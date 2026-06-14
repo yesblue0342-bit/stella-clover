@@ -1,0 +1,1 @@
+{"scripts":{"dev":"vercel dev"},"dependencies":{"mssql":"latest","openai":"latest","googleapis":"latest","formidable":"latest","uuid":"latest"}}
