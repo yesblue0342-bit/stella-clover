@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stella Clover</title>
+<style>
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f6f7fb;color:#111827}.app{max-width:860px;margin:0 auto;padding:20px}.hero,.card{background:white;border:1px solid #e5e7eb;border-radius:20px;padding:18px;margin:14px 0;box-shadow:0 8px 24px rgba(0,0,0,.05)}.hero{background:linear-gradient(135deg,#eef7ee,#eef2ff)}h1{margin:0 0 8px}input,textarea{width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:12px;padding:12px;font-size:16px;margin:6px 0 12px}textarea{min-height:170px}.btn{border:0;border-radius:12px;padding:12px 16px;font-weight:800;background:#1f2937;color:white;margin:4px}.btn2{background:#e5e7eb;color:#111827}.status{white-space:pre-wrap;background:#111827;color:#d1fae5;border-radius:12px;padding:12px;min-height:70px}.row{display:flex;gap:8px;flex-wrap:wrap}.muted{color:#6b7280}.item{padding:12px;border:1px solid #e5e7eb;border-radius:12px;margin:8px 0;background:#fafafa}
+</style>
+</head>
+<body>
+<main class="app">
+<section class="hero"><h1>Stella Clover</h1><p class="muted">AI Meeting & Voice Workspace</p></section>
+<section class="card">
+<h2>회의 생성</h2>
+<label>프로젝트명</label><input id="projectName" value="Default Project">
+<label>회의 제목</label><input id="title" placeholder="회의 제목">
+<label>참석자</label><input id="participants" placeholder="참석자">
+<label>음성 파일 첨부</label><input id="audio" type="file" accept="audio/*,video/*">
+<div class="row"><button class="btn" onclick="startRec()">녹음 시작</button><button class="btn btn2" onclick="stopRec()">녹음 종료</button><button class="btn" onclick="transcribe()">회의록 생성</button></div>
+<p id="recState" class="muted">대기 중</p>
+<label>회의록</label><textarea id="transcript"></textarea>
+</section>
+<section class="card">
+<h2>AI 요약</h2>
+<p class="muted">기본 모델: gpt-4o-mini</p>
+<button class="btn" onclick="summarize()">요약 생성 및 저장</button>
+<textarea id="summary"></textarea>
+</section>
+<section class="card"><h2>처리 상태</h2><pre id="status" class="status">준비 완료</pre></section>
+<section class="card"><h2>회의 목록</h2><button class="btn btn2" onclick="loadMeetings()">새로고침</button><div id="list"></div></section>
+</main>
+<script>
+let recorder,chunks=[],recordedBlob=null;
+const $=id=>document.getElementById(id);
+function log(x){$('status').textContent=typeof x==='string'?x:JSON.stringify(x,null,2)}
+async function startRec(){chunks=[];recordedBlob=null;const s=await navigator.mediaDevices.getUserMedia({audio:true});recorder=new MediaRecorder(s);recorder.ondataavailable=e=>chunks.push(e.data);recorder.onstop=()=>{recordedBlob=new Blob(chunks,{type:'audio/webm'});$('recState').textContent='녹음 완료 '+Math.round(recordedBlob.size/1024)+'KB'};recorder.start();$('recState').textContent='녹음 중'}
+function stopRec(){if(recorder&&recorder.state!=='inactive')recorder.stop()}
+async function transcribe(){const f=$('audio').files[0];const b=f||recordedBlob;if(!b)return alert('음성 파일 또는 녹음이 필요합니다.');const fd=new FormData();fd.append('audio',b,f?.name||'recording.webm');log('회의록 생성 중...');const r=await fetch('/api/transcribe',{method:'POST',body:fd});const d=await r.json();if(!r.ok)return log(d);$('transcript').value=d.text||'';log(d)}
+async function summarize(){const body={projectName:$('projectName').value,title:$('title').value,participants:$('participants').value,transcript:$('transcript').value};log('요약 생성 중...');const r=await fetch('/api/summarize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)return log(d);$('summary').value=d.summary||'';log(d)}
+async function loadMeetings(){const r=await fetch('/api/meetings');const d=await r.json();$('list').innerHTML=(d.items||[]).map(x=>'<div class="item"><b>'+esc(x.title)+'</b><br><span class="muted">'+esc(x.project_name)+' · '+esc(x.created_at)+'</span></div>').join('')||'<p class="muted">회의 없음</p>'}
+function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+</script>
+</body>
+</html>
