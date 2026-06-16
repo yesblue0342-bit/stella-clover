@@ -1,8 +1,7 @@
 // api/summarize.js - 텍스트 → AI 회의록 + Drive 저장 + Azure(전문 저장)
 import OpenAI from "openai";
-import { google } from "googleapis";
-import sql from "mssql";
-import { Readable } from "stream";
+import { getPool, sql } from "./_db.js";
+import { getDrive, ensurePath, uploadText, dateParts } from "./_drive.js";
 
 export const config = { maxDuration: 120 };
 
@@ -17,66 +16,12 @@ async function retry(fn, times = 3, delay = 2000) {
   throw lastErr;
 }
 
-// ── Google Drive ──
-const CLOVER_FOLDER = "stellaclover";
-const FOLDER_MIME = "application/vnd.google-apps.folder";
-
-function getDrive() {
-  const o = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
-  o.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
-  return google.drive({ version: "v3", auth: o });
-}
-async function ensureFolder(drive, name, parentId) {
-  const q = `name='${name}' and mimeType='${FOLDER_MIME}' and '${parentId}' in parents and trashed=false`;
-  const r = await drive.files.list({ q, fields: "files(id)", pageSize: 1 });
-  if (r.data.files?.[0]) return r.data.files[0].id;
-  const c = await drive.files.create({ requestBody: { name, mimeType: FOLDER_MIME, parents: [parentId] }, fields: "id" });
-  return c.data.id;
-}
-async function getRoot(drive) {
-  const q = `name='${CLOVER_FOLDER}' and mimeType='${FOLDER_MIME}' and trashed=false`;
-  const r = await drive.files.list({ q, fields: "files(id)", pageSize: 1 });
-  if (r.data.files?.[0]) return r.data.files[0].id;
-  const c = await drive.files.create({ requestBody: { name: CLOVER_FOLDER, mimeType: FOLDER_MIME }, fields: "id" });
-  return c.data.id;
-}
-async function ensurePath(drive, parts) {
-  let p = await getRoot(drive);
-  for (const part of parts.filter(Boolean)) p = await ensureFolder(drive, part, p);
-  return p;
-}
-async function uploadText(drive, folderId, fileName, content) {
-  const r = await drive.files.create({
-    requestBody: { name: fileName, parents: [folderId] },
-    media: { mimeType: "text/plain", body: Readable.from([Buffer.from(content, "utf-8")]) },
-    fields: "id,webViewLink"
-  });
-  return r.data;
-}
-function dateParts() {
-  const n = new Date();
-  const Y = n.getFullYear().toString();
-  const YM = Y + String(n.getMonth() + 1).padStart(2, "0");
-  const YMD = YM + String(n.getDate()).padStart(2, "0");
-  const HM = String(n.getHours()).padStart(2, "0") + String(n.getMinutes()).padStart(2, "0");
-  return { Y, YM, YMD, HM };
-}
-
-// ── Azure SQL ──
-function getDbConfig() {
-  return {
-    server: process.env.CL_DB_SV, database: process.env.CL_DB_NM,
-    user: process.env.CL_DB_USR, password: process.env.CL_DB_PW,
-    options: { encrypt: true, trustServerCertificate: false },
-    pool: { max: 3, min: 0, idleTimeoutMillis: 30000 }
-  };
-}
-
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
 
-  const { transcript, audioFileName } = req.body || {};
+  const { transcript, audioFileName, sessionId } = req.body || {};
   if (!transcript?.trim()) return res.status(400).json({ ok: false, message: "회의 내용이 없습니다." });
+  const audioSession = (sessionId || "").toString().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
 
   // 1. AI 회의록 (SAP/ERP 컨설팅 컨텍스트)
   let summary;
@@ -147,7 +92,7 @@ ${new Date().toLocaleDateString("ko-KR")}
   const { Y, YM, YMD, HM } = dateParts();
   const fileBase = `${YMD}_${HM}_${title.slice(0, 20)}`;
 
-  // 3. Google Drive 저장 (회의록 + 원본 전사)
+  // 3. Google Drive 저장 (회의록 + 원본 전사 + 메타데이터 JSON)
   let driveFileId = null, driveLink = null, driveError = null;
   try {
     const drive = getDrive();
@@ -160,6 +105,21 @@ ${new Date().toLocaleDateString("ko-KR")}
       const rawFolder = await ensurePath(drive, ["AI_Report", Y, YM]);
       await uploadText(drive, rawFolder, `${fileBase}_전사.txt`, transcript);
     } catch (e2) {}
+    // 메타데이터 JSON 미러 (Azure SQL이 원본, Drive는 포터블 백업)
+    try {
+      const metaFolder = await ensurePath(drive, ["Metadata", Y, YM]);
+      const meta = {
+        title, keywords,
+        created_at: new Date().toISOString(),
+        transcript_chars: transcript.length,
+        summary_chars: summary.length,
+        drive_file_id: driveFileId,
+        drive_link: driveLink,
+        audio_file: audioFileName || "",
+        audio_session: audioSession || ""
+      };
+      await uploadText(drive, metaFolder, `${fileBase}.json`, JSON.stringify(meta, null, 2));
+    } catch (e3) {}
   } catch (e) {
     driveError = e.message;
   }
@@ -167,7 +127,7 @@ ${new Date().toLocaleDateString("ko-KR")}
   // 4. Azure SQL - 전문 저장 (키워드 검색용)
   let dbError = null;
   try {
-    const pool = await sql.connect(getDbConfig());
+    const pool = await getPool();
     await pool.request()
       .input("title", sql.NVarChar(300), title)
       .input("keywords", sql.NVarChar(500), keywords)
@@ -178,6 +138,7 @@ ${new Date().toLocaleDateString("ko-KR")}
       .input("fid", sql.NVarChar(200), driveFileId || "")
       .input("link", sql.NVarChar(500), driveLink || "")
       .input("audio", sql.NVarChar(300), audioFileName || "")
+      .input("asession", sql.NVarChar(100), audioSession || "")
       .query(`
         IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='cl_meetings')
         CREATE TABLE cl_meetings (
@@ -186,15 +147,16 @@ ${new Date().toLocaleDateString("ko-KR")}
           summary NVARCHAR(MAX), transcript NVARCHAR(MAX),
           transcript_chars INT, summary_chars INT,
           drive_file_id NVARCHAR(200), drive_link NVARCHAR(500),
-          audio_file NVARCHAR(300), created_at DATETIME2 DEFAULT SYSUTCDATETIME()
+          audio_file NVARCHAR(300), audio_session NVARCHAR(100),
+          created_at DATETIME2 DEFAULT SYSUTCDATETIME()
         );
         IF COL_LENGTH('cl_meetings','keywords') IS NULL ALTER TABLE cl_meetings ADD keywords NVARCHAR(500);
         IF COL_LENGTH('cl_meetings','summary') IS NULL ALTER TABLE cl_meetings ADD summary NVARCHAR(MAX);
         IF COL_LENGTH('cl_meetings','transcript') IS NULL ALTER TABLE cl_meetings ADD transcript NVARCHAR(MAX);
-        INSERT INTO cl_meetings (title,keywords,summary,transcript,transcript_chars,summary_chars,drive_file_id,drive_link,audio_file)
-        VALUES (@title,@keywords,@summary,@transcript,@tc,@sc,@fid,@link,@audio)
+        IF COL_LENGTH('cl_meetings','audio_session') IS NULL ALTER TABLE cl_meetings ADD audio_session NVARCHAR(100);
+        INSERT INTO cl_meetings (title,keywords,summary,transcript,transcript_chars,summary_chars,drive_file_id,drive_link,audio_file,audio_session)
+        VALUES (@title,@keywords,@summary,@transcript,@tc,@sc,@fid,@link,@audio,@asession)
       `);
-    await pool.close();
   } catch (e) {
     dbError = e.message;
   }

@@ -4,6 +4,7 @@ import formidable from "formidable";
 import fs from "fs";
 import path from "path";
 import OpenAI, { toFile } from "openai";
+import { getDrive, ensurePath, uploadBuffer } from "./_drive.js";
 
 export const config = { api: { bodyParser: false }, maxDuration: 300 };
 
@@ -40,10 +41,13 @@ export default async function handler(req, res) {
 
     // 이전 청크의 마지막 텍스트 (문맥 연결용)
     const prevText = (fields.prevText?.[0] || fields.prevText || "").slice(-200);
+    // 세션/청크 식별 (오디오 Drive 보관용)
+    const sessionId = (fields.sessionId?.[0] || fields.sessionId || "").toString().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+    const index = parseInt(fields.index?.[0] || fields.index || "0", 10) || 0;
 
     try {
+      const buffer = fs.readFileSync(filePath);
       const text = await retry(async () => {
-        const buffer = fs.readFileSync(filePath);
         const file = await toFile(buffer, `audio${ext}`);
         const response = await openai.audio.transcriptions.create({
           file,
@@ -54,6 +58,15 @@ export default async function handler(req, res) {
         });
         return typeof response === "string" ? response : (response.text || "");
       });
+
+      // 오디오 청크를 Drive에 보관 (10일 후 cleanup 크론이 삭제). 실패해도 변환은 성공 처리.
+      if (sessionId && process.env.GOOGLE_REFRESH_TOKEN) {
+        try {
+          const drive = getDrive();
+          const folderId = await ensurePath(drive, ["Audio"]);
+          await uploadBuffer(drive, folderId, `${sessionId}_${String(index).padStart(3, "0")}${ext}`, "audio/wav", buffer);
+        } catch (e2) { /* 보관 실패는 무시 */ }
+      }
 
       fs.unlink(filePath, () => {});
       return res.status(200).json({ ok: true, text: text || "", length: (text || "").length });

@@ -3,6 +3,11 @@
     { "source": "/api/transcribe", "destination": "/api/transcribe" },
     { "source": "/api/summarize", "destination": "/api/summarize" },
     { "source": "/api/meetings", "destination": "/api/meetings" },
+    { "source": "/api/drive-search", "destination": "/api/drive-search" },
+    { "source": "/api/cleanup", "destination": "/api/cleanup" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cleanup", "schedule": "0 18 * * *" }
   ]
 }

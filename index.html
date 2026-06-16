@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Stella Clover">
-<meta name="description" content="AI 회의록 자동 생성 - SAP 프로젝트 회의 특화">
+<meta name="description" content="AI 회의록 자동 생성 - 음성 파일을 회의록으로">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f0;color:#111827;min-height:100vh}
@@ -65,6 +65,9 @@ input[type=file]{display:none}
 .modal.show{display:flex}
 .modal-content{background:#fff;border-radius:20px;padding:20px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto}
 .modal-close{float:right;border:none;background:none;font-size:1.5rem;cursor:pointer;color:#9ca3af}
+/* 토스트 */
+.toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:#1a4731;color:#fff;padding:10px 18px;border-radius:12px;font-size:.85rem;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 </style>
 </head>
 <body>
@@ -74,7 +77,7 @@ input[type=file]{display:none}
     <button class="install-btn" id="installBtn" onclick="installApp()">⬇ 앱 설치</button>
     <div class="clover">🍀</div>
     <h1>Stella Clover</h1>
-    <p>SAP 프로젝트 회의록 자동 생성</p>
+    <p>AI 음성 회의록 자동 생성</p>
   </div>
 
   <div class="card" id="inputSection">
@@ -100,13 +103,21 @@ input[type=file]{display:none}
     <div class="error-box" id="errBox"></div>
   </div>
 
+  <div class="card" id="recentCard" style="display:none">
+    <div class="card-title">🎧 최근 녹음 (이 기기에만 저장)</div>
+    <div id="recentList"></div>
+  </div>
+
   <div class="card result-area" id="resultSection">
     <div class="card-title">📋 회의록</div>
     <button class="new-btn" onclick="resetAll()">+ 새 회의록</button>
     <div class="summary-box" id="summaryBox"></div>
     <div class="result-btns">
-      <button class="rbtn" onclick="copyAll()">📋 복사</button>
+      <button class="rbtn" onclick="copyAll()">📋 전체 복사</button>
       <button class="rbtn" onclick="downloadTxt()">📄 TXT</button>
+      <button class="rbtn" id="copyKwBtn" onclick="copyKeywords()" style="display:none">🔑 키워드</button>
+      <button class="rbtn" id="copyTableBtn" onclick="copyTable()" style="display:none">📊 표 복사</button>
+      <button class="rbtn" id="copyLinksBtn" onclick="copyLinks()" style="display:none">🔗 링크</button>
       <button class="rbtn drive" id="driveBtn" onclick="openDrive()" style="display:none">☁️ Google Drive에서 열기</button>
     </div>
   </div>
@@ -117,12 +128,15 @@ input[type=file]{display:none}
       <button onclick="loadMeetings()" style="border:none;background:none;color:#2d6a4f;font-weight:700;cursor:pointer;font-size:.8rem">새로고침</button>
     </div>
     <div class="search-box">
-      <input type="text" id="searchInput" placeholder="키워드 검색 (제목·내용·SAP용어)" onkeydown="if(event.key==='Enter')doSearch()">
-      <button onclick="doSearch()">🔍</button>
+      <input type="text" id="searchInput" placeholder="키워드 검색 (제목·내용)" onkeydown="if(event.key==='Enter')doSearch()">
+      <button onclick="doSearch()" title="저장된 회의록 검색">🔍</button>
+      <button onclick="doDriveSearch()" title="Google Drive 검색" style="background:#1a4731">☁️</button>
     </div>
     <div id="meetingList"><p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p></div>
   </div>
 </div>
+
+<div class="toast" id="toast"></div>
 
 <!-- 상세 모달 -->
 <div class="modal" id="detailModal" onclick="if(event.target===this)closeDetail()">
@@ -134,7 +148,7 @@ input[type=file]{display:none}
 
 <script>
 let recorder=null, chunks=[], recordedBlob=null, currentAudioFile=null;
-let _driveLink='', _summary='', _title='', _deferredPrompt=null, _detailSummary='';
+let _driveLink='', _summary='', _title='', _keywords='', _deferredPrompt=null, _detailSummary='';
 
 // ── PWA 설치 ──
 window.addEventListener('beforeinstallprompt', function(e){
@@ -261,10 +275,12 @@ async function generate(){
   document.getElementById('resultSection').style.display='none';
 
   try{
-    // 1. 오디오 분할 (5분 = 300초 단위, 16kHz WAV ≈ 청크당 ~9MB→4.5MB 이하 위해 4분)
+    // 1. 오디오 분할 (16kHz mono WAV). 청크당 4.5MB(Vercel 본문 제한) 미만으로 유지해 413 방지.
     setProgress(5,'🔧 음성 분석 중...','오디오를 변환하고 있습니다');
-    const CHUNK_SEC = 240; // 4분 단위 (16kHz mono WAV ≈ 7.3MB/분*4... → 약 4.6MB, 안전하게 3분으로)
-    const { chunks, totalDuration } = await audioToChunks(audio, 180); // 3분 단위
+    // 120초 × 16000Hz × 2byte ≈ 3.84MB < 4.5MB
+    const CHUNK_SEC = 120;
+    const sessionId = Date.now().toString(36) + Math.floor(Math.random()*1e6).toString(36);
+    const { chunks, totalDuration } = await audioToChunks(audio, CHUNK_SEC);
     const mins = Math.round(totalDuration/60);
     setProgress(10,'🎙 음성 변환 중...',`총 ${mins}분 · ${chunks.length}개 구간 처리`);
 
@@ -272,10 +288,12 @@ async function generate(){
     let fullText='';
     for(let i=0;i<chunks.length;i++){
       const pct = 10 + Math.round((i/chunks.length)*45);
-      setProgress(pct,'🎙 음성 변환 중...',`구간 ${i+1}/${chunks.length} 변환 중 (SAP 용어 인식)`);
+      setProgress(pct,'🎙 음성 변환 중...',`구간 ${i+1}/${chunks.length} 변환 중`);
       const fd=new FormData();
       fd.append('audio',chunks[i],`chunk_${i}.wav`);
       fd.append('prevText',fullText.slice(-200));
+      fd.append('sessionId',sessionId);
+      fd.append('index',String(i));
       const r=await fetch('/api/transcribe',{method:'POST',body:fd});
       if(!r.ok){
         const txt=await r.text();
@@ -289,19 +307,23 @@ async function generate(){
     if(!fullText.trim())throw new Error('음성에서 텍스트를 추출하지 못했습니다 (무음 파일)');
 
     // 3. AI 회의록
-    setProgress(60,'📝 회의록 작성 중...','SAP 프로젝트 회의록 작성 중');
+    setProgress(60,'📝 회의록 작성 중...','회의록 작성 중');
     const r2=await fetch('/api/summarize',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile?.name||'recording.webm')})
+      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile?.name||'recording.webm'),sessionId})
     });
     if(!r2.ok){const txt=await r2.text();throw new Error('회의록 생성 실패('+r2.status+'): '+txt.slice(0,100));}
     const d2=await r2.json();
     if(!d2.ok)throw new Error(d2.message||'회의록 생성 실패');
 
     setProgress(100,'✅ 완료!','회의록이 생성되었습니다');
-    _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';
+    _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
     document.getElementById('summaryBox').textContent=_summary;
     document.getElementById('resultSection').style.display='block';
+    // 콘텐츠 종류별 복사 버튼 토글
+    document.getElementById('copyKwBtn').style.display=_keywords?'flex':'none';
+    document.getElementById('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
+    document.getElementById('copyLinksBtn').style.display=extractUrls(_summary).length?'flex':'none';
     if(_driveLink)document.getElementById('driveBtn').style.display='flex';
     document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
 
@@ -313,6 +335,8 @@ async function generate(){
       showErr('⚠️ 회의록은 생성됐으나 일부 저장 실패: '+w);
     }
     loadMeetings();
+    // 최근 녹음을 이 기기(IndexedDB)에 캐시 (최근 5개 유지)
+    idbSaveRecording(audio, (currentAudioFile?.name)||((d2.title||'recording')+'.webm'));
   }catch(e){
     showErr('오류: '+e.message);
     setProgress(0,'실패','오류가 발생했습니다. 다시 시도해주세요.');
@@ -321,12 +345,46 @@ async function generate(){
   }
 }
 
-function copyAll(){navigator.clipboard.writeText(_summary).then(()=>{const b=document.querySelector('.rbtn');b.textContent='✓ 복사됨';setTimeout(()=>{b.textContent='📋 복사';},2000);}).catch(()=>{const t=document.createElement('textarea');t.value=_summary;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();});}
+// ── 복사 유틸 (모던 클립보드 + 폴백 + 토스트) ──
+let _toastTimer=null;
+function showToast(msg){
+  const t=document.getElementById('toast');if(!t)return;
+  t.textContent=msg;t.classList.add('show');
+  clearTimeout(_toastTimer);_toastTimer=setTimeout(()=>t.classList.remove('show'),1800);
+}
+function copyToClipboard(text){
+  if(!text){showToast('복사할 내용이 없습니다');return Promise.resolve(false);}
+  const fallback=()=>{try{const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();return true;}catch(e){return false;}};
+  const done=ok=>{showToast(ok?'✓ 복사되었습니다':'복사 실패');return ok;};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(text).then(()=>done(true)).catch(()=>done(fallback()));
+  }
+  return Promise.resolve(done(fallback()));
+}
+// 마크다운 표(연속된 | 행) 추출
+function extractTable(md){
+  const lines=(md||'').split('\n');const tbl=[];let inT=false;
+  for(const ln of lines){
+    if(/^\s*\|.*\|\s*$/.test(ln)){tbl.push(ln.trim());inT=true;}
+    else if(inT){break;}
+  }
+  return tbl.length>=2?tbl.join('\n'):'';
+}
+// URL 추출 (중복 제거)
+function extractUrls(md){
+  const m=(md||'').match(/https?:\/\/[^\s)]+/g)||[];
+  return [...new Set(m)];
+}
+function copyAll(){copyToClipboard(_summary);}
+function copyKeywords(){copyToClipboard(_keywords);}
+function copyTable(){const t=extractTable(_summary);copyToClipboard(t||_summary);}
+function copyLinks(){copyToClipboard(extractUrls(_summary).join('\n'));}
 function downloadTxt(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([_summary],{type:'text/plain;charset=utf-8'}));a.download=(_title||'회의록')+'.txt';a.click();}
 function openDrive(){if(_driveLink)window.open(_driveLink,'_blank');}
 function resetAll(){
   recorder=null;chunks=[];recordedBlob=null;currentAudioFile=null;
-  _summary='';_title='';_driveLink='';
+  _summary='';_title='';_driveLink='';_keywords='';
+  ['copyKwBtn','copyTableBtn','copyLinksBtn','driveBtn'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
   document.getElementById('recBtn').className='rec-btn';
   document.getElementById('recIcon').textContent='🎤';
   document.getElementById('recText').textContent='터치하여 녹음 시작';
@@ -367,6 +425,30 @@ async function renderList(url){
   }
 }
 
+// ── Google Drive 검색 ──
+async function doDriveSearch(){
+  const q=document.getElementById('searchInput').value.trim();
+  if(!q){loadMeetings();return;}
+  const list=document.getElementById('meetingList');
+  list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">☁️ Drive 검색 중...</p>';
+  try{
+    const r=await fetch('/api/drive-search?q='+encodeURIComponent(q));
+    const d=await r.json();
+    const items=d.items||[];
+    if(!items.length){
+      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+esc(d.message||'Drive 검색 결과 없음')+'</p>';
+      return;
+    }
+    list.innerHTML=items.map(f=>`
+      <div class="meeting-item" onclick="window.open('${encodeURI(f.webViewLink||'#')}','_blank')">
+        <div class="mtitle">${esc(f.name||'파일')}<span class="badge">☁️ Drive</span></div>
+        <div class="mdate">${f.modifiedTime?new Date(f.modifiedTime).toLocaleString('ko-KR'):''}</div>
+      </div>`).join('');
+  }catch(e){
+    list.innerHTML='<p style="color:#ef4444;font-size:.82rem">Drive 검색 실패: '+esc(e.message)+'</p>';
+  }
+}
+
 // ── 상세 ──
 async function showDetail(id){
   const modal=document.getElementById('detailModal');
@@ -378,21 +460,21 @@ async function showDetail(id){
     const d=await r.json();
     const it=d.item;
     if(!it){content.innerHTML='<p>회의록을 찾을 수 없습니다.</p>';return;}
+    _detailSummary=it.summary||'';
     content.innerHTML=`
       <h2 style="font-size:1.2rem;margin-bottom:6px;padding-right:30px">${esc(it.title||'회의록')}</h2>
       <p style="font-size:.78rem;color:#9ca3af;margin-bottom:12px">${new Date(it.created_at).toLocaleString('ko-KR')}</p>
       ${it.keywords?'<p style="font-size:.8rem;color:#2d6a4f;margin-bottom:12px">🔑 '+esc(it.keywords)+'</p>':''}
       <div style="background:#f9fafb;border-radius:12px;padding:14px;font-size:.85rem;line-height:1.7;white-space:pre-wrap;max-height:50vh;overflow-y:auto;border:1px solid #e5e7eb">${esc(it.summary||'')}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-        <button class="rbtn" onclick="copyText(\`${(it.summary||'').replace(/`/g,'\\\\`').replace(/\$/g,'\\\\$')}\`)">📋 복사</button>
+        <button class="rbtn" onclick="copyDetailSummary()">📋 복사</button>
         ${it.drive_link?'<button class="rbtn" onclick="window.open(\''+it.drive_link+'\',\'_blank\')">☁️ Drive</button>':'<button class="rbtn" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>'}
       </div>
       ${it.drive_link?'<button class="new-btn" style="margin-top:8px" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>':''}`;
   }catch(e){content.innerHTML='<p style="color:#ef4444">로드 실패: '+esc(e.message)+'</p>';}
 }
 function closeDetail(){document.getElementById('detailModal').classList.remove('show');}
-function copyText(t){navigator.clipboard.writeText(t).catch(()=>{});alert('복사되었습니다');}
-function copyDetailSummary(){navigator.clipboard.writeText(_detailSummary).then(()=>alert('복사되었습니다')).catch(()=>{const t=document.createElement('textarea');t.value=_detailSummary;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();alert('복사되었습니다');});}
+function copyDetailSummary(){copyToClipboard(_detailSummary);}
 async function deleteMeeting(id){
   if(!confirm('이 회의록을 삭제하시겠습니까?'))return;
   await fetch('/api/meetings?action=delete&id='+id);
@@ -400,7 +482,66 @@ async function deleteMeeting(id){
 }
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
+// ── IndexedDB: 최근 녹음 5개를 이 기기에 캐시 ──
+const IDB_NAME='stella-clover', IDB_STORE='recordings', IDB_MAX=5;
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const rq=indexedDB.open(IDB_NAME,1);
+    rq.onupgradeneeded=()=>{const db=rq.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'});};
+    rq.onsuccess=()=>res(rq.result);
+    rq.onerror=()=>rej(rq.error);
+  });
+}
+function idbTx(db,mode){return db.transaction(IDB_STORE,mode).objectStore(IDB_STORE);}
+async function idbAll(){
+  const db=await idbOpen();
+  return new Promise((res,rej)=>{const rq=idbTx(db,'readonly').getAll();rq.onsuccess=()=>res((rq.result||[]).sort((a,b)=>b.id-a.id));rq.onerror=()=>rej(rq.error);});
+}
+async function idbSaveRecording(blob,name){
+  if(!blob||!('indexedDB' in window))return;
+  try{
+    const db=await idbOpen();
+    const rec={id:Date.now(),name:name||'recording.webm',type:blob.type||'audio/webm',size:blob.size,date:new Date().toISOString(),blob};
+    await new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(rec);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});
+    await idbTrim();
+    renderRecent();
+  }catch(e){/* 캐시는 베스트에포트 */}
+}
+async function idbTrim(){
+  const all=await idbAll();
+  const extra=all.slice(IDB_MAX);
+  if(!extra.length)return;
+  const db=await idbOpen();
+  await new Promise(res=>{const tx=db.transaction(IDB_STORE,'readwrite');extra.forEach(r=>tx.objectStore(IDB_STORE).delete(r.id));tx.oncomplete=res;tx.onerror=res;});
+}
+async function idbDelete(id){
+  try{const db=await idbOpen();await new Promise(res=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).delete(id);tx.oncomplete=res;tx.onerror=res;});}catch(e){}
+  renderRecent();
+}
+async function loadRecent(id){
+  try{const all=await idbAll();const r=all.find(x=>x.id===id);if(!r)return;applyFile(new File([r.blob],r.name,{type:r.type}));window.scrollTo({top:0,behavior:'smooth'});}catch(e){}
+}
+async function renderRecent(){
+  const card=document.getElementById('recentCard'), box=document.getElementById('recentList');
+  if(!box)return;
+  if(!('indexedDB' in window)){card.style.display='none';return;}
+  try{
+    const all=await idbAll();
+    if(!all.length){card.style.display='none';return;}
+    card.style.display='block';
+    box.innerHTML=all.map(r=>`
+      <div class="meeting-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div style="flex:1;cursor:pointer" onclick="loadRecent(${r.id})">
+          <div class="mtitle">${esc(r.name)}</div>
+          <div class="mdate">${new Date(r.date).toLocaleString('ko-KR')} · ${(r.size/1024/1024).toFixed(1)}MB</div>
+        </div>
+        <button onclick="idbDelete(${r.id})" title="삭제" style="border:none;background:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1">×</button>
+      </div>`).join('');
+  }catch(e){card.style.display='none';}
+}
+
 loadMeetings();
+renderRecent();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
 </body>
