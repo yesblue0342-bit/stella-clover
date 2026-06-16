@@ -325,6 +325,7 @@ async function generate(){
     document.getElementById('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
     document.getElementById('copyLinksBtn').style.display=extractUrls(_summary).length?'flex':'none';
     if(_driveLink)document.getElementById('driveBtn').style.display='flex';
+    saveSession();
     document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
 
     // 경고 표시 (Drive/DB 저장 실패 시)
@@ -391,6 +392,7 @@ function resetAll(){
   document.getElementById('fileArea').className='file-area';
   document.getElementById('fileAreaText').innerHTML='파일 첨부';
   document.getElementById('audioFile').value='';
+  try{localStorage.removeItem(SESSION_KEY);}catch(e){}
   document.getElementById('progress').style.display='none';
   document.getElementById('resultSection').style.display='none';
   hideErr();document.getElementById('genBtn').disabled=false;
@@ -556,6 +558,23 @@ async function renderRecent(){
   }catch(e){card.style.display='none';}
 }
 
+// ── 세션 유지: 마지막 회의록을 localStorage에 저장/복원 (이 기기) ──
+const SESSION_KEY='cl_last_session';
+function saveSession(){
+  try{localStorage.setItem(SESSION_KEY,JSON.stringify({summary:_summary,title:_title,keywords:_keywords,driveLink:_driveLink,ts:Date.now()}));}catch(e){}
+}
+function restoreSession(){
+  let s;try{s=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch(e){return;}
+  if(!s||!s.summary)return;
+  _summary=s.summary;_title=s.title||'회의록';_keywords=s.keywords||'';_driveLink=s.driveLink||'';
+  document.getElementById('summaryBox').textContent=_summary;
+  document.getElementById('resultSection').style.display='block';
+  document.getElementById('copyKwBtn').style.display=_keywords?'flex':'none';
+  document.getElementById('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
+  document.getElementById('copyLinksBtn').style.display=extractUrls(_summary).length?'flex':'none';
+  if(_driveLink)document.getElementById('driveBtn').style.display='flex';
+}
+
 // ── 자동저장: 5분마다 현재 회의록을 Google Drive(Drafts)에 백업 ──
 let _lastAutosaved='';
 async function autosaveTick(){
@@ -571,6 +590,7 @@ setInterval(autosaveTick,5*60*1000);
 
 loadMeetings();
 renderRecent();
+restoreSession();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
 </body>
