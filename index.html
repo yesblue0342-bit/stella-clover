@@ -397,31 +397,47 @@ function resetAll(){
 }
 
 // ── 목록 / 검색 ──
-async function loadMeetings(){renderList('/api/meetings');}
+const LIST_CACHE_KEY='cl_meetings_list_cache';
+function renderMeetingItems(items){
+  return items.map(x=>`
+    <div class="meeting-item" onclick="showDetail(${x.id})">
+      <div class="mtitle">${esc(x.title||'회의록')}${x.drive_link?'<span class="badge">☁️ Drive</span>':''}</div>
+      <div class="mdate">${new Date(x.created_at).toLocaleString('ko-KR')} · ${x.transcript_chars||0}자</div>
+      ${x.keywords?'<div class="mkeywords">🔑 '+esc(x.keywords)+'</div>':''}
+    </div>`).join('');
+}
+async function loadMeetings(){
+  // Azure 호출 절감: 캐시된 목록을 먼저 즉시 표시한 뒤 백그라운드로 갱신
+  try{
+    const cached=JSON.parse(localStorage.getItem(LIST_CACHE_KEY)||'null');
+    if(cached&&Array.isArray(cached.items)&&cached.items.length){
+      document.getElementById('meetingList').innerHTML=renderMeetingItems(cached.items);
+    }
+  }catch(e){}
+  renderList('/api/meetings',true);
+}
 async function doSearch(){
   const q=document.getElementById('searchInput').value.trim();
   if(!q){loadMeetings();return;}
   renderList('/api/meetings?action=search&q='+encodeURIComponent(q));
 }
-async function renderList(url){
+async function renderList(url,cache){
   const list=document.getElementById('meetingList');
-  list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p>';
+  if(!(cache&&list.querySelector('.meeting-item')))
+    list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p>';
   try{
     const r=await fetch(url);
     const d=await r.json();
     const items=d.items||[];
+    if(cache){try{localStorage.setItem(LIST_CACHE_KEY,JSON.stringify({ts:Date.now(),items}));}catch(e){}}
     if(!items.length){
       list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+(d.message||'회의록 없음')+'</p>';
       return;
     }
-    list.innerHTML=items.map(x=>`
-      <div class="meeting-item" onclick="showDetail(${x.id})">
-        <div class="mtitle">${esc(x.title||'회의록')}${x.drive_link?'<span class="badge">☁️ Drive</span>':''}</div>
-        <div class="mdate">${new Date(x.created_at).toLocaleString('ko-KR')} · ${x.transcript_chars||0}자</div>
-        ${x.keywords?'<div class="mkeywords">🔑 '+esc(x.keywords)+'</div>':''}
-      </div>`).join('');
+    list.innerHTML=renderMeetingItems(items);
   }catch(e){
-    list.innerHTML='<p style="color:#ef4444;font-size:.82rem">목록 로드 실패: '+esc(e.message)+'</p>';
+    if(!list.querySelector('.meeting-item'))
+      list.innerHTML='<p style="color:#ef4444;font-size:.82rem">목록 로드 실패: '+esc(e.message)+'</p>';
   }
 }
 
