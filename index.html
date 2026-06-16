@@ -2,44 +2,318 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Stella Clover</title>
 <style>
-body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f6f7fb;color:#111827}.app{max-width:860px;margin:0 auto;padding:20px}.hero,.card{background:white;border:1px solid #e5e7eb;border-radius:20px;padding:18px;margin:14px 0;box-shadow:0 8px 24px rgba(0,0,0,.05)}.hero{background:linear-gradient(135deg,#eef7ee,#eef2ff)}h1{margin:0 0 8px}input,textarea{width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:12px;padding:12px;font-size:16px;margin:6px 0 12px}textarea{min-height:170px}.btn{border:0;border-radius:12px;padding:12px 16px;font-weight:800;background:#1f2937;color:white;margin:4px}.btn2{background:#e5e7eb;color:#111827}.status{white-space:pre-wrap;background:#111827;color:#d1fae5;border-radius:12px;padding:12px;min-height:70px}.row{display:flex;gap:8px;flex-wrap:wrap}.muted{color:#6b7280}.item{padding:12px;border:1px solid #e5e7eb;border-radius:12px;margin:8px 0;background:#fafafa}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f0;color:#111827;min-height:100vh}
+.app{max-width:600px;margin:0 auto;padding:16px;padding-bottom:40px}
+
+/* 헤더 */
+.header{background:linear-gradient(135deg,#1a4731,#2d6a4f);border-radius:20px;padding:20px;margin-bottom:16px;color:#fff}
+.header h1{font-size:1.5rem;font-weight:900;letter-spacing:-.5px}
+.header p{font-size:.85rem;opacity:.75;margin-top:4px}
+.clover{font-size:1.8rem;margin-bottom:6px}
+
+/* 카드 */
+.card{background:#fff;border-radius:20px;padding:18px;margin-bottom:14px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
+.card-title{font-size:.8rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
+
+/* 녹음 버튼 */
+.rec-btn{width:100%;height:80px;border:3px dashed #d1fae5;border-radius:16px;background:#f0fff4;color:#1a4731;font-size:1rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .2s;margin-bottom:12px}
+.rec-btn.recording{border-color:#ef4444;background:#fff5f5;color:#ef4444;animation:pulse 1.2s infinite}
+.rec-btn.done{border-style:solid;border-color:#34d399;background:#ecfdf5}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+
+/* 파일 업로드 */
+.file-area{border:2px dashed #d1d5db;border-radius:14px;padding:20px;text-align:center;cursor:pointer;color:#6b7280;transition:all .2s;margin-bottom:12px}
+.file-area:hover,.file-area.drag{border-color:#2d6a4f;background:#f0fff4;color:#2d6a4f}
+.file-area.has-file{border-color:#34d399;border-style:solid;background:#ecfdf5;color:#1a4731}
+.file-name{font-weight:700;font-size:.9rem}
+input[type=file]{display:none}
+
+/* 생성 버튼 */
+.gen-btn{width:100%;height:56px;border:none;border-radius:14px;background:#1a4731;color:#fff;font-size:1.05rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s}
+.gen-btn:hover{background:#2d6a4f}
+.gen-btn:disabled{background:#9ca3af;cursor:not-allowed}
+
+/* 진행 상태 */
+.progress{background:#f9fafb;border-radius:12px;padding:14px;margin-top:14px;display:none}
+.progress-bar-wrap{background:#e5e7eb;border-radius:99px;height:8px;margin:10px 0}
+.progress-bar{background:linear-gradient(90deg,#2d6a4f,#34d399);height:8px;border-radius:99px;width:0;transition:width .5s}
+.progress-step{font-size:.82rem;color:#374151;font-weight:600}
+.progress-detail{font-size:.75rem;color:#9ca3af;margin-top:4px}
+
+/* 결과 */
+.result-area{display:none}
+.summary-box{background:#f9fafb;border-radius:14px;padding:16px;font-size:.88rem;line-height:1.75;white-space:pre-wrap;max-height:400px;overflow-y:auto;border:1px solid #e5e7eb;margin-bottom:12px}
+.result-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.rbtn{height:48px;border:2px solid #e5e7eb;border-radius:12px;background:#fff;font-size:.88rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;color:#374151;transition:all .2s}
+.rbtn:hover{border-color:#2d6a4f;color:#2d6a4f}
+.rbtn.drive{grid-column:1/-1;background:#2d6a4f;color:#fff;border-color:#2d6a4f}
+.rbtn.drive:hover{background:#1a4731}
+
+/* 회의 목록 */
+.meeting-item{padding:12px;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:8px;cursor:pointer;transition:all .2s}
+.meeting-item:hover{border-color:#2d6a4f;background:#f0fff4}
+.meeting-item .mtitle{font-weight:700;font-size:.9rem;margin-bottom:2px}
+.meeting-item .mdate{font-size:.75rem;color:#9ca3af}
+.badge{display:inline-block;background:#ecfdf5;color:#2d6a4f;border-radius:6px;padding:2px 8px;font-size:.72rem;font-weight:700;margin-left:6px}
+
+/* 에러 */
+.error-box{background:#fff5f5;border:1px solid #fca5a5;border-radius:12px;padding:12px;color:#dc2626;font-size:.85rem;margin-top:10px;display:none}
+.new-btn{width:100%;height:44px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;color:#6b7280;font-size:.88rem;font-weight:700;cursor:pointer;margin-bottom:10px}
+.new-btn:hover{background:#f0fff4;color:#2d6a4f;border-color:#2d6a4f}
 </style>
 </head>
 <body>
-<main class="app">
-<section class="hero"><h1>Stella Clover</h1><p class="muted">AI Meeting & Voice Workspace</p></section>
-<section class="card">
-<h2>회의 생성</h2>
-<label>프로젝트명</label><input id="projectName" value="Default Project">
-<label>회의 제목</label><input id="title" placeholder="회의 제목">
-<label>참석자</label><input id="participants" placeholder="참석자">
-<label>음성 파일 첨부</label><input id="audio" type="file" accept="audio/*,video/*">
-<div class="row"><button class="btn" onclick="startRec()">녹음 시작</button><button class="btn btn2" onclick="stopRec()">녹음 종료</button><button class="btn" onclick="transcribe()">회의록 생성</button></div>
-<p id="recState" class="muted">대기 중</p>
-<label>회의록</label><textarea id="transcript"></textarea>
-</section>
-<section class="card">
-<h2>AI 요약</h2>
-<p class="muted">기본 모델: gpt-4o-mini</p>
-<button class="btn" onclick="summarize()">요약 생성 및 저장</button>
-<textarea id="summary"></textarea>
-</section>
-<section class="card"><h2>처리 상태</h2><pre id="status" class="status">준비 완료</pre></section>
-<section class="card"><h2>회의 목록</h2><button class="btn btn2" onclick="loadMeetings()">새로고침</button><div id="list"></div></section>
-</main>
+<div class="app">
+
+  <div class="header">
+    <div class="clover">🍀</div>
+    <h1>Stella Clover</h1>
+    <p>AI 회의록 자동 생성</p>
+  </div>
+
+  <!-- 입력 섹션 -->
+  <div class="card" id="inputSection">
+    <div class="card-title">🎙 음성 입력</div>
+
+    <!-- 녹음 버튼 -->
+    <button class="rec-btn" id="recBtn" onclick="toggleRec()">
+      <span id="recIcon">🎤</span>
+      <span id="recText">터치하여 녹음 시작</span>
+    </button>
+
+    <!-- 파일 업로드 -->
+    <div class="file-area" id="fileArea" onclick="document.getElementById('audioFile').click()"
+      ondragover="event.preventDefault();this.classList.add('drag')"
+      ondragleave="this.classList.remove('drag')"
+      ondrop="dropFile(event)">
+      <div style="font-size:1.5rem;margin-bottom:6px">📎</div>
+      <div id="fileAreaText">파일 첨부</div>
+      <div style="font-size:.75rem;margin-top:4px;opacity:.7">mp3 · m4a · wav · aac · ogg · webm</div>
+    </div>
+    <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.aac,.ogg,.webm,audio/*" onchange="onFileSelect(this)">
+
+    <!-- 생성 버튼 -->
+    <button class="gen-btn" id="genBtn" onclick="generate()">
+      <span>✨</span> 회의록 생성
+    </button>
+
+    <!-- 진행 상태 -->
+    <div class="progress" id="progress">
+      <div class="progress-step" id="pStep">준비 중...</div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="pBar"></div></div>
+      <div class="progress-detail" id="pDetail"></div>
+    </div>
+    <div class="error-box" id="errBox"></div>
+  </div>
+
+  <!-- 결과 섹션 -->
+  <div class="card result-area" id="resultSection">
+    <div class="card-title">📋 회의록</div>
+    <button class="new-btn" onclick="resetAll()">+ 새 회의록</button>
+    <div class="summary-box" id="summaryBox"></div>
+    <div class="result-btns">
+      <button class="rbtn" onclick="copyAll()">📋 복사</button>
+      <button class="rbtn" onclick="downloadTxt()">📄 TXT</button>
+      <button class="rbtn drive" id="driveBtn" onclick="openDrive()" style="display:none">
+        ☁️ Google Drive에서 열기
+      </button>
+    </div>
+  </div>
+
+  <!-- 회의 목록 -->
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+      📅 최근 회의록
+      <button onclick="loadMeetings()" style="border:none;background:none;color:#2d6a4f;font-weight:700;cursor:pointer;font-size:.8rem">새로고침</button>
+    </div>
+    <div id="meetingList"><p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p></div>
+  </div>
+
+</div>
+
 <script>
-let recorder,chunks=[],recordedBlob=null;
-const $=id=>document.getElementById(id);
-function log(x){$('status').textContent=typeof x==='string'?x:JSON.stringify(x,null,2)}
-async function startRec(){chunks=[];recordedBlob=null;const s=await navigator.mediaDevices.getUserMedia({audio:true});recorder=new MediaRecorder(s);recorder.ondataavailable=e=>chunks.push(e.data);recorder.onstop=()=>{recordedBlob=new Blob(chunks,{type:'audio/webm'});$('recState').textContent='녹음 완료 '+Math.round(recordedBlob.size/1024)+'KB'};recorder.start();$('recState').textContent='녹음 중'}
-function stopRec(){if(recorder&&recorder.state!=='inactive')recorder.stop()}
-async function transcribe(){const f=$('audio').files[0];const b=f||recordedBlob;if(!b)return alert('음성 파일 또는 녹음이 필요합니다.');const fd=new FormData();fd.append('audio',b,f?.name||'recording.webm');log('회의록 생성 중...');const r=await fetch('/api/transcribe',{method:'POST',body:fd});const d=await r.json();if(!r.ok)return log(d);$('transcript').value=d.text||'';log(d)}
-async function summarize(){const body={projectName:$('projectName').value,title:$('title').value,participants:$('participants').value,transcript:$('transcript').value};log('요약 생성 중...');const r=await fetch('/api/summarize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)return log(d);$('summary').value=d.summary||'';log(d)}
-async function loadMeetings(){const r=await fetch('/api/meetings');const d=await r.json();$('list').innerHTML=(d.items||[]).map(x=>'<div class="item"><b>'+esc(x.title)+'</b><br><span class="muted">'+esc(x.project_name)+' · '+esc(x.created_at)+'</span></div>').join('')||'<p class="muted">회의 없음</p>'}
-function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+let recorder=null, chunks=[], recordedBlob=null, currentAudioFile=null;
+let _driveLink='', _summary='', _title='';
+
+// ── 녹음 ──
+async function toggleRec(){
+  const btn=document.getElementById('recBtn');
+  if(recorder && recorder.state==='recording'){
+    recorder.stop();
+    btn.className='rec-btn done';
+    document.getElementById('recIcon').textContent='✅';
+    document.getElementById('recText').textContent='녹음 완료 - 회의록 생성 누르세요';
+    return;
+  }
+  try{
+    chunks=[];recordedBlob=null;currentAudioFile=null;
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    recorder=new MediaRecorder(stream);
+    recorder.ondataavailable=e=>chunks.push(e.data);
+    recorder.onstop=()=>{
+      recordedBlob=new Blob(chunks,{type:'audio/webm'});
+      stream.getTracks().forEach(t=>t.stop());
+    };
+    recorder.start();
+    btn.className='rec-btn recording';
+    document.getElementById('recIcon').textContent='⏹';
+    document.getElementById('recText').textContent='녹음 중... (터치하여 종료)';
+  }catch(e){
+    showErr('마이크 권한이 필요합니다: '+e.message);
+  }
+}
+
+// ── 파일 드롭 ──
+function dropFile(e){
+  e.preventDefault();
+  document.getElementById('fileArea').classList.remove('drag');
+  const f=e.dataTransfer.files[0];
+  if(f) applyFile(f);
+}
+function onFileSelect(input){
+  if(input.files[0]) applyFile(input.files[0]);
+}
+function applyFile(f){
+  currentAudioFile=f;recordedBlob=null;
+  const area=document.getElementById('fileArea');
+  area.className='file-area has-file';
+  document.getElementById('fileAreaText').innerHTML='<div class="file-name">'+f.name+'</div><div style="font-size:.75rem;margin-top:2px">'+Math.round(f.size/1024)+'KB</div>';
+}
+
+// ── 진행 상태 표시 ──
+function setProgress(pct, step, detail){
+  const p=document.getElementById('progress');
+  p.style.display='block';
+  document.getElementById('pBar').style.width=pct+'%';
+  document.getElementById('pStep').textContent=step;
+  document.getElementById('pDetail').textContent=detail||'';
+}
+function showErr(msg){
+  const e=document.getElementById('errBox');
+  e.textContent=msg;e.style.display='block';
+}
+function hideErr(){document.getElementById('errBox').style.display='none';}
+
+// ── 메인: 회의록 생성 ──
+async function generate(){
+  const audio=currentAudioFile||recordedBlob;
+  if(!audio){showErr('음성 파일을 선택하거나 녹음해주세요.');return;}
+
+  hideErr();
+  document.getElementById('genBtn').disabled=true;
+  document.getElementById('resultSection').style.display='none';
+
+  try{
+    // Step 1: 음성→텍스트 (Whisper)
+    setProgress(10,'🎙 음성 변환 중...','OpenAI Whisper로 텍스트 변환 중');
+    const fd=new FormData();
+    const fname=currentAudioFile?.name||'recording.webm';
+    fd.append('audio', audio, fname);
+
+    const r1=await fetch('/api/transcribe',{method:'POST',body:fd});
+    const d1=await r1.json();
+    if(!r1.ok||!d1.ok) throw new Error(d1.message||'음성 변환 실패');
+
+    setProgress(50,'📝 회의록 작성 중...','AI가 회의록을 자동 작성합니다');
+
+    // Step 2: AI 회의록 생성 + Drive 저장
+    const r2=await fetch('/api/summarize',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({transcript:d1.text, audioFileName:fname})
+    });
+    const d2=await r2.json();
+    if(!r2.ok||!d2.ok) throw new Error(d2.message||'회의록 생성 실패');
+
+    setProgress(100,'✅ 완료!','회의록이 생성되었습니다');
+
+    // 결과 표시
+    _summary=d2.summary||'';
+    _title=d2.title||'회의록';
+    _driveLink=d2.driveLink||'';
+
+    document.getElementById('summaryBox').textContent=_summary;
+    document.getElementById('resultSection').style.display='block';
+    if(_driveLink){
+      const db=document.getElementById('driveBtn');
+      db.style.display='flex';
+    }
+    document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
+    loadMeetings();
+
+  }catch(e){
+    showErr('오류: '+e.message);
+    setProgress(0,'실패','오류가 발생했습니다. 다시 시도해주세요.');
+  } finally {
+    document.getElementById('genBtn').disabled=false;
+  }
+}
+
+// ── 결과 액션 ──
+function copyAll(){
+  navigator.clipboard.writeText(_summary).then(()=>{
+    const btn=document.querySelector('.rbtn');
+    btn.textContent='✓ 복사됨';
+    setTimeout(()=>{btn.textContent='📋 복사';},2000);
+  }).catch(()=>{
+    const ta=document.createElement('textarea');
+    ta.value=_summary;document.body.appendChild(ta);ta.select();
+    document.execCommand('copy');ta.remove();
+  });
+}
+function downloadTxt(){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([_summary],{type:'text/plain;charset=utf-8'}));
+  a.download=(_title||'회의록')+'.txt';
+  a.click();
+}
+function openDrive(){
+  if(_driveLink) window.open(_driveLink,'_blank');
+}
+function resetAll(){
+  recorder=null;chunks=[];recordedBlob=null;currentAudioFile=null;
+  _summary='';_title='';_driveLink='';
+  document.getElementById('recBtn').className='rec-btn';
+  document.getElementById('recIcon').textContent='🎤';
+  document.getElementById('recText').textContent='터치하여 녹음 시작';
+  document.getElementById('fileArea').className='file-area';
+  document.getElementById('fileAreaText').innerHTML='파일 첨부';
+  document.getElementById('audioFile').value='';
+  document.getElementById('progress').style.display='none';
+  document.getElementById('resultSection').style.display='none';
+  hideErr();
+  document.getElementById('genBtn').disabled=false;
+}
+
+// ── 회의 목록 ──
+async function loadMeetings(){
+  const list=document.getElementById('meetingList');
+  try{
+    const r=await fetch('/api/meetings');
+    const d=await r.json();
+    const items=d.items||[];
+    if(!items.length){
+      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">회의록 없음</p>';
+      return;
+    }
+    list.innerHTML=items.map(x=>`
+      <div class="meeting-item" onclick="if('${x.drive_link}')window.open('${x.drive_link}','_blank')">
+        <div class="mtitle">${esc(x.title||'회의록')}<span class="badge">☁️ Drive</span></div>
+        <div class="mdate">${new Date(x.created_at).toLocaleString('ko-KR')} · ${x.transcript_chars||0}자</div>
+      </div>
+    `).join('');
+  }catch(e){
+    list.innerHTML='<p style="color:#ef4444;font-size:.82rem">목록 로드 실패: '+e.message+'</p>';
+  }
+}
+function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+// 초기 로드
+loadMeetings();
 </script>
 </body>
 </html>
