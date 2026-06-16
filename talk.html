@@ -39,7 +39,8 @@ input[type=file]{display:none}
   <div class="header">
     <span id="hdrAvatar" style="font-size:1.4rem">🍀</span>
     <h1>Stella Talk</h1>
-    <button class="icon-btn" id="bellBtn" onclick="markRead()" title="안읽음 메시지">🔔<span class="badge" id="unreadBadge"></span></button>
+    <button class="icon-btn" id="soundBtn" onclick="cycleSound()" title="알림 방식">🔔</button>
+    <button class="icon-btn" id="bellBtn" onclick="markRead()" title="안읽음 메시지">📬<span class="badge" id="unreadBadge"></span></button>
     <button class="icon-btn" onclick="clearChat()" title="대화 비우기">🗑</button>
   </div>
 
@@ -67,8 +68,9 @@ input[type=file]{display:none}
 </div>
 
 <script>
-const MSG_KEY='stella_talk_msgs', USER_KEY='stella_talk_user', USERS_KEY='stella_talk_users';
+const MSG_KEY='stella_talk_msgs', USER_KEY='stella_talk_user', USERS_KEY='stella_talk_users', SOUND_KEY='stella_talk_sound';
 let _user=null, _avatar='🍀', _msgs=[], _unread=0;
+let _soundMode=localStorage.getItem(SOUND_KEY)||'sound'; // sound | vibrate | silent
 
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function save(){try{localStorage.setItem(MSG_KEY,JSON.stringify(_msgs.slice(-200)));}catch(e){}}
@@ -86,6 +88,23 @@ function beep(){
     g.gain.exponentialRampToValueAtTime(0.001,_audioCtx.currentTime+0.25);
     o.start();o.stop(_audioCtx.currentTime+0.26);
   }catch(e){}
+}
+// 자동재생 정책: 사용자 제스처에서 오디오 컨텍스트를 미리 깨워둠 (버그수정)
+function primeAudio(){
+  try{_audioCtx=_audioCtx||new (window.AudioContext||window.webkitAudioContext)();if(_audioCtx.state==='suspended')_audioCtx.resume();}catch(e){}
+}
+// 소리 옵션: 소리 / 진동 / 무음
+function notify(){
+  if(_soundMode==='sound')beep();
+  else if(_soundMode==='vibrate'){try{navigator.vibrate&&navigator.vibrate(120);}catch(e){}}
+}
+const SOUND_ICON={sound:'🔔',vibrate:'📳',silent:'🔕'};
+function applySoundIcon(){const b=document.getElementById('soundBtn');if(b)b.textContent=SOUND_ICON[_soundMode]||'🔔';}
+function cycleSound(){
+  _soundMode=_soundMode==='sound'?'vibrate':_soundMode==='vibrate'?'silent':'sound';
+  try{localStorage.setItem(SOUND_KEY,_soundMode);}catch(e){}
+  applySoundIcon();primeAudio();
+  if(_soundMode==='sound')beep();
 }
 
 // ── 렌더링 (속도: 새 메시지는 append만, 전체 재렌더 안 함) ──
@@ -124,6 +143,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)markRead()
 window.addEventListener('focus',markRead);
 
 function send(){
+  primeAudio();
   const inp=document.getElementById('msgInput');
   const text=inp.value.trim();
   if(!text)return;
@@ -144,7 +164,7 @@ function botReply(userText){
   setTimeout(()=>{
     const reply='“'+userText.slice(0,40)+'” 잘 받았어요! 🍀';
     pushMessage({from:'Stella',text:reply,ts:Date.now()});
-    beep();
+    notify();
   },900);
 }
 
@@ -176,7 +196,7 @@ function enterChat(){
   document.getElementById('loginView').hidden=true;
   document.getElementById('messages').hidden=false;
   document.getElementById('composer').hidden=false;
-  renderAll();updateBadge();
+  renderAll();updateBadge();applySoundIcon();
   document.getElementById('msgInput').focus();
 }
 
