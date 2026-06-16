@@ -1,21 +1,86 @@
 // api/summarize.js - 텍스트 → AI 회의록 + Drive 저장 + Azure 메타데이터
+// (drive 유틸을 직접 포함하여 Vercel 번들 문제 방지)
 import OpenAI from "openai";
-import { ensurePath, uploadToDrive, dateParts } from "../lib/drive.js";
+import { google } from "googleapis";
 import sql from "mssql";
+import { Readable } from "stream";
 
 export const config = { maxDuration: 120 };
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-async function retry(fn, times = 3) {
+// ────── 재시도 ──────
+async function retry(fn, times = 3, delay = 2000) {
   let lastErr;
   for (let i = 0; i < times; i++) {
     try { return await fn(); }
-    catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 2000 * (i + 1))); }
+    catch (e) { lastErr = e; await new Promise(r => setTimeout(r, delay * (i + 1))); }
   }
   throw lastErr;
 }
 
+// ────── Google Drive ──────
+const CLOVER_FOLDER = "stellaclover";
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+
+function getDrive() {
+  const oauth2 = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  oauth2.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+  return google.drive({ version: "v3", auth: oauth2 });
+}
+
+async function ensureFolder(drive, name, parentId) {
+  const q = `name='${name}' and mimeType='${FOLDER_MIME}' and '${parentId}' in parents and trashed=false`;
+  const r = await drive.files.list({ q, fields: "files(id,name)", pageSize: 1 });
+  if (r.data.files?.[0]) return r.data.files[0].id;
+  const c = await drive.files.create({
+    requestBody: { name, mimeType: FOLDER_MIME, parents: [parentId] },
+    fields: "id"
+  });
+  return c.data.id;
+}
+
+async function getCloverRoot(drive) {
+  const q = `name='${CLOVER_FOLDER}' and mimeType='${FOLDER_MIME}' and trashed=false`;
+  const r = await drive.files.list({ q, fields: "files(id)", pageSize: 1 });
+  if (r.data.files?.[0]) return r.data.files[0].id;
+  const c = await drive.files.create({
+    requestBody: { name: CLOVER_FOLDER, mimeType: FOLDER_MIME },
+    fields: "id"
+  });
+  return c.data.id;
+}
+
+async function ensurePath(drive, parts) {
+  let parentId = await getCloverRoot(drive);
+  for (const part of parts.filter(Boolean)) {
+    parentId = await ensureFolder(drive, part, parentId);
+  }
+  return parentId;
+}
+
+async function uploadText(drive, folderId, fileName, content) {
+  const r = await drive.files.create({
+    requestBody: { name: fileName, parents: [folderId] },
+    media: { mimeType: "text/plain", body: Readable.from([Buffer.from(content, "utf-8")]) },
+    fields: "id,webViewLink"
+  });
+  return r.data;
+}
+
+function dateParts() {
+  const now = new Date();
+  const Y = now.getFullYear().toString();
+  const YM = Y + String(now.getMonth() + 1).padStart(2, "0");
+  const YMD = YM + String(now.getDate()).padStart(2, "0");
+  const HM = String(now.getHours()).padStart(2, "0") + String(now.getMinutes()).padStart(2, "0");
+  return { Y, YM, YMD, HM };
+}
+
+// ────── Azure SQL ──────
 function getDbConfig() {
   return {
     server: process.env.CL_DB_SV,
@@ -27,6 +92,7 @@ function getDbConfig() {
   };
 }
 
+// ────── 메인 핸들러 ──────
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
 
@@ -42,26 +108,24 @@ export default async function handler(req, res) {
         messages: [
           {
             role: "system",
-            content: `당신은 전문 회의록 작성 AI입니다. 주어진 회의 내용을 분석하여 아래 형식으로 회의록을 작성하세요.
-반드시 아래 형식을 지키고, 내용은 한국어로 작성하세요.
+            content: `당신은 전문 회의록 작성 AI입니다. 주어진 회의 내용을 분석하여 아래 형식으로 회의록을 작성하세요. 반드시 형식을 지키고 한국어로 작성하세요.
 
----
 # 회의록
 
 ## 회의 제목
 (내용에서 추론)
 
 ## 회의 일시
-(현재 날짜 기준: ${new Date().toLocaleDateString("ko-KR")})
+${new Date().toLocaleDateString("ko-KR")}
 
 ## 참석자
 (내용에서 추론 또는 "미상")
 
 ## 회의 내용 요약
-(핵심 내용 3~5줄)
+(핵심 3~5줄)
 
 ## 주요 결정사항
-- (항목별로 나열)
+- (항목별)
 
 ## Action Item
 | 담당자 | 내용 | 완료 예정일 |
@@ -69,11 +133,10 @@ export default async function handler(req, res) {
 | | | |
 
 ## 이슈 사항
-- (있는 경우)
+- (있으면)
 
 ## 차기 일정
-- (있는 경우)
----`
+- (있으면)`
           },
           { role: "user", content: `다음 회의 내용으로 회의록을 작성해주세요:\n\n${transcript}` }
         ],
@@ -83,67 +146,60 @@ export default async function handler(req, res) {
       return resp.choices[0].message.content;
     });
   } catch (e) {
-    return res.status(500).json({ ok: false, message: "AI 생성 실패: " + e.message });
+    return res.status(500).json({ ok: false, message: "AI 회의록 생성 실패: " + e.message });
   }
 
-  // 2. 제목 추출 (회의록에서)
-  const titleMatch = summary.match(/## 회의 제목\s*\n([^\n]+)/);
-  const title = titleMatch ? titleMatch[1].trim() : "회의록";
+  // 2. 제목 추출
+  const m = summary.match(/##\s*회의 제목\s*\n+\s*([^\n]+)/);
+  let title = m ? m[1].trim().replace(/[\\/:*?"<>|]/g, "") : "회의록";
+  if (!title) title = "회의록";
 
   const { Y, YM, YMD, HM } = dateParts();
   const fileBase = `${YMD}_${HM}_${title.slice(0, 20)}`;
 
-  // 3. Google Drive 저장 (회의록 텍스트)
-  let driveFileId = null, driveLink = null;
+  // 3. Google Drive 저장
+  let driveFileId = null, driveLink = null, driveError = null;
   try {
-    const folder = await retry(() => ensurePath(["Meeting", Y, YM]));
-    const uploaded = await retry(() => uploadToDrive({
-      folderId: folder.id,
-      fileName: `${fileBase}.txt`,
-      mimeType: "text/plain",
-      content: summary
-    }));
-    driveFileId = uploaded.id;
-    driveLink = uploaded.webViewLink;
+    const drive = getDrive();
+    const folderId = await retry(() => ensurePath(drive, ["Meeting", Y, YM]));
+    const up = await retry(() => uploadText(drive, folderId, `${fileBase}.txt`, summary));
+    driveFileId = up.id;
+    driveLink = up.webViewLink;
   } catch (e) {
-    console.error("Drive 저장 실패:", e.message);
-    // Drive 실패해도 요약은 반환
+    driveError = e.message;
+    console.error("[Drive] 저장 실패:", e.message);
   }
 
-  // 4. Azure SQL 메타데이터 저장
+  // 4. Azure SQL 메타데이터
+  let dbError = null;
   try {
     const pool = await sql.connect(getDbConfig());
     await pool.request()
       .input("title", sql.NVarChar(300), title)
-      .input("transcript_chars", sql.Int, transcript.length)
-      .input("summary_chars", sql.Int, summary.length)
-      .input("drive_file_id", sql.NVarChar(200), driveFileId || "")
-      .input("drive_link", sql.NVarChar(500), driveLink || "")
-      .input("audio_file", sql.NVarChar(300), audioFileName || "")
+      .input("tc", sql.Int, transcript.length)
+      .input("sc", sql.Int, summary.length)
+      .input("fid", sql.NVarChar(200), driveFileId || "")
+      .input("link", sql.NVarChar(500), driveLink || "")
+      .input("audio", sql.NVarChar(300), audioFileName || "")
       .query(`
         IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='cl_meetings')
         CREATE TABLE cl_meetings (
           id INT IDENTITY PRIMARY KEY,
-          title NVARCHAR(300),
-          transcript_chars INT,
-          summary_chars INT,
-          drive_file_id NVARCHAR(200),
-          drive_link NVARCHAR(500),
-          audio_file NVARCHAR(300),
-          created_at DATETIME2 DEFAULT SYSUTCDATETIME()
+          title NVARCHAR(300), transcript_chars INT, summary_chars INT,
+          drive_file_id NVARCHAR(200), drive_link NVARCHAR(500),
+          audio_file NVARCHAR(300), created_at DATETIME2 DEFAULT SYSUTCDATETIME()
         );
         INSERT INTO cl_meetings (title,transcript_chars,summary_chars,drive_file_id,drive_link,audio_file)
-        VALUES (@title,@transcript_chars,@summary_chars,@drive_file_id,@drive_link,@audio_file)
+        VALUES (@title,@tc,@sc,@fid,@link,@audio)
       `);
+    await pool.close();
   } catch (e) {
-    console.error("Azure 저장 실패:", e.message);
+    dbError = e.message;
+    console.error("[Azure] 저장 실패:", e.message);
   }
 
   return res.status(200).json({
-    ok: true,
-    summary,
-    title,
-    driveFileId,
-    driveLink
+    ok: true, summary, title, driveFileId, driveLink,
+    warnings: { driveError, dbError }
   });
 }
