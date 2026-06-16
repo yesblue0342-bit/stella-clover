@@ -4,6 +4,7 @@
     { "source": "/api/summarize", "destination": "/api/summarize" },
     { "source": "/api/meetings", "destination": "/api/meetings" },
     { "source": "/api/drive-search", "destination": "/api/drive-search" },
+    { "source": "/api/autosave", "destination": "/api/autosave" },
     { "source": "/api/cleanup", "destination": "/api/cleanup" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],

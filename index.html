@@ -556,6 +556,19 @@ async function renderRecent(){
   }catch(e){card.style.display='none';}
 }
 
+// ── 자동저장: 5분마다 현재 회의록을 Google Drive(Drafts)에 백업 ──
+let _lastAutosaved='';
+async function autosaveTick(){
+  if(!_summary||!_summary.trim()||_summary===_lastAutosaved)return;
+  const content=_summary, name=(_title||'draft')+'_autosave';
+  try{
+    const r=await fetch('/api/autosave',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,name})});
+    const d=await r.json();
+    if(d.ok&&!d.skipped){_lastAutosaved=content;showToast('💾 자동저장됨');}
+  }catch(e){}
+}
+setInterval(autosaveTick,5*60*1000);
+
 loadMeetings();
 renderRecent();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
