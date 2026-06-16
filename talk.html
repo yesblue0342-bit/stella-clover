@@ -30,21 +30,30 @@ input[type=file]{display:none}
 #loginView .clover{font-size:3rem}
 #loginView input{border:1px solid #d1d5db;border-radius:12px;padding:12px 16px;font-size:1rem;width:100%;max-width:280px;outline:none}
 #loginView button{border:none;background:#1a4731;color:#fff;border-radius:12px;padding:12px 24px;font-size:1rem;font-weight:800;cursor:pointer}
+#avatarPick span{cursor:pointer;opacity:.4;transition:transform .15s,opacity .15s}
+#avatarPick span.sel{opacity:1;transform:scale(1.25)}
 </style>
 </head>
 <body>
 <div class="app">
   <div class="header">
-    <span style="font-size:1.4rem">🍀</span>
+    <span id="hdrAvatar" style="font-size:1.4rem">🍀</span>
     <h1>Stella Talk</h1>
+    <button class="icon-btn" id="bellBtn" onclick="markRead()" title="안읽음 메시지">🔔<span class="badge" id="unreadBadge"></span></button>
     <button class="icon-btn" onclick="clearChat()" title="대화 비우기">🗑</button>
   </div>
 
   <div id="loginView">
     <div class="clover">🍀</div>
-    <div style="font-weight:800;font-size:1.1rem">Stella Talk 시작하기</div>
+    <div style="font-weight:800;font-size:1.1rem">Stella Talk 회원가입</div>
     <input id="nickInput" type="text" placeholder="닉네임을 입력하세요" maxlength="20" onkeydown="if(event.key==='Enter')doLogin()">
-    <button onclick="doLogin()">입장</button>
+    <div id="avatarPick" style="display:flex;gap:10px;font-size:1.8rem">
+      <span class="sel" onclick="pickAvatar(this,'🍀')">🍀</span>
+      <span onclick="pickAvatar(this,'😊')">😊</span>
+      <span onclick="pickAvatar(this,'🐱')">🐱</span>
+      <span onclick="pickAvatar(this,'🚀')">🚀</span>
+    </div>
+    <button onclick="doLogin()">가입하고 시작</button>
   </div>
 
   <div id="messages" hidden></div>
@@ -58,8 +67,8 @@ input[type=file]{display:none}
 </div>
 
 <script>
-const MSG_KEY='stella_talk_msgs', USER_KEY='stella_talk_user';
-let _user=null, _msgs=[];
+const MSG_KEY='stella_talk_msgs', USER_KEY='stella_talk_user', USERS_KEY='stella_talk_users';
+let _user=null, _avatar='🍀', _msgs=[], _unread=0;
 
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function save(){try{localStorage.setItem(MSG_KEY,JSON.stringify(_msgs.slice(-200)));}catch(e){}}
@@ -99,7 +108,20 @@ function renderAll(){
   box.scrollTop=box.scrollHeight;
 }
 
-function pushMessage(m){_msgs.push(m);save();appendMsg(m);}
+function pushMessage(m){
+  _msgs.push(m);save();appendMsg(m);
+  if(m.from!==_user && document.hidden){_unread++;updateBadge();}
+}
+
+// ── 안읽음 배지 ──
+function updateBadge(){
+  const b=document.getElementById('unreadBadge');
+  if(_unread>0){b.textContent=_unread>99?'99+':_unread;b.classList.add('show');document.title='('+_unread+') Stella Talk';}
+  else{b.classList.remove('show');document.title='Stella Talk';}
+}
+function markRead(){_unread=0;updateBadge();}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)markRead();});
+window.addEventListener('focus',markRead);
 
 function send(){
   const inp=document.getElementById('msgInput');
@@ -131,23 +153,39 @@ function clearChat(){
   _msgs=[];save();renderAll();
 }
 
+function pickAvatar(el,a){
+  _avatar=a;
+  document.querySelectorAll('#avatarPick span').forEach(s=>s.classList.remove('sel'));
+  el.classList.add('sel');
+}
 function doLogin(){
   const nick=document.getElementById('nickInput').value.trim();
   if(!nick){document.getElementById('nickInput').focus();return;}
-  _user=nick;try{localStorage.setItem(USER_KEY,nick);}catch(e){}
+  _user=nick;
+  const profile={nick,avatar:_avatar,joined:Date.now()};
+  try{
+    localStorage.setItem(USER_KEY,JSON.stringify(profile));
+    // 회원 목록(로컬)에 등록 - 같은 닉네임은 갱신
+    const users=JSON.parse(localStorage.getItem(USERS_KEY)||'[]').filter(u=>u.nick!==nick);
+    users.push(profile);localStorage.setItem(USERS_KEY,JSON.stringify(users));
+  }catch(e){}
   enterChat();
 }
 function enterChat(){
+  document.getElementById('hdrAvatar').textContent=_avatar;
   document.getElementById('loginView').hidden=true;
   document.getElementById('messages').hidden=false;
   document.getElementById('composer').hidden=false;
-  renderAll();
+  renderAll();updateBadge();
   document.getElementById('msgInput').focus();
 }
 
 // ── 초기화 ──
 try{_msgs=JSON.parse(localStorage.getItem(MSG_KEY)||'[]');}catch(e){_msgs=[];}
-_user=localStorage.getItem(USER_KEY)||null;
+try{
+  const raw=localStorage.getItem(USER_KEY);
+  if(raw){const p=JSON.parse(raw);_user=p.nick;_avatar=p.avatar||'🍀';}
+}catch(e){_user=localStorage.getItem(USER_KEY)||null;} // 구버전(문자열) 호환
 if(_user){enterChat();}
 </script>
 </body>
