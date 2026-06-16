@@ -1,1 +1,12 @@
-{"scripts":{"dev":"vercel dev"},"dependencies":{"mssql":"latest","openai":"latest","googleapis":"latest","formidable":"latest","uuid":"latest"}}
+{
+  "name": "stella-clover",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": { "dev": "vercel dev" },
+  "dependencies": {
+    "mssql": "^11.0.1",
+    "openai": "^4.47.1",
+    "googleapis": "^144.0.0",
+    "formidable": "^3.5.1"
+  }
+}
