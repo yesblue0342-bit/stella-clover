@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stella DB</title>
+<meta name="theme-color" content="#1a4731">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f0;color:#111827;min-height:100vh}
+.app{max-width:680px;margin:0 auto;padding:16px}
+.header{background:linear-gradient(135deg,#1a4731,#2d6a4f);border-radius:18px;padding:16px 18px;color:#fff;margin-bottom:14px}
+.header h1{font-size:1.25rem;font-weight:900}
+.header p{font-size:.8rem;opacity:.8;margin-top:3px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.btn{border:1px solid #d1d5db;background:#fff;border-radius:10px;padding:8px 12px;font-size:.85rem;font-weight:700;cursor:pointer;color:#1a4731}
+.btn:hover{border-color:#2d6a4f;background:#f0fff4}
+.btn.primary{background:#1a4731;color:#fff;border-color:#1a4731}
+.btn.primary:disabled{background:#9ca3af;border-color:#9ca3af;cursor:not-allowed}
+.crumb{font-size:.85rem;color:#374151;margin-bottom:10px;word-break:break-all}
+.crumb a{color:#2d6a4f;font-weight:700;cursor:pointer;text-decoration:none}
+.item{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.item .nm{flex:1;font-size:.92rem;font-weight:600;cursor:pointer;word-break:break-all}
+.item.cut{opacity:.5}
+.item .act{border:none;background:none;cursor:pointer;font-size:1rem;color:#6b7280;padding:2px 4px}
+.item .act:hover{color:#1a4731}
+.empty{color:#9ca3af;text-align:center;padding:30px;font-size:.9rem}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal.show{display:flex}
+.modal-content{background:#fff;border-radius:16px;padding:18px;max-width:560px;width:100%;max-height:85vh;overflow:auto}
+.modal-content textarea{width:100%;min-height:200px;border:1px solid #d1d5db;border-radius:10px;padding:10px;font-family:ui-monospace,monospace;font-size:.85rem;resize:vertical}
+.modal-content h3{margin-bottom:10px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>🗂 Stella DB</h1>
+    <p>파일 관리 · 이동 / 복사 / 잘라내기 (이 기기에 저장)</p>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn" onclick="newFolder()">📁 새 폴더</button>
+    <button class="btn" onclick="newFile()">📄 새 파일</button>
+    <button class="btn primary" id="pasteBtn" onclick="paste()" disabled>📌 여기에 붙여넣기</button>
+  </div>
+
+  <div class="crumb" id="crumb"></div>
+  <div id="list"></div>
+</div>
+
+<div class="modal" id="editModal">
+  <div class="modal-content">
+    <h3 id="editTitle">파일</h3>
+    <textarea id="editBody"></textarea>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeEdit()">닫기</button>
+      <button class="btn primary" onclick="saveEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const FS_KEY='stella_db_fs';
+let nodes=[];      // {id,name,type:'folder'|'file',parent,content,ts}
+let cwd=null;      // 현재 폴더 id (null=루트)
+let clip={ids:[],mode:null}; // mode: 'copy' | 'cut'
+let editingId=null;
+
+function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function uid(){return 'n'+Date.now().toString(36)+Math.floor(Math.random()*1e6).toString(36);}
+function load(){try{nodes=JSON.parse(localStorage.getItem(FS_KEY)||'[]');}catch(e){nodes=[];}}
+function save(){try{localStorage.setItem(FS_KEY,JSON.stringify(nodes));}catch(e){}}
+function byId(id){return nodes.find(n=>n.id===id);}
+function childrenOf(p){return nodes.filter(n=>n.parent===p).sort((a,b)=>(a.type===b.type)?a.name.localeCompare(b.name):(a.type==='folder'?-1:1));}
+
+// 자손 id 전체 수집 (재귀)
+function descendants(id){
+  const out=[];const stack=[id];
+  while(stack.length){const c=childrenOf(stack.pop());for(const ch of c){out.push(ch.id);stack.push(ch.id);}}
+  return out;
+}
+function isAncestor(maybeAncestor,id){
+  let p=byId(id)?byId(id).parent:null;
+  while(p!==null){if(p===maybeAncestor)return true;p=byId(p)?byId(p).parent:null;}
+  return false;
+}
+
+function newFolder(){
+  const name=prompt('폴더 이름','새 폴더');if(!name)return;
+  nodes.push({id:uid(),name:name.trim(),type:'folder',parent:cwd,content:'',ts:Date.now()});
+  save();render();
+}
+function newFile(){
+  const name=prompt('파일 이름','메모.txt');if(!name)return;
+  nodes.push({id:uid(),name:name.trim(),type:'file',parent:cwd,content:'',ts:Date.now()});
+  save();render();
+}
+function rename(id){
+  const n=byId(id);if(!n)return;
+  const name=prompt('새 이름',n.name);if(!name)return;
+  n.name=name.trim();save();render();
+}
+function del(id){
+  const n=byId(id);if(!n)return;
+  if(!confirm('"'+n.name+'"'+(n.type==='folder'?' 폴더와 내용 전체를':'를(을)')+' 삭제할까요?'))return;
+  const kill=new Set([id,...descendants(id)]);
+  nodes=nodes.filter(x=>!kill.has(x.id));
+  clip.ids=clip.ids.filter(x=>!kill.has(x));updatePaste();
+  save();render();
+}
+function open(id){
+  const n=byId(id);if(!n)return;
+  if(n.type==='folder'){cwd=id;render();return;}
+  editingId=id;
+  document.getElementById('editTitle').textContent=n.name;
+  document.getElementById('editBody').value=n.content||'';
+  document.getElementById('editModal').classList.add('show');
+}
+function closeEdit(){document.getElementById('editModal').classList.remove('show');editingId=null;}
+function saveEdit(){const n=byId(editingId);if(n){n.content=document.getElementById('editBody').value;save();}closeEdit();}
+
+function copyItem(id){clip={ids:[id],mode:'copy'};updatePaste();render();}
+function cutItem(id){clip={ids:[id],mode:'cut'};updatePaste();render();}
+
+function paste(){
+  if(!clip.ids.length||!clip.mode)return;
+  if(clip.mode==='cut'){
+    for(const id of clip.ids){
+      if(id===cwd||isAncestor(id,cwd)){alert('폴더를 자기 자신/하위로 이동할 수 없습니다.');continue;}
+      const n=byId(id);if(n)n.parent=cwd;
+    }
+    clip={ids:[],mode:null};
+  }else{ // copy: 하위 포함 깊은 복제
+    for(const id of clip.ids)deepClone(id,cwd);
+  }
+  updatePaste();save();render();
+}
+function deepClone(id,newParent){
+  const map={};
+  const root=byId(id);if(!root)return;
+  const all=[id,...descendants(id)];
+  for(const oid of all){
+    const o=byId(oid);const nid=uid();map[oid]=nid;
+    const np=(oid===id)?newParent:map[o.parent];
+    nodes.push({id:nid,name:(oid===id?o.name+' (복사본)':o.name),type:o.type,parent:np,content:o.content,ts:Date.now()});
+  }
+}
+
+function updatePaste(){
+  const b=document.getElementById('pasteBtn');
+  b.disabled=!(clip.ids.length&&clip.mode);
+  b.textContent=clip.mode==='cut'?'✂ 여기로 이동':'📌 여기에 붙여넣기';
+}
+function crumbPath(){
+  const path=[];let p=cwd;
+  while(p!==null){const n=byId(p);if(!n)break;path.unshift(n);p=n.parent;}
+  let html='<a onclick="goRoot()">🏠 루트</a>';
+  path.forEach(n=>{html+=' / <a onclick="goTo(\''+n.id+'\')">'+esc(n.name)+'</a>';});
+  return html;
+}
+function goRoot(){cwd=null;render();}
+function goTo(id){cwd=id;render();}
+
+function render(){
+  document.getElementById('crumb').innerHTML=crumbPath();
+  const list=document.getElementById('list');
+  const items=childrenOf(cwd);
+  if(!items.length){list.innerHTML='<div class="empty">비어 있습니다. 폴더나 파일을 추가하세요.</div>';return;}
+  list.innerHTML=items.map(n=>{
+    const cut=(clip.mode==='cut'&&clip.ids.includes(n.id))?' cut':'';
+    const icon=n.type==='folder'?'📁':'📄';
+    return `<div class="item${cut}">
+      <span style="font-size:1.1rem">${icon}</span>
+      <span class="nm" onclick="open('${n.id}')">${esc(n.name)}</span>
+      <button class="act" title="이름변경" onclick="rename('${n.id}')">✏️</button>
+      <button class="act" title="복사" onclick="copyItem('${n.id}')">📋</button>
+      <button class="act" title="잘라내기" onclick="cutItem('${n.id}')">✂️</button>
+      <button class="act" title="삭제" onclick="del('${n.id}')">🗑️</button>
+    </div>`;
+  }).join('');
+}
+
+load();updatePaste();render();
+</script>
+</body>
+</html>
