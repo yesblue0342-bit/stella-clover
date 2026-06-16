@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    { "source": "/api/transcribe", "destination": "/api/transcribe" },
+    { "source": "/api/summarize", "destination": "/api/summarize" },
+    { "source": "/api/meetings", "destination": "/api/meetings" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
