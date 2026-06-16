@@ -108,6 +108,23 @@ input[type=file]{display:none}
     <div id="recentList"></div>
   </div>
 
+  <div class="card" id="ocrCard">
+    <div class="card-title">🖼 이미지 → 텍스트 (OCR)</div>
+    <div class="file-area" id="imgArea" onclick="document.getElementById('ocrImage').click()">
+      <div style="font-size:1.5rem;margin-bottom:6px">🖼</div>
+      <div id="imgAreaText">이미지 첨부 (회의 화면·문서 사진)</div>
+    </div>
+    <input type="file" id="ocrImage" accept="image/*" onchange="onOcrImage(this)">
+    <img id="ocrPreview" alt="" style="display:none;max-width:100%;border-radius:12px;margin:10px 0">
+    <button class="gen-btn" id="ocrBtn" style="display:none" onclick="runOcr()"><span>🔍</span> 텍스트 추출</button>
+    <div class="progress" id="ocrProgress" style="display:none">
+      <div class="progress-step" id="ocrProgStep">🔍 텍스트 인식 중...</div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="ocrBar" style="width:40%"></div></div>
+    </div>
+    <div class="summary-box" id="ocrResult" style="display:none"></div>
+    <button class="rbtn" id="ocrToMinutes" style="display:none;width:100%;margin-top:8px" onclick="ocrToMinutes()">✨ 이 텍스트로 회의록 생성</button>
+  </div>
+
   <div class="card result-area" id="resultSection">
     <div class="card-title">📋 회의록</div>
     <button class="new-btn" onclick="resetAll()">+ 새 회의록</button>
@@ -556,6 +573,58 @@ async function renderRecent(){
         <button onclick="idbDelete(${r.id})" title="삭제" style="border:none;background:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1">×</button>
       </div>`).join('');
   }catch(e){card.style.display='none';}
+}
+
+// ── 이미지 OCR (Tesseract.js, 필요 시 CDN 로드) ──
+let _ocrImageFile=null, _tesseractLoaded=false;
+function onOcrImage(input){
+  const f=input.files[0];if(!f)return;
+  _ocrImageFile=f;
+  const img=document.getElementById('ocrPreview');
+  img.src=URL.createObjectURL(f);img.style.display='block';
+  document.getElementById('imgAreaText').textContent=f.name;
+  document.getElementById('ocrBtn').style.display='flex';
+  document.getElementById('ocrResult').style.display='none';
+  document.getElementById('ocrToMinutes').style.display='none';
+}
+function loadScript(src){
+  return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error('OCR 라이브러리 로드 실패'));document.head.appendChild(s);});
+}
+async function runOcr(){
+  if(!_ocrImageFile){showToast('이미지를 먼저 선택하세요');return;}
+  const prog=document.getElementById('ocrProgress'), btn=document.getElementById('ocrBtn');
+  prog.style.display='block';btn.disabled=true;
+  try{
+    if(!_tesseractLoaded){await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');_tesseractLoaded=true;}
+    const worker=await Tesseract.createWorker('kor+eng');
+    const { data }=await worker.recognize(_ocrImageFile);
+    await worker.terminate();
+    const txt=((data&&data.text)||'').trim();
+    const box=document.getElementById('ocrResult');
+    box.textContent=txt||'(인식된 텍스트 없음)';box.style.display='block';
+    document.getElementById('ocrToMinutes').style.display=txt?'flex':'none';
+  }catch(e){showToast('OCR 실패: '+e.message);}
+  finally{prog.style.display='none';btn.disabled=false;}
+}
+async function ocrToMinutes(){
+  const text=document.getElementById('ocrResult').textContent.trim();
+  if(!text||text==='(인식된 텍스트 없음)'){showToast('추출된 텍스트가 없습니다');return;}
+  const btn=document.getElementById('ocrToMinutes');btn.disabled=true;btn.textContent='⏳ 생성 중...';
+  try{
+    const r=await fetch('/api/summarize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,audioFileName:'ocr_image'})});
+    const d2=await r.json();
+    if(!d2.ok)throw new Error(d2.message||'생성 실패');
+    _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
+    document.getElementById('summaryBox').textContent=_summary;
+    document.getElementById('resultSection').style.display='block';
+    document.getElementById('copyKwBtn').style.display=_keywords?'flex':'none';
+    document.getElementById('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
+    document.getElementById('copyLinksBtn').style.display=extractUrls(_summary).length?'flex':'none';
+    document.getElementById('driveBtn').style.display=_driveLink?'flex':'none';
+    saveSession();loadMeetings();
+    document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
+  }catch(e){showToast('회의록 생성 실패: '+e.message);}
+  finally{btn.disabled=false;btn.textContent='✨ 이 텍스트로 회의록 생성';}
 }
 
 // ── 세션 유지: 마지막 회의록을 localStorage에 저장/복원 (이 기기) ──
