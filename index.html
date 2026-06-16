@@ -9,48 +9,36 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Stella Clover">
-<meta name="description" content="AI 회의록 자동 생성 - 음성 파일을 회의록으로">
+<meta name="description" content="AI 회의록 자동 생성 - SAP 프로젝트 회의 특화">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f0;color:#111827;min-height:100vh}
 .app{max-width:600px;margin:0 auto;padding:16px;padding-bottom:40px}
-
-/* 헤더 */
-.header{background:linear-gradient(135deg,#1a4731,#2d6a4f);border-radius:20px;padding:20px;margin-bottom:16px;color:#fff}
+.header{background:linear-gradient(135deg,#1a4731,#2d6a4f);border-radius:20px;padding:20px;margin-bottom:16px;color:#fff;position:relative}
 .header h1{font-size:1.5rem;font-weight:900;letter-spacing:-.5px}
 .header p{font-size:.85rem;opacity:.75;margin-top:4px}
 .clover{font-size:1.8rem;margin-bottom:6px}
-
-/* 카드 */
+.install-btn{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:10px;padding:7px 12px;font-size:.78rem;font-weight:700;cursor:pointer;display:none;align-items:center;gap:4px}
+.install-btn.show{display:flex}
 .card{background:#fff;border-radius:20px;padding:18px;margin-bottom:14px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
 .card-title{font-size:.8rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
-
-/* 녹음 버튼 */
 .rec-btn{width:100%;height:80px;border:3px dashed #d1fae5;border-radius:16px;background:#f0fff4;color:#1a4731;font-size:1rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .2s;margin-bottom:12px}
 .rec-btn.recording{border-color:#ef4444;background:#fff5f5;color:#ef4444;animation:pulse 1.2s infinite}
 .rec-btn.done{border-style:solid;border-color:#34d399;background:#ecfdf5}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
-
-/* 파일 업로드 */
 .file-area{border:2px dashed #d1d5db;border-radius:14px;padding:20px;text-align:center;cursor:pointer;color:#6b7280;transition:all .2s;margin-bottom:12px}
 .file-area:hover,.file-area.drag{border-color:#2d6a4f;background:#f0fff4;color:#2d6a4f}
 .file-area.has-file{border-color:#34d399;border-style:solid;background:#ecfdf5;color:#1a4731}
 .file-name{font-weight:700;font-size:.9rem}
 input[type=file]{display:none}
-
-/* 생성 버튼 */
 .gen-btn{width:100%;height:56px;border:none;border-radius:14px;background:#1a4731;color:#fff;font-size:1.05rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s}
 .gen-btn:hover{background:#2d6a4f}
 .gen-btn:disabled{background:#9ca3af;cursor:not-allowed}
-
-/* 진행 상태 */
 .progress{background:#f9fafb;border-radius:12px;padding:14px;margin-top:14px;display:none}
 .progress-bar-wrap{background:#e5e7eb;border-radius:99px;height:8px;margin:10px 0}
-.progress-bar{background:linear-gradient(90deg,#2d6a4f,#34d399);height:8px;border-radius:99px;width:0;transition:width .5s}
+.progress-bar{background:linear-gradient(90deg,#2d6a4f,#34d399);height:8px;border-radius:99px;width:0;transition:width .4s}
 .progress-step{font-size:.82rem;color:#374151;font-weight:600}
 .progress-detail{font-size:.75rem;color:#9ca3af;margin-top:4px}
-
-/* 결과 */
 .result-area{display:none}
 .summary-box{background:#f9fafb;border-radius:14px;padding:16px;font-size:.88rem;line-height:1.75;white-space:pre-wrap;max-height:400px;overflow-y:auto;border:1px solid #e5e7eb;margin-bottom:12px}
 .result-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
@@ -58,56 +46,52 @@ input[type=file]{display:none}
 .rbtn:hover{border-color:#2d6a4f;color:#2d6a4f}
 .rbtn.drive{grid-column:1/-1;background:#2d6a4f;color:#fff;border-color:#2d6a4f}
 .rbtn.drive:hover{background:#1a4731}
-
-/* 회의 목록 */
+.search-box{display:flex;gap:8px;margin-bottom:12px}
+.search-box input{flex:1;border:2px solid #e5e7eb;border-radius:12px;padding:10px 14px;font-size:.9rem;outline:none}
+.search-box input:focus{border-color:#2d6a4f}
+.search-box button{border:none;background:#2d6a4f;color:#fff;border-radius:12px;padding:0 16px;font-weight:700;cursor:pointer}
 .meeting-item{padding:12px;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:8px;cursor:pointer;transition:all .2s}
 .meeting-item:hover{border-color:#2d6a4f;background:#f0fff4}
 .meeting-item .mtitle{font-weight:700;font-size:.9rem;margin-bottom:2px}
 .meeting-item .mdate{font-size:.75rem;color:#9ca3af}
+.meeting-item .mkeywords{font-size:.72rem;color:#2d6a4f;margin-top:4px}
 .badge{display:inline-block;background:#ecfdf5;color:#2d6a4f;border-radius:6px;padding:2px 8px;font-size:.72rem;font-weight:700;margin-left:6px}
-
-/* 에러 */
 .error-box{background:#fff5f5;border:1px solid #fca5a5;border-radius:12px;padding:12px;color:#dc2626;font-size:.85rem;margin-top:10px;display:none}
 .new-btn{width:100%;height:44px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;color:#6b7280;font-size:.88rem;font-weight:700;cursor:pointer;margin-bottom:10px}
 .new-btn:hover{background:#f0fff4;color:#2d6a4f;border-color:#2d6a4f}
+.hint{font-size:.72rem;color:#9ca3af;margin-top:6px;text-align:center}
+/* 상세 모달 */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:none;align-items:center;justify-content:center;padding:16px}
+.modal.show{display:flex}
+.modal-content{background:#fff;border-radius:20px;padding:20px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto}
+.modal-close{float:right;border:none;background:none;font-size:1.5rem;cursor:pointer;color:#9ca3af}
 </style>
 </head>
 <body>
 <div class="app">
 
   <div class="header">
+    <button class="install-btn" id="installBtn" onclick="installApp()">⬇ 앱 설치</button>
     <div class="clover">🍀</div>
     <h1>Stella Clover</h1>
-    <p>AI 회의록 자동 생성</p>
+    <p>SAP 프로젝트 회의록 자동 생성</p>
   </div>
 
-  <!-- 입력 섹션 -->
   <div class="card" id="inputSection">
     <div class="card-title">🎙 음성 입력</div>
-
-    <!-- 녹음 버튼 -->
     <button class="rec-btn" id="recBtn" onclick="toggleRec()">
-      <span id="recIcon">🎤</span>
-      <span id="recText">터치하여 녹음 시작</span>
+      <span id="recIcon">🎤</span><span id="recText">터치하여 녹음 시작</span>
     </button>
-
-    <!-- 파일 업로드 -->
     <div class="file-area" id="fileArea" onclick="document.getElementById('audioFile').click()"
       ondragover="event.preventDefault();this.classList.add('drag')"
-      ondragleave="this.classList.remove('drag')"
-      ondrop="dropFile(event)">
+      ondragleave="this.classList.remove('drag')" ondrop="dropFile(event)">
       <div style="font-size:1.5rem;margin-bottom:6px">📎</div>
       <div id="fileAreaText">파일 첨부</div>
       <div style="font-size:.75rem;margin-top:4px;opacity:.7">mp3 · m4a · wav · aac · ogg · webm</div>
     </div>
     <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.aac,.ogg,.webm,audio/*" onchange="onFileSelect(this)">
-
-    <!-- 생성 버튼 -->
-    <button class="gen-btn" id="genBtn" onclick="generate()">
-      <span>✨</span> 회의록 생성
-    </button>
-
-    <!-- 진행 상태 -->
+    <button class="gen-btn" id="genBtn" onclick="generate()"><span>✨</span> 회의록 생성</button>
+    <div class="hint">긴 회의(1~2시간)도 자동 분할 처리됩니다</div>
     <div class="progress" id="progress">
       <div class="progress-step" id="pStep">준비 중...</div>
       <div class="progress-bar-wrap"><div class="progress-bar" id="pBar"></div></div>
@@ -116,7 +100,6 @@ input[type=file]{display:none}
     <div class="error-box" id="errBox"></div>
   </div>
 
-  <!-- 결과 섹션 -->
   <div class="card result-area" id="resultSection">
     <div class="card-title">📋 회의록</div>
     <button class="new-btn" onclick="resetAll()">+ 새 회의록</button>
@@ -124,26 +107,52 @@ input[type=file]{display:none}
     <div class="result-btns">
       <button class="rbtn" onclick="copyAll()">📋 복사</button>
       <button class="rbtn" onclick="downloadTxt()">📄 TXT</button>
-      <button class="rbtn drive" id="driveBtn" onclick="openDrive()" style="display:none">
-        ☁️ Google Drive에서 열기
-      </button>
+      <button class="rbtn drive" id="driveBtn" onclick="openDrive()" style="display:none">☁️ Google Drive에서 열기</button>
     </div>
   </div>
 
-  <!-- 회의 목록 -->
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-      📅 최근 회의록
+      📅 회의록 이력
       <button onclick="loadMeetings()" style="border:none;background:none;color:#2d6a4f;font-weight:700;cursor:pointer;font-size:.8rem">새로고침</button>
+    </div>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="키워드 검색 (제목·내용·SAP용어)" onkeydown="if(event.key==='Enter')doSearch()">
+      <button onclick="doSearch()">🔍</button>
     </div>
     <div id="meetingList"><p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p></div>
   </div>
+</div>
 
+<!-- 상세 모달 -->
+<div class="modal" id="detailModal" onclick="if(event.target===this)closeDetail()">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeDetail()">×</button>
+    <div id="detailContent"></div>
+  </div>
 </div>
 
 <script>
 let recorder=null, chunks=[], recordedBlob=null, currentAudioFile=null;
-let _driveLink='', _summary='', _title='';
+let _driveLink='', _summary='', _title='', _deferredPrompt=null, _detailSummary='';
+
+// ── PWA 설치 ──
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();
+  _deferredPrompt=e;
+  document.getElementById('installBtn').classList.add('show');
+});
+function installApp(){
+  if(!_deferredPrompt)return;
+  _deferredPrompt.prompt();
+  _deferredPrompt.userChoice.then(function(){
+    _deferredPrompt=null;
+    document.getElementById('installBtn').classList.remove('show');
+  });
+}
+window.addEventListener('appinstalled', function(){
+  document.getElementById('installBtn').classList.remove('show');
+});
 
 // ── 녹음 ──
 async function toggleRec(){
@@ -160,126 +169,161 @@ async function toggleRec(){
     const stream=await navigator.mediaDevices.getUserMedia({audio:true});
     recorder=new MediaRecorder(stream);
     recorder.ondataavailable=e=>chunks.push(e.data);
-    recorder.onstop=()=>{
-      recordedBlob=new Blob(chunks,{type:'audio/webm'});
-      stream.getTracks().forEach(t=>t.stop());
-    };
+    recorder.onstop=()=>{recordedBlob=new Blob(chunks,{type:'audio/webm'});stream.getTracks().forEach(t=>t.stop());};
     recorder.start();
     btn.className='rec-btn recording';
     document.getElementById('recIcon').textContent='⏹';
     document.getElementById('recText').textContent='녹음 중... (터치하여 종료)';
-  }catch(e){
-    showErr('마이크 권한이 필요합니다: '+e.message);
-  }
+  }catch(e){showErr('마이크 권한이 필요합니다: '+e.message);}
 }
 
-// ── 파일 드롭 ──
-function dropFile(e){
-  e.preventDefault();
-  document.getElementById('fileArea').classList.remove('drag');
-  const f=e.dataTransfer.files[0];
-  if(f) applyFile(f);
-}
-function onFileSelect(input){
-  if(input.files[0]) applyFile(input.files[0]);
-}
+// ── 파일 ──
+function dropFile(e){e.preventDefault();document.getElementById('fileArea').classList.remove('drag');const f=e.dataTransfer.files[0];if(f)applyFile(f);}
+function onFileSelect(input){if(input.files[0])applyFile(input.files[0]);}
 function applyFile(f){
   currentAudioFile=f;recordedBlob=null;
   const area=document.getElementById('fileArea');
   area.className='file-area has-file';
-  document.getElementById('fileAreaText').innerHTML='<div class="file-name">'+f.name+'</div><div style="font-size:.75rem;margin-top:2px">'+Math.round(f.size/1024)+'KB</div>';
+  const mb=(f.size/1024/1024).toFixed(1);
+  document.getElementById('fileAreaText').innerHTML='<div class="file-name">'+f.name+'</div><div style="font-size:.75rem;margin-top:2px">'+mb+'MB</div>';
 }
 
-// ── 진행 상태 표시 ──
-function setProgress(pct, step, detail){
-  const p=document.getElementById('progress');
-  p.style.display='block';
+function setProgress(pct,step,detail){
+  const p=document.getElementById('progress');p.style.display='block';
   document.getElementById('pBar').style.width=pct+'%';
   document.getElementById('pStep').textContent=step;
   document.getElementById('pDetail').textContent=detail||'';
 }
-function showErr(msg){
-  const e=document.getElementById('errBox');
-  e.textContent=msg;e.style.display='block';
-}
+function showErr(msg){const e=document.getElementById('errBox');e.textContent=msg;e.style.display='block';}
 function hideErr(){document.getElementById('errBox').style.display='none';}
 
-// ── 메인: 회의록 생성 ──
+// ── 오디오를 WAV로 디코드 후 시간 단위 분할 (Vercel 4.5MB 우회) ──
+// 16kHz 모노 WAV로 변환 → Whisper 권장 포맷, 용량 대폭 감소
+async function audioToChunks(blob, chunkSeconds){
+  const arrayBuf = await blob.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  const audioBuf = await ctx.decodeAudioData(arrayBuf);
+  ctx.close && ctx.close();
+
+  const targetRate = 16000; // 16kHz로 다운샘플
+  const totalDuration = audioBuf.duration;
+  const chunkCount = Math.ceil(totalDuration / chunkSeconds);
+  const chunks = [];
+
+  for(let i=0; i<chunkCount; i++){
+    const startSec = i * chunkSeconds;
+    const endSec = Math.min(startSec + chunkSeconds, totalDuration);
+    const wav = encodeWavSlice(audioBuf, startSec, endSec, targetRate);
+    chunks.push(wav);
+  }
+  return { chunks, totalDuration };
+}
+
+// AudioBuffer의 일부 구간을 16kHz 모노 WAV로 인코딩
+function encodeWavSlice(audioBuf, startSec, endSec, targetRate){
+  const srcRate = audioBuf.sampleRate;
+  const startFrame = Math.floor(startSec * srcRate);
+  const endFrame = Math.floor(endSec * srcRate);
+  const frameCount = endFrame - startFrame;
+  // 모노 다운믹스
+  const ch = audioBuf.numberOfChannels;
+  const mono = new Float32Array(frameCount);
+  for(let c=0;c<ch;c++){
+    const data=audioBuf.getChannelData(c);
+    for(let i=0;i<frameCount;i++){ mono[i]+=data[startFrame+i]/ch; }
+  }
+  // 다운샘플 16kHz
+  const ratio = srcRate/targetRate;
+  const outLen = Math.floor(frameCount/ratio);
+  const out = new Float32Array(outLen);
+  for(let i=0;i<outLen;i++){ out[i]=mono[Math.floor(i*ratio)]||0; }
+  // WAV 헤더 + PCM16
+  const buffer=new ArrayBuffer(44+outLen*2);
+  const view=new DataView(buffer);
+  const writeStr=(off,s)=>{for(let i=0;i<s.length;i++)view.setUint8(off+i,s.charCodeAt(i));};
+  writeStr(0,'RIFF');view.setUint32(4,36+outLen*2,true);writeStr(8,'WAVE');
+  writeStr(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);
+  view.setUint16(22,1,true);view.setUint32(24,targetRate,true);
+  view.setUint32(28,targetRate*2,true);view.setUint16(32,2,true);view.setUint16(34,16,true);
+  writeStr(36,'data');view.setUint32(40,outLen*2,true);
+  let off=44;
+  for(let i=0;i<outLen;i++){const s=Math.max(-1,Math.min(1,out[i]));view.setInt16(off,s<0?s*0x8000:s*0x7FFF,true);off+=2;}
+  return new Blob([buffer],{type:'audio/wav'});
+}
+
+// ── 메인 ──
 async function generate(){
   const audio=currentAudioFile||recordedBlob;
   if(!audio){showErr('음성 파일을 선택하거나 녹음해주세요.');return;}
-
   hideErr();
   document.getElementById('genBtn').disabled=true;
   document.getElementById('resultSection').style.display='none';
 
   try{
-    // Step 1: 음성→텍스트 (Whisper)
-    setProgress(10,'🎙 음성 변환 중...','OpenAI Whisper로 텍스트 변환 중');
-    const fd=new FormData();
-    const fname=currentAudioFile?.name||'recording.webm';
-    fd.append('audio', audio, fname);
+    // 1. 오디오 분할 (5분 = 300초 단위, 16kHz WAV ≈ 청크당 ~9MB→4.5MB 이하 위해 4분)
+    setProgress(5,'🔧 음성 분석 중...','오디오를 변환하고 있습니다');
+    const CHUNK_SEC = 240; // 4분 단위 (16kHz mono WAV ≈ 7.3MB/분*4... → 약 4.6MB, 안전하게 3분으로)
+    const { chunks, totalDuration } = await audioToChunks(audio, 180); // 3분 단위
+    const mins = Math.round(totalDuration/60);
+    setProgress(10,'🎙 음성 변환 중...',`총 ${mins}분 · ${chunks.length}개 구간 처리`);
 
-    const r1=await fetch('/api/transcribe',{method:'POST',body:fd});
-    const d1=await r1.json();
-    if(!r1.ok||!d1.ok) throw new Error(d1.message||'음성 변환 실패');
+    // 2. 각 청크 순차 STT
+    let fullText='';
+    for(let i=0;i<chunks.length;i++){
+      const pct = 10 + Math.round((i/chunks.length)*45);
+      setProgress(pct,'🎙 음성 변환 중...',`구간 ${i+1}/${chunks.length} 변환 중 (SAP 용어 인식)`);
+      const fd=new FormData();
+      fd.append('audio',chunks[i],`chunk_${i}.wav`);
+      fd.append('prevText',fullText.slice(-200));
+      const r=await fetch('/api/transcribe',{method:'POST',body:fd});
+      if(!r.ok){
+        const txt=await r.text();
+        throw new Error('변환 실패('+r.status+'): '+txt.slice(0,100));
+      }
+      const d=await r.json();
+      if(!d.ok)throw new Error(d.message||'변환 실패');
+      fullText += (fullText?' ':'') + d.text;
+    }
 
-    setProgress(50,'📝 회의록 작성 중...','AI가 회의록을 자동 작성합니다');
+    if(!fullText.trim())throw new Error('음성에서 텍스트를 추출하지 못했습니다 (무음 파일)');
 
-    // Step 2: AI 회의록 생성 + Drive 저장
+    // 3. AI 회의록
+    setProgress(60,'📝 회의록 작성 중...','SAP 프로젝트 회의록 작성 중');
     const r2=await fetch('/api/summarize',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({transcript:d1.text, audioFileName:fname})
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile?.name||'recording.webm')})
     });
+    if(!r2.ok){const txt=await r2.text();throw new Error('회의록 생성 실패('+r2.status+'): '+txt.slice(0,100));}
     const d2=await r2.json();
-    if(!r2.ok||!d2.ok) throw new Error(d2.message||'회의록 생성 실패');
+    if(!d2.ok)throw new Error(d2.message||'회의록 생성 실패');
 
     setProgress(100,'✅ 완료!','회의록이 생성되었습니다');
-
-    // 결과 표시
-    _summary=d2.summary||'';
-    _title=d2.title||'회의록';
-    _driveLink=d2.driveLink||'';
-
+    _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';
     document.getElementById('summaryBox').textContent=_summary;
     document.getElementById('resultSection').style.display='block';
-    if(_driveLink){
-      const db=document.getElementById('driveBtn');
-      db.style.display='flex';
-    }
+    if(_driveLink)document.getElementById('driveBtn').style.display='flex';
     document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
-    loadMeetings();
 
+    // 경고 표시 (Drive/DB 저장 실패 시)
+    if(d2.warnings && (d2.warnings.driveError||d2.warnings.dbError)){
+      let w='';
+      if(d2.warnings.driveError)w+='Drive 저장 실패: '+d2.warnings.driveError+'. ';
+      if(d2.warnings.dbError)w+='DB 저장 실패: '+d2.warnings.dbError;
+      showErr('⚠️ 회의록은 생성됐으나 일부 저장 실패: '+w);
+    }
+    loadMeetings();
   }catch(e){
     showErr('오류: '+e.message);
     setProgress(0,'실패','오류가 발생했습니다. 다시 시도해주세요.');
-  } finally {
+  }finally{
     document.getElementById('genBtn').disabled=false;
   }
 }
 
-// ── 결과 액션 ──
-function copyAll(){
-  navigator.clipboard.writeText(_summary).then(()=>{
-    const btn=document.querySelector('.rbtn');
-    btn.textContent='✓ 복사됨';
-    setTimeout(()=>{btn.textContent='📋 복사';},2000);
-  }).catch(()=>{
-    const ta=document.createElement('textarea');
-    ta.value=_summary;document.body.appendChild(ta);ta.select();
-    document.execCommand('copy');ta.remove();
-  });
-}
-function downloadTxt(){
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([_summary],{type:'text/plain;charset=utf-8'}));
-  a.download=(_title||'회의록')+'.txt';
-  a.click();
-}
-function openDrive(){
-  if(_driveLink) window.open(_driveLink,'_blank');
-}
+function copyAll(){navigator.clipboard.writeText(_summary).then(()=>{const b=document.querySelector('.rbtn');b.textContent='✓ 복사됨';setTimeout(()=>{b.textContent='📋 복사';},2000);}).catch(()=>{const t=document.createElement('textarea');t.value=_summary;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();});}
+function downloadTxt(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([_summary],{type:'text/plain;charset=utf-8'}));a.download=(_title||'회의록')+'.txt';a.click();}
+function openDrive(){if(_driveLink)window.open(_driveLink,'_blank');}
 function resetAll(){
   recorder=null;chunks=[];recordedBlob=null;currentAudioFile=null;
   _summary='';_title='';_driveLink='';
@@ -291,40 +335,73 @@ function resetAll(){
   document.getElementById('audioFile').value='';
   document.getElementById('progress').style.display='none';
   document.getElementById('resultSection').style.display='none';
-  hideErr();
-  document.getElementById('genBtn').disabled=false;
+  hideErr();document.getElementById('genBtn').disabled=false;
 }
 
-// ── 회의 목록 ──
-async function loadMeetings(){
+// ── 목록 / 검색 ──
+async function loadMeetings(){renderList('/api/meetings');}
+async function doSearch(){
+  const q=document.getElementById('searchInput').value.trim();
+  if(!q){loadMeetings();return;}
+  renderList('/api/meetings?action=search&q='+encodeURIComponent(q));
+}
+async function renderList(url){
   const list=document.getElementById('meetingList');
+  list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p>';
   try{
-    const r=await fetch('/api/meetings');
+    const r=await fetch(url);
     const d=await r.json();
     const items=d.items||[];
     if(!items.length){
-      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">회의록 없음</p>';
+      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+(d.message||'회의록 없음')+'</p>';
       return;
     }
     list.innerHTML=items.map(x=>`
-      <div class="meeting-item" onclick="if('${x.drive_link}')window.open('${x.drive_link}','_blank')">
-        <div class="mtitle">${esc(x.title||'회의록')}<span class="badge">☁️ Drive</span></div>
+      <div class="meeting-item" onclick="showDetail(${x.id})">
+        <div class="mtitle">${esc(x.title||'회의록')}${x.drive_link?'<span class="badge">☁️ Drive</span>':''}</div>
         <div class="mdate">${new Date(x.created_at).toLocaleString('ko-KR')} · ${x.transcript_chars||0}자</div>
-      </div>
-    `).join('');
+        ${x.keywords?'<div class="mkeywords">🔑 '+esc(x.keywords)+'</div>':''}
+      </div>`).join('');
   }catch(e){
-    list.innerHTML='<p style="color:#ef4444;font-size:.82rem">목록 로드 실패: '+e.message+'</p>';
+    list.innerHTML='<p style="color:#ef4444;font-size:.82rem">목록 로드 실패: '+esc(e.message)+'</p>';
   }
+}
+
+// ── 상세 ──
+async function showDetail(id){
+  const modal=document.getElementById('detailModal');
+  const content=document.getElementById('detailContent');
+  content.innerHTML='<p style="color:#9ca3af">불러오는 중...</p>';
+  modal.classList.add('show');
+  try{
+    const r=await fetch('/api/meetings?action=detail&id='+id);
+    const d=await r.json();
+    const it=d.item;
+    if(!it){content.innerHTML='<p>회의록을 찾을 수 없습니다.</p>';return;}
+    content.innerHTML=`
+      <h2 style="font-size:1.2rem;margin-bottom:6px;padding-right:30px">${esc(it.title||'회의록')}</h2>
+      <p style="font-size:.78rem;color:#9ca3af;margin-bottom:12px">${new Date(it.created_at).toLocaleString('ko-KR')}</p>
+      ${it.keywords?'<p style="font-size:.8rem;color:#2d6a4f;margin-bottom:12px">🔑 '+esc(it.keywords)+'</p>':''}
+      <div style="background:#f9fafb;border-radius:12px;padding:14px;font-size:.85rem;line-height:1.7;white-space:pre-wrap;max-height:50vh;overflow-y:auto;border:1px solid #e5e7eb">${esc(it.summary||'')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+        <button class="rbtn" onclick="copyText(\`${(it.summary||'').replace(/`/g,'\\\\`').replace(/\$/g,'\\\\$')}\`)">📋 복사</button>
+        ${it.drive_link?'<button class="rbtn" onclick="window.open(\''+it.drive_link+'\',\'_blank\')">☁️ Drive</button>':'<button class="rbtn" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>'}
+      </div>
+      ${it.drive_link?'<button class="new-btn" style="margin-top:8px" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>':''}`;
+  }catch(e){content.innerHTML='<p style="color:#ef4444">로드 실패: '+esc(e.message)+'</p>';}
+}
+function closeDetail(){document.getElementById('detailModal').classList.remove('show');}
+function copyText(t){navigator.clipboard.writeText(t).catch(()=>{});alert('복사되었습니다');}
+function copyDetailSummary(){navigator.clipboard.writeText(_detailSummary).then(()=>alert('복사되었습니다')).catch(()=>{const t=document.createElement('textarea');t.value=_detailSummary;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();alert('복사되었습니다');});}
+async function deleteMeeting(id){
+  if(!confirm('이 회의록을 삭제하시겠습니까?'))return;
+  await fetch('/api/meetings?action=delete&id='+id);
+  closeDetail();loadMeetings();
 }
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
-// 초기 로드
 loadMeetings();
-
-// Service Worker 등록 (PWA)
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js').catch(function(){});
-}
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
 </body>
 </html>
