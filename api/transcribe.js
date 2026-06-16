@@ -2,13 +2,12 @@
 import formidable from "formidable";
 import fs from "fs";
 import path from "path";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 
 export const config = { api: { bodyParser: false }, maxDuration: 120 };
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// 재시도 함수
 async function retry(fn, times = 3) {
   let lastErr;
   for (let i = 0; i < times; i++) {
@@ -31,29 +30,29 @@ export default async function handler(req, res) {
 
     const filePath = audioFile.filepath;
     const originalName = audioFile.originalFilename || "audio.webm";
-    const ext = path.extname(originalName).toLowerCase() || ".webm";
+    let ext = path.extname(originalName).toLowerCase() || ".webm";
     const allowedExts = [".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".ogg", ".aac"];
-
-    if (!allowedExts.includes(ext)) {
-      return res.status(400).json({ ok: false, message: `지원하지 않는 형식: ${ext}` });
-    }
+    if (!allowedExts.includes(ext)) ext = ".webm"; // 알 수 없으면 webm으로 시도
 
     try {
       const text = await retry(async () => {
-        const fileStream = fs.createReadStream(filePath);
-        fileStream.path = `audio${ext}`; // Whisper가 확장자로 형식 판별
+        // toFile로 안정적으로 파일 객체 생성 (확장자 명시)
+        const buffer = fs.readFileSync(filePath);
+        const file = await toFile(buffer, `audio${ext}`);
         const response = await openai.audio.transcriptions.create({
-          file: fileStream,
+          file,
           model: "whisper-1",
           language: "ko",
           response_format: "text"
         });
-        return typeof response === "string" ? response : response.text || "";
+        return typeof response === "string" ? response : (response.text || "");
       });
 
-      // 임시 파일 삭제
       fs.unlink(filePath, () => {});
 
+      if (!text || !text.trim()) {
+        return res.status(200).json({ ok: false, message: "음성에서 텍스트를 추출하지 못했습니다. (무음이거나 너무 짧은 파일)" });
+      }
       return res.status(200).json({ ok: true, text, length: text.length });
     } catch (e) {
       fs.unlink(filePath, () => {});
