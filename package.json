@@ -2,7 +2,10 @@
   "name": "stella-clover",
   "version": "1.0.0",
   "type": "module",
-  "scripts": { "dev": "vercel dev" },
+  "scripts": {
+    "dev": "vercel dev",
+    "test": "node tests/safejson.test.mjs && node tests/meetings.test.mjs"
+  },
   "dependencies": {
     "mssql": "^11.0.1",
     "openai": "^4.47.1",
