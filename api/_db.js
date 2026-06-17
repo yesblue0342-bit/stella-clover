@@ -1,4 +1,5 @@
-const sql = require('mssql');
+// 공통 DB 헬퍼 (ESM). 파일명이 _로 시작하므로 Vercel 라우트로 노출되지 않음.
+import sql from 'mssql';
 
 let poolPromise;
 
@@ -52,4 +53,5 @@ async function initDb() {
   return pool;
 }
 
-module.exports = { sql, getPool, initDb };
+export { sql, getPool, initDb };
+export default { sql, getPool, initDb };

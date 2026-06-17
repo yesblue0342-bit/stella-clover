@@ -34,17 +34,26 @@ export default async function handler(req, res) {
     const allowedExts = [".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".ogg", ".aac"];
     if (!allowedExts.includes(ext)) ext = ".webm"; // 알 수 없으면 webm으로 시도
 
+    // 언어 지정: "auto"(또는 미지정)면 Whisper 자동 감지에 맡김
+    const langRaw = fields.lang?.[0] ?? fields.lang ?? "ko";
+    const lang = String(langRaw).trim().toLowerCase();
+    // 직전 청크 전사 일부를 prompt로 전달해 문맥/용어(SAP) 연속성 확보
+    const prevRaw = fields.prevText?.[0] ?? fields.prevText ?? "";
+    const prevText = String(prevRaw).slice(0, 800);
+
     try {
       const text = await retry(async () => {
         // toFile로 안정적으로 파일 객체 생성 (확장자 명시)
         const buffer = fs.readFileSync(filePath);
         const file = await toFile(buffer, `audio${ext}`);
-        const response = await openai.audio.transcriptions.create({
+        const params = {
           file,
           model: "whisper-1",
-          language: "ko",
           response_format: "text"
-        });
+        };
+        if (lang && lang !== "auto") params.language = lang;
+        if (prevText.trim()) params.prompt = prevText;
+        const response = await openai.audio.transcriptions.create(params);
         return typeof response === "string" ? response : (response.text || "");
       });
 

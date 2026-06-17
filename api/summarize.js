@@ -92,12 +92,50 @@ function getDbConfig() {
   };
 }
 
+// ────── 언어 설정 ──────
+const LANG_NAMES = {
+  ko: "한국어", en: "English", ja: "日本語",
+  zh: "中文", de: "Deutsch", es: "Español", fr: "Français"
+};
+const LANG_LOCALES = {
+  ko: "ko-KR", en: "en-US", ja: "ja-JP",
+  zh: "zh-CN", de: "de-DE", es: "es-ES", fr: "fr-FR"
+};
+
+function buildSystemPrompt(lang) {
+  const locale = LANG_LOCALES[lang] || "ko-KR";
+  const today = new Date().toLocaleDateString(locale);
+  const langLine = lang === "auto"
+    ? "Detect the language of the meeting content and write the ENTIRE minutes (including all section headings) in that same language."
+    : `Write the ENTIRE minutes (including all section headings) in ${LANG_NAMES[lang] || lang}.`;
+
+  return `You are a professional meeting-minutes writer AI.
+${langLine}
+The meeting may contain SAP terminology (module names, T-codes, table names, etc.); keep such technical terms accurate and unchanged.
+
+Your response MUST begin with a single line in exactly this form:
+TITLE: <a concise meeting title>
+Then one blank line, then the minutes following this structure (translate the headings into the target language, keep the markdown):
+
+# Meeting Minutes
+## Title
+## Date (${today})
+## Attendees (infer, or mark unknown)
+## Summary (3-5 key lines)
+## Decisions (bulleted)
+## Action Items (markdown table: owner | task | due date)
+## Issues (if any)
+## Next Steps (if any)`;
+}
+
 // ────── 메인 핸들러 ──────
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
 
   const { transcript, audioFileName } = req.body || {};
   if (!transcript?.trim()) return res.status(400).json({ ok: false, message: "회의 내용이 없습니다." });
+
+  const lang = String((req.body && req.body.lang) || "ko").trim().toLowerCase();
 
   // 1. AI 회의록 생성
   let summary;
@@ -106,39 +144,8 @@ export default async function handler(req, res) {
       const resp = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
-          {
-            role: "system",
-            content: `당신은 전문 회의록 작성 AI입니다. 주어진 회의 내용을 분석하여 아래 형식으로 회의록을 작성하세요. 반드시 형식을 지키고 한국어로 작성하세요.
-
-# 회의록
-
-## 회의 제목
-(내용에서 추론)
-
-## 회의 일시
-${new Date().toLocaleDateString("ko-KR")}
-
-## 참석자
-(내용에서 추론 또는 "미상")
-
-## 회의 내용 요약
-(핵심 3~5줄)
-
-## 주요 결정사항
-- (항목별)
-
-## Action Item
-| 담당자 | 내용 | 완료 예정일 |
-|--------|------|------------|
-| | | |
-
-## 이슈 사항
-- (있으면)
-
-## 차기 일정
-- (있으면)`
-          },
-          { role: "user", content: `다음 회의 내용으로 회의록을 작성해주세요:\n\n${transcript}` }
+          { role: "system", content: buildSystemPrompt(lang) },
+          { role: "user", content: `Write the meeting minutes for the following meeting transcript:\n\n${transcript}` }
         ],
         temperature: 0.3,
         max_tokens: 2000
@@ -149,9 +156,18 @@ ${new Date().toLocaleDateString("ko-KR")}
     return res.status(500).json({ ok: false, message: "AI 회의록 생성 실패: " + e.message });
   }
 
-  // 2. 제목 추출
-  const m = summary.match(/##\s*회의 제목\s*\n+\s*([^\n]+)/);
-  let title = m ? m[1].trim().replace(/[\\/:*?"<>|]/g, "") : "회의록";
+  // 2. 제목 추출 (언어 무관: 첫 줄의 TITLE: 마커 사용, 표시에서는 제거)
+  let title = "회의록";
+  const tMatch = summary.match(/^\s*TITLE:\s*(.+)$/im);
+  if (tMatch) {
+    title = tMatch[1].trim();
+    summary = summary.replace(/^\s*TITLE:\s*.+\r?\n?/im, "").replace(/^\s+/, "");
+  } else {
+    // 마커가 없으면 한국어 헤딩 기반 폴백
+    const m = summary.match(/##\s*(?:회의 제목|Title|タイトル|标题|Titel)\s*\r?\n+\s*([^\n]+)/i);
+    if (m) title = m[1].trim();
+  }
+  title = title.replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 80);
   if (!title) title = "회의록";
 
   const { Y, YM, YMD, HM } = dateParts();

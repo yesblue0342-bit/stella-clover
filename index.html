@@ -38,6 +38,11 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f0;color:#11
 .file-name{font-weight:700;font-size:.9rem}
 input[type=file]{display:none}
 
+/* 언어 선택 */
+.lang-row{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.lang-row label{font-size:.82rem;color:#6b7280;font-weight:700;white-space:nowrap}
+.lang-sel{flex:1;height:44px;border:1px solid #d1d5db;border-radius:12px;padding:0 12px;font-size:.9rem;background:#fff;color:#111827}
+
 /* 생성 버튼 */
 .gen-btn{width:100%;height:56px;border:none;border-radius:14px;background:#1a4731;color:#fff;font-size:1.05rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s}
 .gen-btn:hover{background:#2d6a4f}
@@ -59,12 +64,19 @@ input[type=file]{display:none}
 .rbtn.drive{grid-column:1/-1;background:#2d6a4f;color:#fff;border-color:#2d6a4f}
 .rbtn.drive:hover{background:#1a4731}
 
+/* 검색 */
+.search-input{width:100%;height:42px;border:1px solid #d1d5db;border-radius:12px;padding:0 12px;font-size:.88rem;margin-bottom:10px}
+.search-input:focus{outline:none;border-color:#2d6a4f}
+
 /* 회의 목록 */
-.meeting-item{padding:12px;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:8px;cursor:pointer;transition:all .2s}
+.meeting-item{display:flex;align-items:flex-start;gap:8px;padding:12px;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:8px;transition:all .2s}
 .meeting-item:hover{border-color:#2d6a4f;background:#f0fff4}
+.meeting-main{flex:1;min-width:0;cursor:pointer}
 .meeting-item .mtitle{font-weight:700;font-size:.9rem;margin-bottom:2px}
 .meeting-item .mdate{font-size:.75rem;color:#9ca3af}
 .badge{display:inline-block;background:#ecfdf5;color:#2d6a4f;border-radius:6px;padding:2px 8px;font-size:.72rem;font-weight:700;margin-left:6px}
+.del-btn{border:none;background:none;cursor:pointer;font-size:1rem;color:#9ca3af;padding:2px 4px;border-radius:8px;flex-shrink:0}
+.del-btn:hover{background:#fff5f5;color:#dc2626}
 
 /* 에러 */
 .error-box{background:#fff5f5;border:1px solid #fca5a5;border-radius:12px;padding:12px;color:#dc2626;font-size:.85rem;margin-top:10px;display:none}
@@ -98,9 +110,22 @@ input[type=file]{display:none}
       ondrop="dropFile(event)">
       <div style="font-size:1.5rem;margin-bottom:6px">📎</div>
       <div id="fileAreaText">파일 첨부</div>
-      <div style="font-size:.75rem;margin-top:4px;opacity:.7">mp3 · m4a · wav · aac · ogg · webm</div>
+      <div style="font-size:.75rem;margin-top:4px;opacity:.7">mp3 · m4a · wav · aac · ogg · webm (대용량 OK)</div>
     </div>
     <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.aac,.ogg,.webm,audio/*" onchange="onFileSelect(this)">
+
+    <!-- 언어 선택 -->
+    <div class="lang-row">
+      <label for="langSel">🌐 언어</label>
+      <select class="lang-sel" id="langSel">
+        <option value="ko" selected>한국어 (Korean)</option>
+        <option value="en">English</option>
+        <option value="ja">日本語 (Japanese)</option>
+        <option value="zh">中文 (Chinese)</option>
+        <option value="de">Deutsch (German)</option>
+        <option value="auto">자동 감지 (Auto)</option>
+      </select>
+    </div>
 
     <!-- 생성 버튼 -->
     <button class="gen-btn" id="genBtn" onclick="generate()">
@@ -133,9 +158,10 @@ input[type=file]{display:none}
   <!-- 회의 목록 -->
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-      📅 최근 회의록
+      📅 회의록 이력
       <button onclick="loadMeetings()" style="border:none;background:none;color:#2d6a4f;font-weight:700;cursor:pointer;font-size:.8rem">새로고침</button>
     </div>
+    <input class="search-input" id="searchInput" type="search" placeholder="🔍 제목으로 검색..." oninput="onSearchInput()">
     <div id="meetingList"><p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p></div>
   </div>
 
@@ -144,6 +170,12 @@ input[type=file]{display:none}
 <script>
 let recorder=null, chunks=[], recordedBlob=null, currentAudioFile=null;
 let _driveLink='', _summary='', _title='';
+let _searchTimer=null;
+
+// 클라이언트 청크 설정: 120초 × 16kHz × 2byte(mono 16bit PCM) = 3.84MB < Vercel 4.5MB 본문 제한
+const TARGET_SR=16000;       // Whisper 권장 16kHz
+const CHUNK_SEC=120;         // 청크당 길이(초)
+const CHUNK_RETRY=3;         // 청크당 재시도 횟수
 
 // ── 녹음 ──
 async function toggleRec(){
@@ -187,15 +219,17 @@ function applyFile(f){
   currentAudioFile=f;recordedBlob=null;
   const area=document.getElementById('fileArea');
   area.className='file-area has-file';
-  document.getElementById('fileAreaText').innerHTML='<div class="file-name">'+f.name+'</div><div style="font-size:.75rem;margin-top:2px">'+Math.round(f.size/1024)+'KB</div>';
+  const mb=(f.size/1024/1024);
+  const sizeStr = mb>=1 ? mb.toFixed(1)+'MB' : Math.round(f.size/1024)+'KB';
+  document.getElementById('fileAreaText').innerHTML='<div class="file-name">'+esc(f.name)+'</div><div style="font-size:.75rem;margin-top:2px">'+sizeStr+'</div>';
 }
 
 // ── 진행 상태 표시 ──
 function setProgress(pct, step, detail){
   const p=document.getElementById('progress');
   p.style.display='block';
-  document.getElementById('pBar').style.width=pct+'%';
-  document.getElementById('pStep').textContent=step;
+  if(pct!=null) document.getElementById('pBar').style.width=pct+'%';
+  if(step!=null) document.getElementById('pStep').textContent=step;
   document.getElementById('pDetail').textContent=detail||'';
 }
 function showErr(msg){
@@ -203,6 +237,131 @@ function showErr(msg){
   e.textContent=msg;e.style.display='block';
 }
 function hideErr(){document.getElementById('errBox').style.display='none';}
+
+// ── 오디오 디코딩 → 16kHz mono Float32 ──
+async function decodeToMono16k(blob){
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC) throw new Error('이 브라우저는 오디오 디코딩을 지원하지 않습니다.');
+  const arrayBuf=await blob.arrayBuffer();
+  const ctx=new AC();
+  let decoded;
+  try{
+    decoded=await ctx.decodeAudioData(arrayBuf);
+  } finally {
+    if(ctx.close) try{ ctx.close(); }catch(_){}
+  }
+  const OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+  if(!OAC) throw new Error('OfflineAudioContext 미지원'); // 리샘플 불가 → 원본 전송 폴백
+  const length=Math.max(1, Math.ceil(decoded.duration*TARGET_SR));
+  const offline=new OAC(1, length, TARGET_SR); // mono로 자동 다운믹스 + 16kHz 리샘플
+  const src=offline.createBufferSource();
+  src.buffer=decoded;
+  src.connect(offline.destination);
+  src.start(0);
+  const rendered=await offline.startRendering();
+  return rendered.getChannelData(0);
+}
+
+// ── Float32 PCM → 16bit mono WAV Blob ──
+function encodeWav(samples, sampleRate){
+  const bytesPerSample=2;
+  const buffer=new ArrayBuffer(44+samples.length*bytesPerSample);
+  const view=new DataView(buffer);
+  function ws(off,str){ for(let i=0;i<str.length;i++) view.setUint8(off+i, str.charCodeAt(i)); }
+  ws(0,'RIFF');
+  view.setUint32(4, 36+samples.length*bytesPerSample, true);
+  ws(8,'WAVE');
+  ws(12,'fmt ');
+  view.setUint32(16, 16, true);        // fmt 청크 크기
+  view.setUint16(20, 1, true);         // PCM
+  view.setUint16(22, 1, true);         // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate*bytesPerSample, true); // byte rate
+  view.setUint16(32, bytesPerSample, true);            // block align
+  view.setUint16(34, 16, true);        // bits per sample
+  ws(36,'data');
+  view.setUint32(40, samples.length*bytesPerSample, true);
+  let off=44;
+  for(let i=0;i<samples.length;i++){
+    let s=Math.max(-1, Math.min(1, samples[i]));
+    s = s<0 ? s*0x8000 : s*0x7FFF;
+    view.setInt16(off, s, true);
+    off+=2;
+  }
+  return new Blob([view], {type:'audio/wav'});
+}
+
+// ── 청크 1개 전송 (재시도 포함) ──
+async function sendChunk(blob, fname, lang, prevText){
+  let lastErr;
+  for(let attempt=0; attempt<CHUNK_RETRY; attempt++){
+    try{
+      const fd=new FormData();
+      fd.append('audio', blob, fname);
+      fd.append('lang', lang);
+      if(prevText) fd.append('prevText', prevText);
+      const r=await fetch('/api/transcribe',{method:'POST',body:fd});
+      // 413(본문 초과) 등은 재시도해도 동일하지만, 일시적 실패 대비 재시도 유지
+      const d=await r.json().catch(()=>({ok:false,message:'HTTP '+r.status}));
+      if(!r.ok||!d.ok) throw new Error(d.message||('HTTP '+r.status));
+      return d.text||'';
+    }catch(e){
+      lastErr=e;
+      if(attempt<CHUNK_RETRY-1){
+        await new Promise(res=>setTimeout(res, 1500*(attempt+1)));
+      }
+    }
+  }
+  throw lastErr||new Error('청크 전송 실패');
+}
+
+// ── 전체 전사: 디코드 → 16kHz mono → 120초 청크 → 순차 전송 ──
+async function transcribeAudio(audio, lang){
+  let channelData;
+  try{
+    setProgress(10,'🎙 음성 분석 중...','오디오 디코딩 및 16kHz 변환');
+    channelData=await decodeToMono16k(audio);
+  }catch(err){
+    // 디코딩 실패(미지원 코덱/메모리 등) → 원본 1회 직접 전송(차선책)
+    setProgress(30,'🎙 음성 변환 중...','청크 분할 불가 - 원본 직접 전송 시도');
+    const fname=(currentAudioFile&&currentAudioFile.name)||'recording.webm';
+    return await sendChunk(audio, fname, lang, '');
+  }
+
+  const chunkSize=TARGET_SR*CHUNK_SEC;
+  const total=channelData.length;
+  const nChunks=Math.max(1, Math.ceil(total/chunkSize));
+  const parts=[];
+  const failed=[];
+  let prevText='';
+
+  for(let i=0;i<nChunks;i++){
+    const start=i*chunkSize;
+    const slice=channelData.subarray(start, Math.min(start+chunkSize, total));
+    const wav=encodeWav(slice, TARGET_SR);
+    const pct=10+Math.round(40*(i+1)/nChunks);   // 전사 구간: 10% → 50%
+    setProgress(pct,'🎙 음성 변환 중...','청크 '+(i+1)+'/'+nChunks+' 변환 중 ('+CHUNK_SEC+'초 단위)');
+    try{
+      const text=await sendChunk(wav, 'chunk_'+(i+1)+'.wav', lang, prevText);
+      if(text && text.trim()){
+        parts.push(text.trim());
+        prevText=text.trim().slice(-200); // 다음 청크 문맥 연결
+      }
+    }catch(e){
+      // 한 청크가 끝내 실패해도 전체를 버리지 않고 표시 후 계속
+      failed.push(i+1);
+      parts.push('[구간 '+(i+1)+' 변환 실패]');
+    }
+  }
+
+  if(failed.length===nChunks){
+    throw new Error('모든 구간 변환에 실패했습니다. 파일 형식/네트워크를 확인하세요.');
+  }
+  if(failed.length){
+    showErr('일부 구간('+failed.join(', ')+'/'+nChunks+') 변환에 실패했습니다. 나머지로 회의록을 작성합니다.');
+  }
+  return parts.join('\n').trim();
+}
 
 // ── 메인: 회의록 생성 ──
 async function generate(){
@@ -213,26 +372,25 @@ async function generate(){
   document.getElementById('genBtn').disabled=true;
   document.getElementById('resultSection').style.display='none';
 
+  const lang=document.getElementById('langSel').value||'ko';
+
   try{
-    // Step 1: 음성→텍스트 (Whisper)
-    setProgress(10,'🎙 음성 변환 중...','OpenAI Whisper로 텍스트 변환 중');
-    const fd=new FormData();
-    const fname=currentAudioFile?.name||'recording.webm';
-    fd.append('audio', audio, fname);
+    // Step 1: 음성 → 텍스트 (클라이언트 청크 분할 + Whisper)
+    const transcript=await transcribeAudio(audio, lang);
+    if(!transcript || !transcript.replace(/\[구간 \d+ 변환 실패\]/g,'').trim()){
+      throw new Error('음성에서 텍스트를 추출하지 못했습니다. (무음이거나 인식 실패)');
+    }
 
-    const r1=await fetch('/api/transcribe',{method:'POST',body:fd});
-    const d1=await r1.json();
-    if(!r1.ok||!d1.ok) throw new Error(d1.message||'음성 변환 실패');
-
-    setProgress(50,'📝 회의록 작성 중...','AI가 회의록을 자동 작성합니다');
+    setProgress(55,'📝 회의록 작성 중...','AI가 회의록을 자동 작성합니다');
 
     // Step 2: AI 회의록 생성 + Drive 저장
+    const fname=(currentAudioFile&&currentAudioFile.name)||'recording.webm';
     const r2=await fetch('/api/summarize',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({transcript:d1.text, audioFileName:fname})
+      body:JSON.stringify({transcript, audioFileName:fname, lang})
     });
-    const d2=await r2.json();
+    const d2=await r2.json().catch(()=>({ok:false,message:'서버 응답 오류'}));
     if(!r2.ok||!d2.ok) throw new Error(d2.message||'회의록 생성 실패');
 
     setProgress(100,'✅ 완료!','회의록이 생성되었습니다');
@@ -245,8 +403,15 @@ async function generate(){
     document.getElementById('summaryBox').textContent=_summary;
     document.getElementById('resultSection').style.display='block';
     if(_driveLink){
-      const db=document.getElementById('driveBtn');
-      db.style.display='flex';
+      document.getElementById('driveBtn').style.display='flex';
+    }
+    // Drive/DB 부분 실패 경고가 있으면 알림(회의록 자체는 성공)
+    const w=d2.warnings||{};
+    if(w.driveError||w.dbError){
+      const notes=[];
+      if(w.driveError) notes.push('Drive 저장 실패');
+      if(w.dbError) notes.push('이력 저장 실패');
+      showErr('회의록은 생성되었으나 '+notes.join(', ')+' (네트워크/권한 확인). 화면의 회의록은 복사·다운로드 가능합니다.');
     }
     document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
     loadMeetings();
@@ -291,29 +456,58 @@ function resetAll(){
   document.getElementById('audioFile').value='';
   document.getElementById('progress').style.display='none';
   document.getElementById('resultSection').style.display='none';
+  document.getElementById('driveBtn').style.display='none';
   hideErr();
   document.getElementById('genBtn').disabled=false;
 }
 
-// ── 회의 목록 ──
+// ── 회의 목록 / 검색 ──
+function onSearchInput(){
+  if(_searchTimer) clearTimeout(_searchTimer);
+  _searchTimer=setTimeout(loadMeetings, 300);
+}
 async function loadMeetings(){
   const list=document.getElementById('meetingList');
+  const q=(document.getElementById('searchInput')&&document.getElementById('searchInput').value.trim())||'';
+  const url=q?('/api/meetings?q='+encodeURIComponent(q)):'/api/meetings';
   try{
-    const r=await fetch('/api/meetings');
+    const r=await fetch(url);
     const d=await r.json();
     const items=d.items||[];
     if(!items.length){
-      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">회의록 없음</p>';
+      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+(q?'검색 결과 없음':'회의록 없음')+'</p>';
       return;
     }
-    list.innerHTML=items.map(x=>`
-      <div class="meeting-item" onclick="if('${x.drive_link}')window.open('${x.drive_link}','_blank')">
-        <div class="mtitle">${esc(x.title||'회의록')}<span class="badge">☁️ Drive</span></div>
-        <div class="mdate">${new Date(x.created_at).toLocaleString('ko-KR')} · ${x.transcript_chars||0}자</div>
-      </div>
-    `).join('');
+    list.innerHTML=items.map(x=>{
+      const link=x.drive_link||'';
+      const badge=link?'<span class="badge">☁️ Drive</span>':'';
+      const dateStr=x.created_at?new Date(x.created_at).toLocaleString('ko-KR'):'';
+      return '<div class="meeting-item">'
+        +'<div class="meeting-main" onclick="openMeeting(\''+encodeURIComponent(link)+'\')">'
+        +'<div class="mtitle">'+esc(x.title||'회의록')+badge+'</div>'
+        +'<div class="mdate">'+dateStr+' · '+(x.transcript_chars||0)+'자</div>'
+        +'</div>'
+        +'<button class="del-btn" title="삭제" onclick="delMeeting('+x.id+',event)">🗑</button>'
+        +'</div>';
+    }).join('');
   }catch(e){
-    list.innerHTML='<p style="color:#ef4444;font-size:.82rem">목록 로드 실패: '+e.message+'</p>';
+    list.innerHTML='<p style="color:#ef4444;font-size:.82rem">목록 로드 실패: '+esc(e.message)+'</p>';
+  }
+}
+function openMeeting(encLink){
+  const link=decodeURIComponent(encLink||'');
+  if(link) window.open(link,'_blank');
+}
+async function delMeeting(id, ev){
+  if(ev) ev.stopPropagation();
+  if(!confirm('이 회의록 기록을 삭제할까요? (Drive 파일은 유지됩니다)')) return;
+  try{
+    const r=await fetch('/api/meetings?action=delete&id='+id,{method:'POST'});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.message||'삭제 실패');
+    loadMeetings();
+  }catch(e){
+    showErr('삭제 실패: '+e.message);
   }
 }
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
