@@ -1,0 +1,6 @@
+node_modules/
+.vercel/
+.env
+.env.*
+# 생성물(테스트용): test-assets/make-wav.mjs 로 재생성 가능
+test-assets/*.wav
