@@ -20,6 +20,11 @@ function getConfig() {
       trustServerCertificate: false,
       enableArithAbort: true
     },
+    // Azure SQL 서버리스는 일시중지 상태에서 깨어나는 데 시간이 걸린다.
+    // 함수 maxDuration(30s) 이내에 실패하도록 타임아웃을 잡아, 플랫폼이 함수를
+    // 강제 종료(=Vercel 평문 "An error occurred…" 반환)하기 전에 catch가 JSON을 내려보내게 한다.
+    connectionTimeout: 20000,
+    requestTimeout: 20000,
     pool: {
       max: 3,
       min: 0,
