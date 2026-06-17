@@ -60,6 +60,12 @@ input[type=file]{display:none}
 .new-btn{width:100%;height:44px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;color:#6b7280;font-size:.88rem;font-weight:700;cursor:pointer;margin-bottom:10px}
 .new-btn:hover{background:#f0fff4;color:#2d6a4f;border-color:#2d6a4f}
 .hint{font-size:.72rem;color:#9ca3af;margin-top:6px;text-align:center}
+.lang-section{margin:12px 0}
+.lang-label{font-size:.8rem;font-weight:700;color:#6b7280;margin-bottom:8px}
+.lang-grid{display:flex;flex-wrap:wrap;gap:6px}
+.lang-btn{border:1.5px solid #e5e7eb;background:#fff;border-radius:20px;padding:7px 12px;font-size:.82rem;font-weight:600;cursor:pointer;color:#374151;transition:all .15s}
+.lang-btn:hover{border-color:#2d6a4f}
+.lang-btn.active{background:#1a4731;color:#fff;border-color:#1a4731}
 /* 상세 모달 */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:none;align-items:center;justify-content:center;padding:16px}
 .modal.show{display:flex}
@@ -93,6 +99,23 @@ input[type=file]{display:none}
       <div style="font-size:.75rem;margin-top:4px;opacity:.7">mp3 · m4a · wav · aac · ogg · webm</div>
     </div>
     <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.aac,.ogg,.webm,audio/*" onchange="onFileSelect(this)">
+    <div class="lang-section">
+      <div class="lang-label">🌐 회의 언어</div>
+      <div class="lang-grid" id="langGrid">
+        <button class="lang-btn" data-lang="auto" onclick="selectLang(this)">🌐 자동감지</button>
+        <button class="lang-btn active" data-lang="ko" onclick="selectLang(this)">🇰🇷 한국어</button>
+        <button class="lang-btn" data-lang="en" onclick="selectLang(this)">🇺🇸 English</button>
+        <button class="lang-btn" data-lang="ja" onclick="selectLang(this)">🇯🇵 日本語</button>
+        <button class="lang-btn" data-lang="zh" onclick="selectLang(this)">🇨🇳 中文</button>
+        <button class="lang-btn" data-lang="vi" onclick="selectLang(this)">🇻🇳 Việt</button>
+        <button class="lang-btn" data-lang="es" onclick="selectLang(this)">🇪🇸 Español</button>
+        <button class="lang-btn" data-lang="fr" onclick="selectLang(this)">🇫🇷 Français</button>
+        <button class="lang-btn" data-lang="de" onclick="selectLang(this)">🇩🇪 Deutsch</button>
+        <button class="lang-btn" data-lang="id" onclick="selectLang(this)">🇮🇩 Indonesia</button>
+        <button class="lang-btn" data-lang="ru" onclick="selectLang(this)">🇷🇺 Русский</button>
+        <button class="lang-btn" data-lang="th" onclick="selectLang(this)">🇹🇭 ไทย</button>
+      </div>
+    </div>
     <button class="gen-btn" id="genBtn" onclick="generate()"><span>✨</span> 회의록 생성</button>
     <div class="hint">긴 회의(1~2시간)도 자동 분할 처리됩니다</div>
     <div class="progress" id="progress">
@@ -165,6 +188,12 @@ input[type=file]{display:none}
 
 <script>
 let recorder=null, chunks=[], recordedBlob=null, currentAudioFile=null;
+let _selectedLang='ko';
+function selectLang(btn){
+  document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  _selectedLang=btn.getAttribute('data-lang');
+}
 let _driveLink='', _summary='', _title='', _keywords='', _deferredPrompt=null, _detailSummary='';
 
 // ── PWA 설치 ──
@@ -306,18 +335,35 @@ async function generate(){
     for(let i=0;i<chunks.length;i++){
       const pct = 10 + Math.round((i/chunks.length)*45);
       setProgress(pct,'🎙 음성 변환 중...',`구간 ${i+1}/${chunks.length} 변환 중`);
-      const fd=new FormData();
-      fd.append('audio',chunks[i],`chunk_${i}.wav`);
-      fd.append('prevText',fullText.slice(-200));
-      fd.append('sessionId',sessionId);
-      fd.append('index',String(i));
-      const r=await fetch('/api/transcribe',{method:'POST',body:fd});
-      if(!r.ok){
-        const txt=await r.text();
-        throw new Error('변환 실패('+r.status+'): '+txt.slice(0,100));
+      // 청크별 재시도 (Failed to fetch / 일시적 네트워크 오류 대응)
+      let d=null, lastErr='';
+      for(let attempt=0; attempt<3; attempt++){
+        try{
+          const fd=new FormData();
+          fd.append('audio',chunks[i],`chunk_${i}.wav`);
+          fd.append('prevText',fullText.slice(-200));
+          fd.append('sessionId',sessionId);
+          fd.append('index',String(i));
+          fd.append('lang',_selectedLang);
+          const r=await fetch('/api/transcribe',{method:'POST',body:fd});
+          if(!r.ok){
+            const txt=await r.text();
+            lastErr='변환 실패('+r.status+'): '+txt.slice(0,80);
+            if(r.status===413){ throw new Error(lastErr); } // 크기 초과는 재시도 무의미
+            await new Promise(s=>setTimeout(s,1500*(attempt+1)));
+            continue;
+          }
+          d=await r.json();
+          if(!d.ok){ lastErr=d.message||'변환 실패'; await new Promise(s=>setTimeout(s,1500*(attempt+1))); continue; }
+          break; // 성공
+        }catch(err){
+          lastErr=err.message||'네트워크 오류';
+          if(lastErr.includes('413'))throw err;
+          setProgress(pct,'🎙 음성 변환 중...',`구간 ${i+1}/${chunks.length} 재시도 ${attempt+1}/3...`);
+          await new Promise(s=>setTimeout(s,1500*(attempt+1)));
+        }
       }
-      const d=await r.json();
-      if(!d.ok)throw new Error(d.message||'변환 실패');
+      if(!d||!d.ok)throw new Error('구간 '+(i+1)+' 변환 실패: '+lastErr);
       fullText += (fullText?' ':'') + d.text;
     }
 
@@ -327,7 +373,7 @@ async function generate(){
     setProgress(60,'📝 회의록 작성 중...','회의록 작성 중');
     const r2=await fetch('/api/summarize',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile?.name||'recording.webm'),sessionId})
+      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile?.name||'recording.webm'),sessionId,lang:_selectedLang})
     });
     if(!r2.ok){const txt=await r2.text();throw new Error('회의록 생성 실패('+r2.status+'): '+txt.slice(0,100));}
     const d2=await r2.json();
