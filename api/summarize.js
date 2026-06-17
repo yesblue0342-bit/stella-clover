@@ -19,7 +19,13 @@ async function retry(fn, times = 3, delay = 2000) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
 
-  const { transcript, audioFileName, sessionId } = req.body || {};
+  const { transcript, audioFileName, sessionId, lang } = req.body || {};
+  const LANG_NAMES = {
+    ko: "한국어", en: "English", ja: "日本語", zh: "中文",
+    vi: "Tiếng Việt", th: "ภาษาไทย", es: "Español", fr: "Français",
+    de: "Deutsch", id: "Bahasa Indonesia", ru: "Русский", ar: "العربية", auto: "한국어"
+  };
+  const outLang = LANG_NAMES[lang] || "한국어";
   if (!transcript?.trim()) return res.status(400).json({ ok: false, message: "회의 내용이 없습니다." });
   const audioSession = (sessionId || "").toString().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
 
@@ -37,7 +43,7 @@ export default async function handler(req, res) {
 SAP 전문용어(ABAP, BAPI, IDoc, BOM, MRP, QM, PP, MM, SD, FI, CO, S/4HANA, 검사로트, 자재마스터, 생산오더, 고도화, 인터페이스, 마이그레이션 등)를 정확히 이해하고 회의록에 반영하세요.
 음성 인식 오류로 보이는 용어는 SAP 맥락에 맞게 교정하세요.
 
-아래 형식으로 한국어 회의록을 작성하세요:
+아래 형식으로 ${outLang} 회의록을 작성하세요. 모든 내용을 ${outLang}로 작성하세요:
 
 # 회의록
 
