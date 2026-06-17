@@ -41,6 +41,7 @@ export default async function handler(req, res) {
 
     // 이전 청크의 마지막 텍스트 (문맥 연결용)
     const prevText = (fields.prevText?.[0] || fields.prevText || "").slice(-200);
+    let lang = (fields.lang?.[0] || fields.lang || "ko").toString();
     // 세션/청크 식별 (오디오 Drive 보관용)
     const sessionId = (fields.sessionId?.[0] || fields.sessionId || "").toString().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
     const index = parseInt(fields.index?.[0] || fields.index || "0", 10) || 0;
@@ -49,13 +50,14 @@ export default async function handler(req, res) {
       const buffer = fs.readFileSync(filePath);
       const text = await retry(async () => {
         const file = await toFile(buffer, `audio${ext}`);
-        const response = await openai.audio.transcriptions.create({
+        const params = {
           file,
           model: "whisper-1",
-          language: "ko",
           prompt: SAP_PROMPT + (prevText ? " " + prevText : ""),
           response_format: "text"
-        });
+        };
+        if (lang && lang !== "auto") params.language = lang;
+        const response = await openai.audio.transcriptions.create(params);
         return typeof response === "string" ? response : (response.text || "");
       });
 
