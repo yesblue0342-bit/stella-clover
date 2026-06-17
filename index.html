@@ -16,7 +16,6 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f0;color:#11
 .app{max-width:600px;margin:0 auto;padding:16px;padding-bottom:40px}
 .header{background:linear-gradient(135deg,#1a4731,#2d6a4f);border-radius:20px;padding:20px;margin-bottom:16px;color:#fff;position:relative}
 .header h1{font-size:1.5rem;font-weight:900;letter-spacing:-.5px}
-.header p{font-size:.85rem;opacity:.75;margin-top:4px}
 .clover{font-size:1.8rem;margin-bottom:6px}
 .install-btn{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:10px;padding:7px 12px;font-size:.78rem;font-weight:700;cursor:pointer;display:none;align-items:center;gap:4px}
 .install-btn.show{display:flex}
@@ -83,7 +82,6 @@ input[type=file]{display:none}
     <button class="install-btn" id="installBtn" onclick="installApp()">⬇ 앱 설치</button>
     <div class="clover">🍀</div>
     <h1>Stella Clover</h1>
-    <p>AI 음성 회의록 자동 생성</p>
   </div>
 
   <div class="card" id="inputSection">
@@ -492,11 +490,11 @@ async function renderList(url,cache){
     list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p>';
   try{
     const r=await fetch(url);
-    const d=await r.json();
-    const items=d.items||[];
-    if(cache){try{localStorage.setItem(LIST_CACHE_KEY,JSON.stringify({ts:Date.now(),items}));}catch(e){}}
+    const d=await safeJson(r);
+    const items=Array.isArray(d.items)?d.items:[];
+    if(items.length&&cache){try{localStorage.setItem(LIST_CACHE_KEY,JSON.stringify({ts:Date.now(),items}));}catch(e){}}
     if(!items.length){
-      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+(d.message||'회의록 없음')+'</p>';
+      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+esc(d.message||'회의록 없음')+'</p>';
       return;
     }
     list.innerHTML=renderMeetingItems(items);
@@ -514,8 +512,8 @@ async function doDriveSearch(){
   list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">☁️ Drive 검색 중...</p>';
   try{
     const r=await fetch('/api/drive-search?q='+encodeURIComponent(q));
-    const d=await r.json();
-    const items=d.items||[];
+    const d=await safeJson(r);
+    const items=Array.isArray(d.items)?d.items:[];
     if(!items.length){
       list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+esc(d.message||'Drive 검색 결과 없음')+'</p>';
       return;
@@ -538,9 +536,9 @@ async function showDetail(id){
   modal.classList.add('show');
   try{
     const r=await fetch('/api/meetings?action=detail&id='+id);
-    const d=await r.json();
+    const d=await safeJson(r);
     const it=d.item;
-    if(!it){content.innerHTML='<p>회의록을 찾을 수 없습니다.</p>';return;}
+    if(!it){content.innerHTML='<p>'+esc(d.message||'회의록을 찾을 수 없습니다.')+'</p>';return;}
     _detailSummary=it.summary||'';
     content.innerHTML=`
       <h2 style="font-size:1.2rem;margin-bottom:6px;padding-right:30px">${esc(it.title||'회의록')}</h2>
@@ -562,6 +560,17 @@ async function deleteMeeting(id){
   closeDetail();loadMeetings();
 }
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// 서버가 비-JSON(평문/HTML 에러 페이지)을 내려보내도 화면이 죽지 않도록 방어적으로 파싱.
+// 항상 객체를 반환하며, 파싱 실패 시 {ok:false, items:[], message:사람이 읽을 메시지}.
+async function safeJson(r){
+  const text=await r.text();
+  try{ return JSON.parse(text); }
+  catch(e){
+    const msg=(text||'').trim().replace(/<[^>]*>/g,'').slice(0,140)
+      || ('서버 오류 ('+r.status+')');
+    return {ok:false,items:[],message:'서버 응답 오류: '+msg};
+  }
+}
 
 // ── IndexedDB: 최근 녹음 5개를 이 기기에 캐시 ──
 const IDB_NAME='stella-clover', IDB_STORE='recordings', IDB_MAX=5;
