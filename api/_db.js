@@ -20,6 +20,10 @@ function getConfig() {
       trustServerCertificate: false,
       enableArithAbort: true
     },
+    // mssql 기본 타임아웃(15s)이 Vercel 함수 한도를 넘기면 평문 에러가 반환된다.
+    // 빠르게 실패하도록 줄여서 핸들러 try/catch가 항상 JSON을 돌려주게 한다.
+    connectionTimeout: 10000,
+    requestTimeout: 12000,
     pool: {
       max: 3,
       min: 0,
@@ -43,6 +47,7 @@ export function getPool() {
 }
 
 // cl_meetings 테이블 보장 (멱등). 실제 사용 스키마와 일치.
+// ALTER ADD 가드로 스키마 드리프트(컬럼 누락)에도 SELECT가 깨지지 않게 한다.
 export const CREATE_TABLE = `
   IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='cl_meetings')
   CREATE TABLE cl_meetings (
@@ -53,6 +58,15 @@ export const CREATE_TABLE = `
     drive_file_id NVARCHAR(200), drive_link NVARCHAR(500),
     audio_file NVARCHAR(300), audio_session NVARCHAR(100),
     created_at DATETIME2 DEFAULT SYSUTCDATETIME()
-  );`;
+  );
+  IF COL_LENGTH('cl_meetings','keywords') IS NULL ALTER TABLE cl_meetings ADD keywords NVARCHAR(500);
+  IF COL_LENGTH('cl_meetings','summary') IS NULL ALTER TABLE cl_meetings ADD summary NVARCHAR(MAX);
+  IF COL_LENGTH('cl_meetings','transcript') IS NULL ALTER TABLE cl_meetings ADD transcript NVARCHAR(MAX);
+  IF COL_LENGTH('cl_meetings','transcript_chars') IS NULL ALTER TABLE cl_meetings ADD transcript_chars INT;
+  IF COL_LENGTH('cl_meetings','summary_chars') IS NULL ALTER TABLE cl_meetings ADD summary_chars INT;
+  IF COL_LENGTH('cl_meetings','drive_file_id') IS NULL ALTER TABLE cl_meetings ADD drive_file_id NVARCHAR(200);
+  IF COL_LENGTH('cl_meetings','drive_link') IS NULL ALTER TABLE cl_meetings ADD drive_link NVARCHAR(500);
+  IF COL_LENGTH('cl_meetings','audio_file') IS NULL ALTER TABLE cl_meetings ADD audio_file NVARCHAR(300);
+  IF COL_LENGTH('cl_meetings','audio_session') IS NULL ALTER TABLE cl_meetings ADD audio_session NVARCHAR(100);`;
 
 export { sql };
