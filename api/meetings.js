@@ -1,9 +1,12 @@
 // api/meetings.js - 회의록 목록 + 키워드 검색 + 상세
 import { getPool, sql, CREATE_TABLE } from "./_db.js";
 
-export const config = { maxDuration: 15 };
+export const config = { maxDuration: 30 };
 
 export default async function handler(req, res) {
+  // 어떤 경로로 응답하든 JSON 헤더를 명시 (프런트 방어 파싱과 함께 평문 노출 방지)
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+
   if (!process.env.CL_DB_SV || !process.env.CL_DB_USR || !process.env.CL_DB_PW) {
     return res.status(200).json({ ok: false, items: [], message: "DB 환경변수 미설정 (CL_DB_USR/CL_DB_PW 확인)" });
   }
