@@ -20,10 +20,10 @@ function getConfig() {
       trustServerCertificate: false,
       enableArithAbort: true
     },
-    // mssql 기본 타임아웃(15s)이 Vercel 함수 한도를 넘기면 평문 에러가 반환된다.
-    // 빠르게 실패하도록 줄여서 핸들러 try/catch가 항상 JSON을 돌려주게 한다.
-    connectionTimeout: 10000,
-    requestTimeout: 12000,
+    // Azure SQL 서버리스(auto-pause) 티어는 비활성 후 첫 연결 시 DB 재개(resume)에
+    // 수십 초가 걸린다. 짧은 타임아웃이면 재개 전에 끊겨 실패하므로 30초로 상향.
+    connectionTimeout: 30000,
+    requestTimeout: 30000,
     pool: {
       max: 3,
       min: 0,
@@ -32,12 +32,41 @@ function getConfig() {
   };
 }
 
+// 인증 오류(로그인 실패)는 재시도해도 소용없으므로 즉시 중단.
+// 타임아웃/연결 오류(특히 auto-pause DB 재개 대기)만 재시도 대상.
+function isRetryable(err) {
+  const code = (err && (err.code || (err.originalError && err.originalError.code))) || "";
+  const num = (err && (err.number || (err.originalError && err.originalError.number))) || 0;
+  // 로그인 실패(ELOGIN / SQL error 18456)는 재시도 금지
+  if (code === "ELOGIN" || num === 18456) return false;
+  const retryCodes = ["ETIMEOUT", "ETIMEDOUT", "ESOCKET", "ECONNCLOSED", "ECONNREFUSED", "EHOSTUNREACH", "ENOTOPEN"];
+  if (retryCodes.includes(code)) return true;
+  // 메시지 기반 폴백 (예: "Failed to connect ... in 30000ms")
+  const msg = String((err && err.message) || "");
+  return /timeout|failed to connect|socket hang up|getaddrinfo|connection is closed/i.test(msg);
+}
+
+// 일시정지된 DB가 깨어날 시간을 확보: 최대 3회, 시도 간 3초 대기.
+// 재시도 불가(인증) 오류는 즉시, 마지막 시도 실패도 throw.
+async function connectWithRetry(retries = 3, delay = 3000) {
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await new sql.ConnectionPool(getConfig()).connect();
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryable(err) || i === retries - 1) throw err;
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
 // 서버리스 인스턴스당 단일 풀을 재사용한다.
 // (요청마다 connect/close 하면 동시 요청 시 풀이 닫혀 오류가 난다.)
 export function getPool() {
   if (!poolPromise) {
-    poolPromise = new sql.ConnectionPool(getConfig())
-      .connect()
+    poolPromise = connectWithRetry()
       .catch(err => {
         poolPromise = undefined; // 실패 시 다음 요청에서 재시도
         throw err;

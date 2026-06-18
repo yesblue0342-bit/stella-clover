@@ -1,7 +1,8 @@
 // api/meetings.js - 회의록 목록 + 키워드 검색 + 상세
 import { getPool, sql, CREATE_TABLE } from "./_db.js";
 
-export const config = { maxDuration: 30 };
+// connectionTimeout 30s + auto-pause 재개 재시도를 함수 한도 안에 수용하려면 여유 필요.
+export const config = { maxDuration: 60 };
 
 export default async function handler(req, res) {
   // 어떤 경로로 응답하든 JSON 헤더를 명시 (프런트 방어 파싱과 함께 평문 노출 방지)
