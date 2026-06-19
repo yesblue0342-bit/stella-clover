@@ -6,6 +6,9 @@
     { "source": "/api/drive-search", "destination": "/api/drive-search" },
     { "source": "/api/autosave", "destination": "/api/autosave" },
     { "source": "/api/cleanup", "destination": "/api/cleanup" },
+    { "source": "/api/jobs", "destination": "/api/jobs" },
+    { "source": "/api/worker", "destination": "/api/worker" },
+    { "source": "/api/audio", "destination": "/api/audio" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "crons": [
