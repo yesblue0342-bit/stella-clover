@@ -19,7 +19,7 @@ async function retry(fn, times = 3, delay = 2000) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
 
-  const { transcript, audioFileName, sessionId, lang } = req.body || {};
+  const { transcript, audioFileName, sessionId, lang, userInstruction } = req.body || {};
   const LANG_NAMES = {
     ko: "한국어", en: "English", ja: "日本語", zh: "中文",
     vi: "Tiếng Việt", th: "ภาษาไทย", es: "Español", fr: "Français",
@@ -28,6 +28,11 @@ export default async function handler(req, res) {
   const outLang = LANG_NAMES[lang] || "한국어";
   if (!transcript?.trim()) return res.status(400).json({ ok: false, message: "회의 내용이 없습니다." });
   const audioSession = (sessionId || "").toString().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+  // "내 AI 지침": 사용자 정의 요약 프롬프트(길이 제한). 있으면 시스템 프롬프트에 반영.
+  const customInstruction = String(userInstruction || "").trim().slice(0, 1000);
+  const customBlock = customInstruction
+    ? `\n\n[사용자 추가 지침 — 우선 반영]\n${customInstruction}\n`
+    : "";
 
   // 1. AI 회의록 (SAP/ERP 컨설팅 컨텍스트)
   let summary;
@@ -74,7 +79,7 @@ ${new Date().toLocaleDateString("ko-KR")}
 - (있으면)
 
 ## 주요 키워드
-(이 회의의 핵심 SAP 용어/주제를 쉼표로 5~10개)`
+(이 회의의 핵심 SAP 용어/주제를 쉼표로 5~10개)${customBlock}`
           },
           { role: "user", content: `다음 SAP 프로젝트 회의 내용으로 회의록을 작성해주세요:\n\n${transcript}` }
         ],
