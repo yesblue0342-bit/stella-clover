@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Stella Clover</title>
+<title>Stella Clover — 음성 텍스트</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#1a4731">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -11,83 +11,193 @@
 <meta name="apple-mobile-web-app-title" content="Stella Clover">
 <meta name="description" content="AI 회의록 자동 생성 - 음성 파일을 회의록으로">
 <style>
+/* ── 테마 토큰: 기본 라이트, [data-theme=dark] 다크 ── */
+:root{
+  --bg:#eef3ee; --surface:#ffffff; --surface2:#f9fafb; --border:#e5e7eb;
+  --text:#111827; --text2:#6b7280; --text3:#9ca3af;
+  --brand:#1a4731; --brand2:#2d6a4f; --accent:#34d399; --accentbg:#ecfdf5;
+  --danger:#dc2626; --dangerbg:#fff5f5; --shadow:0 2px 12px rgba(0,0,0,.07);
+  --chip:#f0fff4;
+}
+[data-theme=dark]{
+  --bg:#0f1713; --surface:#16211b; --surface2:#1c2a22; --border:#2a3a30;
+  --text:#e6efe9; --text2:#9fb3a7; --text3:#7d8f84;
+  --brand:#34d399; --brand2:#5eead4; --accent:#34d399; --accentbg:#10241b;
+  --danger:#f87171; --dangerbg:#2a1414; --shadow:0 2px 14px rgba(0,0,0,.4);
+  --chip:#15281e;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,sans-serif;background:#f0f4f0;color:#111827;min-height:100vh}
-.app{max-width:600px;margin:0 auto;padding:16px;padding-bottom:40px}
-.header{background:linear-gradient(135deg,#1a4731,#2d6a4f);border-radius:20px;padding:20px;margin-bottom:16px;color:#fff;position:relative}
-.header h1{font-size:1.5rem;font-weight:900;letter-spacing:-.5px}
-.header p{font-size:.85rem;opacity:.75;margin-top:4px}
-.clover{font-size:1.8rem;margin-bottom:6px}
-.install-btn{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:10px;padding:7px 12px;font-size:.78rem;font-weight:700;cursor:pointer;display:none;align-items:center;gap:4px}
-.install-btn.show{display:flex}
-.card{background:#fff;border-radius:20px;padding:18px;margin-bottom:14px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
-.card-title{font-size:.8rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
-.rec-btn{width:100%;height:80px;border:3px dashed #d1fae5;border-radius:16px;background:#f0fff4;color:#1a4731;font-size:1rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .2s;margin-bottom:12px}
-.rec-btn.recording{border-color:#ef4444;background:#fff5f5;color:#ef4444;animation:pulse 1.2s infinite}
-.rec-btn.done{border-style:solid;border-color:#34d399;background:#ecfdf5}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .2s,color .2s}
+img{max-width:100%}
+button{font-family:inherit}
+
+/* ── 상단 앱바 ── */
+.appbar{position:sticky;top:0;z-index:30;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}
+.appbar-in{max-width:920px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:7px;font-weight:900;font-size:1.08rem;letter-spacing:-.3px;white-space:nowrap}
+.logo .leaf{font-size:1.25rem}
+.tabs{display:flex;gap:4px;margin-left:6px}
+.tab{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;padding:7px 14px;font-size:.86rem;font-weight:700;cursor:pointer;min-height:38px}
+.tab.active{background:#fff;color:var(--brand)}
+.appbar-sp{flex:1}
+.user-chip{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.16);border:none;color:#fff;border-radius:999px;padding:6px 12px;font-size:.82rem;font-weight:700;cursor:pointer;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ic-btn{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.14);color:#fff;border-radius:10px;min-width:38px;min-height:38px;font-size:1rem;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+
+.app{max-width:920px;margin:0 auto;padding:16px 14px 60px}
+.hero{padding:18px 6px 6px}
+.hero h1{font-size:1.5rem;font-weight:900;letter-spacing:-.5px}
+.hero p{font-size:.85rem;color:var(--text2);margin-top:6px;line-height:1.5}
+
+.card{background:var(--surface);border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:var(--shadow);border:1px solid var(--border)}
+.card-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.step-num{width:28px;height:28px;border-radius:50%;background:var(--brand);color:#fff;font-weight:800;font-size:.85rem;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.card-title{font-size:.96rem;font-weight:800;color:var(--text)}
+.card-sub{font-size:.76rem;color:var(--text3);margin-top:2px}
+.status-badge{margin-left:auto;font-size:.7rem;font-weight:800;padding:4px 10px;border-radius:999px;background:var(--surface2);color:var(--text2);white-space:nowrap}
+.status-badge.wait{background:var(--surface2);color:var(--text3)}
+.status-badge.active{background:#fef3c7;color:#92400e}
+.status-badge.done{background:var(--accentbg);color:var(--brand2)}
+[data-theme=dark] .status-badge.active{background:#3a2e12;color:#fcd34d}
+
+.rec-btn{width:100%;height:74px;border:3px dashed var(--accent);border-radius:14px;background:var(--chip);color:var(--brand);font-size:.98rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:12px}
+.rec-btn.recording{border-color:#ef4444;background:var(--dangerbg);color:#ef4444;animation:pulse 1.2s infinite}
+.rec-btn.done{border-style:solid;border-color:var(--accent);background:var(--accentbg)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
-.file-area{border:2px dashed #d1d5db;border-radius:14px;padding:20px;text-align:center;cursor:pointer;color:#6b7280;transition:all .2s;margin-bottom:12px}
-.file-area:hover,.file-area.drag{border-color:#2d6a4f;background:#f0fff4;color:#2d6a4f}
-.file-area.has-file{border-color:#34d399;border-style:solid;background:#ecfdf5;color:#1a4731}
-.file-name{font-weight:700;font-size:.9rem}
+.file-area{border:2px dashed var(--border);border-radius:14px;padding:22px;text-align:center;cursor:pointer;color:var(--text2);transition:all .2s;margin-bottom:10px}
+.file-area:hover,.file-area.drag{border-color:var(--brand2);background:var(--chip);color:var(--brand2)}
+.file-area.has-file{border-color:var(--accent);border-style:solid;background:var(--accentbg);color:var(--brand)}
+.file-name{font-weight:700;font-size:.92rem}
+.formats{font-size:.74rem;color:var(--text3);margin-top:4px}
+.cap{font-size:.74rem;color:var(--text2);margin-top:8px;text-align:center}
 input[type=file]{display:none}
-.gen-btn{width:100%;height:56px;border:none;border-radius:14px;background:#1a4731;color:#fff;font-size:1.05rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s}
-.gen-btn:hover{background:#2d6a4f}
-.gen-btn:disabled{background:#9ca3af;cursor:not-allowed}
-.progress{background:#f9fafb;border-radius:12px;padding:14px;margin-top:14px;display:none}
-.progress-bar-wrap{background:#e5e7eb;border-radius:99px;height:8px;margin:10px 0}
-.progress-bar{background:linear-gradient(90deg,#2d6a4f,#34d399);height:8px;border-radius:99px;width:0;transition:width .4s}
-.progress-step{font-size:.82rem;color:#374151;font-weight:600}
-.progress-detail{font-size:.75rem;color:#9ca3af;margin-top:4px}
-.result-area{display:none}
-.summary-box{background:#f9fafb;border-radius:14px;padding:16px;font-size:.88rem;line-height:1.75;white-space:pre-wrap;max-height:400px;overflow-y:auto;border:1px solid #e5e7eb;margin-bottom:12px}
-.result-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
-.rbtn{height:48px;border:2px solid #e5e7eb;border-radius:12px;background:#fff;font-size:.88rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;color:#374151;transition:all .2s}
-.rbtn:hover{border-color:#2d6a4f;color:#2d6a4f}
-.rbtn.drive{grid-column:1/-1;background:#2d6a4f;color:#fff;border-color:#2d6a4f}
-.rbtn.drive:hover{background:#1a4731}
-.search-box{display:flex;gap:8px;margin-bottom:12px}
-.search-box input{flex:1;border:2px solid #e5e7eb;border-radius:12px;padding:10px 14px;font-size:.9rem;outline:none}
-.search-box input:focus{border-color:#2d6a4f}
-.search-box button{border:none;background:#2d6a4f;color:#fff;border-radius:12px;padding:0 16px;font-weight:700;cursor:pointer}
-.meeting-item{padding:12px;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:8px;cursor:pointer;transition:all .2s}
-.meeting-item:hover{border-color:#2d6a4f;background:#f0fff4}
-.meeting-item .mtitle{font-weight:700;font-size:.9rem;margin-bottom:2px}
-.meeting-item .mdate{font-size:.75rem;color:#9ca3af}
-.meeting-item .mkeywords{font-size:.72rem;color:#2d6a4f;margin-top:4px}
-.badge{display:inline-block;background:#ecfdf5;color:#2d6a4f;border-radius:6px;padding:2px 8px;font-size:.72rem;font-weight:700;margin-left:6px}
-.error-box{background:#fff5f5;border:1px solid #fca5a5;border-radius:12px;padding:12px;color:#dc2626;font-size:.85rem;margin-top:10px;display:none}
-.new-btn{width:100%;height:44px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;color:#6b7280;font-size:.88rem;font-weight:700;cursor:pointer;margin-bottom:10px}
-.new-btn:hover{background:#f0fff4;color:#2d6a4f;border-color:#2d6a4f}
-.hint{font-size:.72rem;color:#9ca3af;margin-top:6px;text-align:center}
-.lang-section{margin:12px 0}
-.lang-label{font-size:.8rem;font-weight:700;color:#6b7280;margin-bottom:8px}
+
+.gen-btn{width:100%;height:54px;border:none;border-radius:14px;background:var(--brand);color:#fff;font-size:1.04rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.gen-btn:hover{background:var(--brand2)}
+.gen-btn:disabled{background:var(--text3);cursor:not-allowed}
+
+.lang-section{margin:14px 0}
+.lang-label{font-size:.8rem;font-weight:700;color:var(--text2);margin-bottom:8px}
 .lang-grid{display:flex;flex-wrap:wrap;gap:6px}
-.lang-btn{border:1.5px solid #e5e7eb;background:#fff;border-radius:20px;padding:7px 12px;font-size:.82rem;font-weight:600;cursor:pointer;color:#374151;transition:all .15s}
-.lang-btn:hover{border-color:#2d6a4f}
-.lang-btn.active{background:#1a4731;color:#fff;border-color:#1a4731}
-/* 상세 모달 */
+.lang-btn{border:1.5px solid var(--border);background:var(--surface);border-radius:20px;padding:7px 12px;font-size:.82rem;font-weight:600;cursor:pointer;color:var(--text);transition:all .15s}
+.lang-btn:hover{border-color:var(--brand2)}
+.lang-btn.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+.adv-toggle{width:100%;text-align:left;border:1px solid var(--border);background:var(--surface2);color:var(--text2);border-radius:12px;padding:11px 14px;font-size:.85rem;font-weight:700;cursor:pointer;margin:6px 0}
+.adv-body{display:none;padding:8px 2px 2px}
+.adv-body.open{display:block}
+
+.progress{background:var(--surface2);border-radius:12px;padding:14px;margin-top:6px}
+.progress-bar-wrap{background:var(--border);border-radius:99px;height:8px;margin:10px 0}
+.progress-bar{background:linear-gradient(90deg,var(--brand2),var(--accent));height:8px;border-radius:99px;width:0;transition:width .4s}
+.progress-step{font-size:.84rem;color:var(--text);font-weight:700}
+.progress-detail{font-size:.76rem;color:var(--text3);margin-top:4px}
+.muted-card{opacity:.55}
+
+.summary-box{background:var(--surface2);border-radius:14px;padding:16px;font-size:.88rem;line-height:1.75;white-space:pre-wrap;max-height:420px;overflow-y:auto;border:1px solid var(--border);margin-bottom:12px;color:var(--text)}
+.result-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.rbtn{height:46px;border:2px solid var(--border);border-radius:12px;background:var(--surface);font-size:.86rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--text2)}
+.rbtn:hover{border-color:var(--brand2);color:var(--brand2)}
+.rbtn.full{grid-column:1/-1}
+.rbtn.drive{grid-column:1/-1;background:var(--brand2);color:#fff;border-color:var(--brand2)}
+.rbtn.drive:hover{background:var(--brand)}
+.new-btn{width:100%;height:44px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text2);font-size:.88rem;font-weight:700;cursor:pointer;margin-bottom:10px}
+.new-btn:hover{background:var(--chip);color:var(--brand2);border-color:var(--brand2)}
+.error-box{background:var(--dangerbg);border:1px solid var(--danger);border-radius:12px;padding:12px;color:var(--danger);font-size:.84rem;margin-top:10px;display:none;word-break:break-word}
+
+/* ── 검색 / 목록 ── */
+.search-box{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.search-box input{flex:1;min-width:140px;border:2px solid var(--border);border-radius:12px;padding:10px 14px;font-size:.9rem;outline:none;background:var(--surface);color:var(--text)}
+.search-box input:focus{border-color:var(--brand2)}
+.search-box button{border:none;background:var(--brand2);color:#fff;border-radius:12px;padding:0 16px;font-weight:700;cursor:pointer;min-height:42px}
+.filterbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.filterbar input,.filterbar select{border:1.5px solid var(--border);border-radius:10px;padding:8px 10px;font-size:.82rem;background:var(--surface);color:var(--text);outline:none}
+.filterbar input{flex:1;min-width:130px}
+.chips-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chip{border:1.5px solid var(--border);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:.78rem;font-weight:700;cursor:pointer;color:var(--text2)}
+.chip.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+.type-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.type-tab{border:1.5px solid var(--border);background:var(--surface);border-radius:10px;padding:7px 12px;font-size:.8rem;font-weight:700;cursor:pointer;color:var(--text2)}
+.type-tab.active{background:var(--brand2);color:#fff;border-color:var(--brand2)}
+
+.file-card{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:14px;margin-bottom:8px;background:var(--surface)}
+.file-card .fc-ic{font-size:1.3rem;flex:0 0 auto}
+.file-card .fc-main{flex:1;min-width:0;cursor:pointer}
+.fc-title{font-weight:700;font-size:.9rem;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fc-meta{font-size:.74rem;color:var(--text3);margin-top:3px}
+.fc-kw{font-size:.72rem;color:var(--brand2);margin-top:4px}
+.fc-actions{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.fc-act{border:1px solid var(--border);background:var(--surface2);border-radius:8px;padding:5px 8px;font-size:.72rem;font-weight:700;cursor:pointer;color:var(--text2)}
+.fc-act:hover{border-color:var(--brand2);color:var(--brand2)}
+.fc-act.danger:hover{border-color:var(--danger);color:var(--danger)}
+.badge{display:inline-block;background:var(--accentbg);color:var(--brand2);border-radius:6px;padding:2px 8px;font-size:.7rem;font-weight:700}
+
+/* ── 통계 / 지침 ── */
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:center;box-shadow:var(--shadow)}
+.stat .v{font-size:1.4rem;font-weight:900;color:var(--brand2)}
+.stat .l{font-size:.72rem;color:var(--text2);margin-top:3px}
+.instr-item{display:flex;gap:8px;align-items:flex-start;padding:10px;border:1px solid var(--border);border-radius:12px;margin-bottom:8px;background:var(--surface2)}
+.instr-item .t{flex:1;font-size:.84rem;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;padding:10px 12px;font-size:.86rem;background:var(--surface);color:var(--text);outline:none;resize:vertical;min-height:64px;font-family:inherit}
+
+.profile-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.avatar{width:48px;height:48px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:1.2rem;flex:0 0 auto}
+.profile-head .pn{font-weight:800;font-size:1.05rem}
+.profile-head .pe{font-size:.78rem;color:var(--text2)}
+.profile-head .pd{font-size:.74rem;color:var(--text3);margin-top:2px}
+
+.hidden{display:none!important}
+.empty{color:var(--text3);text-align:center;font-size:.85rem;padding:24px}
+.footer{text-align:center;color:var(--text3);font-size:.72rem;letter-spacing:.5px;padding:20px 0 6px;font-weight:700}
+
+/* ── 모달 / 토스트 ── */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:none;align-items:center;justify-content:center;padding:16px}
 .modal.show{display:flex}
-.modal-content{background:#fff;border-radius:20px;padding:20px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto}
-.modal-close{float:right;border:none;background:none;font-size:1.5rem;cursor:pointer;color:#9ca3af}
-/* 토스트 */
-.toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:#1a4731;color:#fff;padding:10px 18px;border-radius:12px;font-size:.85rem;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200}
+.modal-content{background:var(--surface);color:var(--text);border-radius:18px;padding:20px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto}
+.modal-close{float:right;border:none;background:none;font-size:1.5rem;cursor:pointer;color:var(--text3)}
+.toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:var(--brand);color:#fff;padding:10px 18px;border-radius:12px;font-size:.85rem;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+@media(max-width:560px){
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
+  .hero h1{font-size:1.3rem}
+  .tab{padding:7px 11px}
+}
 </style>
 </head>
 <body>
+
+<header class="appbar">
+  <div class="appbar-in">
+    <div class="logo"><span class="leaf">🍀</span> 음성 텍스트</div>
+    <div class="tabs">
+      <button class="tab active" id="tabBtnConvert" onclick="showTab('convert')">변환</button>
+      <button class="tab" id="tabBtnMy" onclick="showTab('my')">마이</button>
+    </div>
+    <div class="appbar-sp"></div>
+    <button class="user-chip" id="userChip" onclick="editProfile()" title="프로필 편집">👤 <span id="userName">사용자</span></button>
+    <button class="ic-btn" id="installBtn" onclick="installApp()" title="앱 설치" style="display:none">⬇</button>
+    <button class="ic-btn" id="themeToggle" onclick="toggleTheme()" title="다크/라이트">🌙</button>
+    <button class="ic-btn" onclick="logout()" title="로그아웃">⎋</button>
+  </div>
+</header>
+
 <div class="app">
 
-  <div class="header">
-    <button class="install-btn" id="installBtn" onclick="installApp()">⬇ 앱 설치</button>
-    <div class="clover">🍀</div>
-    <h1>Stella Clover</h1>
-    <p>AI 음성 회의록 자동 생성</p>
+<!-- ══════════ 변환 탭 ══════════ -->
+<section id="tabConvert">
+  <div class="hero">
+    <h1>음성을 텍스트로</h1>
+    <p>파일을 올리면 자동으로 압축·분할 후 변환합니다. 모바일에서도, 대용량 파일도 끊김없이.</p>
   </div>
 
-  <div class="card" id="inputSection">
-    <div class="card-title">🎙 음성 입력</div>
+  <!-- STEP 1 -->
+  <div class="card" id="step1">
+    <div class="card-head">
+      <div class="step-num">1</div>
+      <div><div class="card-title">파일 선택</div><div class="card-sub">녹음하거나 음성 파일을 첨부하세요</div></div>
+      <div class="status-badge wait" id="badge1">대기</div>
+    </div>
     <button class="rec-btn" id="recBtn" onclick="toggleRec()">
       <span id="recIcon">🎤</span><span id="recText">터치하여 녹음 시작</span>
     </button>
@@ -95,134 +205,303 @@ input[type=file]{display:none}
       ondragover="event.preventDefault();this.classList.add('drag')"
       ondragleave="this.classList.remove('drag')" ondrop="dropFile(event)">
       <div style="font-size:1.5rem;margin-bottom:6px">📎</div>
-      <div id="fileAreaText">파일 첨부</div>
-      <div style="font-size:.75rem;margin-top:4px;opacity:.7">mp3 · m4a · wav · aac · ogg · webm</div>
+      <div id="fileAreaText">파일 첨부 (탭 또는 드래그)</div>
+      <div class="formats">mp3 · m4a · wav · mp4 · webm · ogg · flac · aac</div>
     </div>
-    <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.aac,.ogg,.webm,audio/*" onchange="onFileSelect(this)">
+    <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.mp4,.aac,.ogg,.webm,.flac,audio/*,video/mp4" onchange="onFileSelect(this)">
+    <div class="cap">최대 수 GB · 청크 분할 업로드 (자동 압축·분할)</div>
+
     <div class="lang-section">
       <div class="lang-label">🌐 회의 언어</div>
       <div class="lang-grid" id="langGrid">
-        <button class="lang-btn" data-lang="auto" onclick="selectLang(this)">🌐 자동감지</button>
+        <button class="lang-btn" data-lang="auto" onclick="selectLang(this)">🌐 다국어</button>
         <button class="lang-btn active" data-lang="ko" onclick="selectLang(this)">🇰🇷 한국어</button>
         <button class="lang-btn" data-lang="en" onclick="selectLang(this)">🇺🇸 English</button>
         <button class="lang-btn" data-lang="ja" onclick="selectLang(this)">🇯🇵 日本語</button>
         <button class="lang-btn" data-lang="zh" onclick="selectLang(this)">🇨🇳 中文</button>
         <button class="lang-btn" data-lang="vi" onclick="selectLang(this)">🇻🇳 Việt</button>
+        <button class="lang-btn" data-lang="th" onclick="selectLang(this)">🇹🇭 ไทย</button>
         <button class="lang-btn" data-lang="es" onclick="selectLang(this)">🇪🇸 Español</button>
         <button class="lang-btn" data-lang="fr" onclick="selectLang(this)">🇫🇷 Français</button>
         <button class="lang-btn" data-lang="de" onclick="selectLang(this)">🇩🇪 Deutsch</button>
         <button class="lang-btn" data-lang="id" onclick="selectLang(this)">🇮🇩 Indonesia</button>
         <button class="lang-btn" data-lang="ru" onclick="selectLang(this)">🇷🇺 Русский</button>
-        <button class="lang-btn" data-lang="th" onclick="selectLang(this)">🇹🇭 ไทย</button>
+        <button class="lang-btn" data-lang="ar" onclick="selectLang(this)">🇸🇦 العربية</button>
       </div>
     </div>
-    <button class="gen-btn" id="genBtn" onclick="generate()"><span>✨</span> 회의록 생성</button>
-    <div class="hint">긴 회의(1~2시간)도 자동 분할 처리됩니다</div>
-    <div class="progress" id="progress">
-      <div class="progress-step" id="pStep">준비 중...</div>
-      <div class="progress-bar-wrap"><div class="progress-bar" id="pBar"></div></div>
-      <div class="progress-detail" id="pDetail"></div>
+
+    <button class="adv-toggle" id="advToggle" onclick="toggleAdv()">⚙️ 고급 옵션 ▾</button>
+    <div class="adv-body" id="advBody">
+      <div class="lang-label" style="margin-top:4px">🖼 이미지 → 텍스트 (OCR)</div>
+      <div class="file-area" id="imgArea" onclick="document.getElementById('ocrImage').click()" style="margin-top:8px">
+        <div style="font-size:1.3rem;margin-bottom:4px">🖼</div>
+        <div id="imgAreaText">이미지 첨부 (회의 화면·문서 사진)</div>
+      </div>
+      <input type="file" id="ocrImage" accept="image/*" onchange="onOcrImage(this)">
+      <img id="ocrPreview" alt="" style="display:none;border-radius:12px;margin:10px 0">
+      <button class="gen-btn" id="ocrBtn" style="display:none;height:46px;font-size:.95rem" onclick="runOcr()"><span>🔍</span> 텍스트 추출</button>
+      <div class="progress" id="ocrProgress" style="display:none;margin-top:8px">
+        <div class="progress-step" id="ocrProgStep">🔍 텍스트 인식 중...</div>
+        <div class="progress-bar-wrap"><div class="progress-bar" id="ocrBar" style="width:40%"></div></div>
+      </div>
+      <div class="summary-box" id="ocrResult" style="display:none;margin-top:8px"></div>
+      <button class="rbtn full" id="ocrToMinutes" style="display:none;margin-top:8px" onclick="ocrToMinutes()">✨ 이 텍스트로 회의록 생성</button>
     </div>
+
+    <button class="gen-btn" id="genBtn" onclick="generate()" style="margin-top:8px"><span>✨</span> 변환 시작</button>
     <div class="error-box" id="errBox"></div>
   </div>
 
+  <!-- STEP 2 -->
+  <div class="card muted-card" id="step2">
+    <div class="card-head">
+      <div class="step-num">2</div>
+      <div><div class="card-title">업로드 중</div><div class="card-sub">청크 분할 전송</div></div>
+      <div class="status-badge wait" id="badge2">대기</div>
+    </div>
+    <div class="progress" id="uploadProgress" style="display:none">
+      <div class="progress-step" id="upStep">청크 분할 전송 준비...</div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="upBar"></div></div>
+      <div class="progress-detail" id="upDetail"></div>
+    </div>
+    <div class="card-sub" id="step2Idle">파일을 변환 시작하면 여기에 업로드 진행이 표시됩니다.</div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="card muted-card" id="step3">
+    <div class="card-head">
+      <div class="step-num">3</div>
+      <div><div class="card-title">AI 변환 중</div><div class="card-sub">Whisper API 처리 · 회의록 작성</div></div>
+      <div class="status-badge wait" id="badge3">대기</div>
+    </div>
+    <div class="progress" id="aiProgress" style="display:none">
+      <div class="progress-step" id="aiStep">Whisper API 처리...</div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="aiBar"></div></div>
+      <div class="progress-detail" id="aiDetail"></div>
+    </div>
+    <div class="card-sub" id="step3Idle">음성을 텍스트로 변환하고 회의록을 작성합니다.</div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="card muted-card" id="step4">
+    <div class="card-head">
+      <div class="step-num">4</div>
+      <div><div class="card-title">변환 완료</div><div class="card-sub">텍스트 다운로드 가능</div></div>
+      <div class="status-badge wait" id="badge4">대기</div>
+    </div>
+    <div id="resultArea" style="display:none">
+      <button class="new-btn" onclick="resetAll()">+ 새 변환</button>
+      <div class="summary-box" id="summaryBox"></div>
+      <div class="result-btns">
+        <button class="rbtn" onclick="copyAll()">📋 전체 복사</button>
+        <button class="rbtn" onclick="downloadTxt()">📄 TXT 다운로드</button>
+        <button class="rbtn" id="copyKwBtn" onclick="copyKeywords()" style="display:none">🔑 키워드</button>
+        <button class="rbtn" id="copyTableBtn" onclick="copyTable()" style="display:none">📊 표 복사</button>
+        <button class="rbtn" id="copyLinksBtn" onclick="copyLinks()" style="display:none">🔗 링크</button>
+        <button class="rbtn drive" id="driveBtn" onclick="openDrive()" style="display:none">☁️ Google Drive에서 열기</button>
+      </div>
+    </div>
+    <div class="card-sub" id="step4Idle">변환이 끝나면 회의록과 다운로드 버튼이 여기에 표시됩니다.</div>
+  </div>
+
+  <!-- 최근 녹음 (이 기기) -->
   <div class="card" id="recentCard" style="display:none">
-    <div class="card-title">🎧 최근 녹음 (이 기기에만 저장)</div>
+    <div class="card-head"><div class="card-title">🎧 최근 녹음 (이 기기에만 저장)</div></div>
     <div id="recentList"></div>
   </div>
 
-  <div class="card" id="ocrCard">
-    <div class="card-title">🖼 이미지 → 텍스트 (OCR)</div>
-    <div class="file-area" id="imgArea" onclick="document.getElementById('ocrImage').click()">
-      <div style="font-size:1.5rem;margin-bottom:6px">🖼</div>
-      <div id="imgAreaText">이미지 첨부 (회의 화면·문서 사진)</div>
-    </div>
-    <input type="file" id="ocrImage" accept="image/*" onchange="onOcrImage(this)">
-    <img id="ocrPreview" alt="" style="display:none;max-width:100%;border-radius:12px;margin:10px 0">
-    <button class="gen-btn" id="ocrBtn" style="display:none" onclick="runOcr()"><span>🔍</span> 텍스트 추출</button>
-    <div class="progress" id="ocrProgress" style="display:none">
-      <div class="progress-step" id="ocrProgStep">🔍 텍스트 인식 중...</div>
-      <div class="progress-bar-wrap"><div class="progress-bar" id="ocrBar" style="width:40%"></div></div>
-    </div>
-    <div class="summary-box" id="ocrResult" style="display:none"></div>
-    <button class="rbtn" id="ocrToMinutes" style="display:none;width:100%;margin-top:8px" onclick="ocrToMinutes()">✨ 이 텍스트로 회의록 생성</button>
-  </div>
-
-  <div class="card result-area" id="resultSection">
-    <div class="card-title">📋 회의록</div>
-    <button class="new-btn" onclick="resetAll()">+ 새 회의록</button>
-    <div class="summary-box" id="summaryBox"></div>
-    <div class="result-btns">
-      <button class="rbtn" onclick="copyAll()">📋 전체 복사</button>
-      <button class="rbtn" onclick="downloadTxt()">📄 TXT</button>
-      <button class="rbtn" id="copyKwBtn" onclick="copyKeywords()" style="display:none">🔑 키워드</button>
-      <button class="rbtn" id="copyTableBtn" onclick="copyTable()" style="display:none">📊 표 복사</button>
-      <button class="rbtn" id="copyLinksBtn" onclick="copyLinks()" style="display:none">🔗 링크</button>
-      <button class="rbtn drive" id="driveBtn" onclick="openDrive()" style="display:none">☁️ Google Drive에서 열기</button>
-    </div>
-  </div>
-
+  <!-- 회의록 이력(요약) -->
   <div class="card">
-    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-      📅 회의록 이력
-      <button onclick="loadMeetings()" style="border:none;background:none;color:#2d6a4f;font-weight:700;cursor:pointer;font-size:.8rem">새로고침</button>
+    <div class="card-head">
+      <div class="card-title">📅 회의록 이력</div>
+      <button class="status-badge" onclick="loadMeetings()" style="cursor:pointer;margin-left:auto">↻ 새로고침</button>
     </div>
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="키워드 검색 (제목·내용)" onkeydown="if(event.key==='Enter')doSearch()">
       <button onclick="doSearch()" title="저장된 회의록 검색">🔍</button>
-      <button onclick="doDriveSearch()" title="Google Drive 검색" style="background:#1a4731">☁️</button>
+      <button onclick="doDriveSearch()" title="Google Drive 검색" style="background:var(--brand)">☁️</button>
     </div>
-    <div id="meetingList"><p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p></div>
+    <div id="meetingList"><div class="empty">불러오는 중...</div></div>
   </div>
+</section>
+
+<!-- ══════════ 마이 탭 ══════════ -->
+<section id="tabMy" class="hidden">
+  <div class="card">
+    <div class="profile-head">
+      <div class="avatar" id="myAvatar">S</div>
+      <div>
+        <div class="pn"><span id="myName">사용자</span>님의 이력</div>
+        <div class="pe" id="myEmail">로그인 정보 없음</div>
+        <div class="pd">변환 이력과 AI 분석 결과를 관리합니다.</div>
+      </div>
+      <button class="status-badge" style="margin-left:auto;cursor:pointer" onclick="editProfile()">✏️ 편집</button>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><div class="v" id="statFiles">0</div><div class="l">변환 파일 수</div></div>
+      <div class="stat"><div class="v" id="statChars">0</div><div class="l">총 글자수</div></div>
+      <div class="stat"><div class="v" id="statAi">0</div><div class="l">AI 분석 건수</div></div>
+      <div class="stat"><div class="v" id="statInstr">0</div><div class="l">내 AI 지침 개수</div></div>
+    </div>
+  </div>
+
+  <!-- 내 AI 지침 -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">🧭 내 AI 지침 <span class="badge" id="instrCount">0</span></div>
+    </div>
+    <div class="card-sub" style="margin-bottom:10px">요약 시 적용할 사용자 정의 프롬프트입니다. (예: "결정사항을 가장 먼저, 불릿으로 정리")</div>
+    <div id="instrList"></div>
+    <textarea class="instr" id="instrInput" placeholder="새 지침 입력 후 추가"></textarea>
+    <button class="rbtn full" style="margin-top:8px" onclick="addInstruction()">＋ 지침 추가</button>
+  </div>
+
+  <!-- 검색 / 필터 -->
+  <div class="card">
+    <div class="card-head"><div class="card-title">🔎 파일 검색 · 필터</div></div>
+    <div class="filterbar">
+      <input type="text" id="mySearch" placeholder="파일명 · 회의주제 · 참석자" oninput="renderFiles()">
+      <input type="text" id="myTags" placeholder="태그 (쉼표 구분)" oninput="renderFiles()">
+      <select id="filterFolder" onchange="renderFiles()"><option value="">폴더 전체</option></select>
+      <select id="filterSort" onchange="renderFiles()">
+        <option value="new">최신순</option><option value="old">오래된순</option><option value="chars">글자수순</option>
+      </select>
+      <button class="chip" onclick="resetFilters()">초기화</button>
+    </div>
+
+    <!-- 폴더 / 태그 -->
+    <div class="chips-row" id="folderChips"></div>
+    <!-- 타입 탭 -->
+    <div class="type-tabs" id="typeTabs">
+      <button class="type-tab active" data-type="all" onclick="selectType(this)">전체</button>
+      <button class="type-tab" data-type="stt" onclick="selectType(this)">STT 원본</button>
+      <button class="type-tab" data-type="minutes" onclick="selectType(this)">회의록</button>
+      <button class="type-tab" data-type="ai" onclick="selectType(this)">AI 요약</button>
+    </div>
+
+    <div id="fileList"><div class="empty">불러오는 중...</div></div>
+  </div>
+</section>
+
+<div class="footer">POWERED BY OPENAI WHISPER · Stella Clover</div>
 </div>
 
 <div class="toast" id="toast"></div>
-
-<!-- 상세 모달 -->
 <div class="modal" id="detailModal" onclick="if(event.target===this)closeDetail()">
-  <div class="modal-content">
-    <button class="modal-close" onclick="closeDetail()">×</button>
-    <div id="detailContent"></div>
-  </div>
+  <div class="modal-content"><button class="modal-close" onclick="closeDetail()">×</button><div id="detailContent"></div></div>
 </div>
 
 <script>
+/* ═══════════ 상태 ═══════════ */
 let recorder=null, chunks=[], recordedBlob=null, currentAudioFile=null;
 let _selectedLang='ko';
-function selectLang(btn){
-  document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  _selectedLang=btn.getAttribute('data-lang');
-}
 let _driveLink='', _summary='', _title='', _keywords='', _deferredPrompt=null, _detailSummary='';
+let _meetingsCache=[];            // 마이페이지 파일 목록 원천
+let _curType='all', _curFolder='';
+const LIST_CACHE_KEY='cl_meetings_list_cache';
+const SESSION_KEY='cl_last_session';
+const THEME_KEY='cl_theme';
+const PROFILE_KEY='cl_profile';
+const INSTR_KEY='cl_ai_instructions';
+const FILEMETA_KEY='cl_file_meta';   // {id:{folder,tags:[]}}
+const FOLDERS_KEY='cl_folders';      // [name,...]
 
-// ── PWA 설치 ──
-window.addEventListener('beforeinstallprompt', function(e){
-  e.preventDefault();
-  _deferredPrompt=e;
-  document.getElementById('installBtn').classList.add('show');
-});
-function installApp(){
-  if(!_deferredPrompt)return;
-  _deferredPrompt.prompt();
-  _deferredPrompt.userChoice.then(function(){
-    _deferredPrompt=null;
-    document.getElementById('installBtn').classList.remove('show');
-  });
+/* ═══════════ 공통 유틸 ═══════════ */
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// 모든 fetch 오류를 사람이 읽을 수 있게: err.name + message, "Failed to fetch"는 네트워크로 설명
+function fmtErr(e){
+  if(!e) return '알 수 없는 오류';
+  const msg=String(e.message||e);
+  if(e.name==='TypeError' && /failed to fetch|networkerror|load failed/i.test(msg))
+    return '네트워크 연결 실패(서버에 도달하지 못함). 잠시 후 다시 시도해주세요.';
+  if(e.name==='AbortError') return '요청 시간이 초과되었습니다.';
+  return (e.name && e.name!=='Error') ? (e.name+': '+msg) : msg;
 }
-window.addEventListener('appinstalled', function(){
-  document.getElementById('installBtn').classList.remove('show');
-});
+// 방어적 JSON 파싱: 평문(타임아웃/에러 페이지)에도 "Unexpected token" 대신 한국어 메시지
+async function safeJson(r){
+  const text=await r.text();
+  try{ return JSON.parse(text); }
+  catch(e){
+    throw new Error(r.ok
+      ? '서버 응답 형식 오류로 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.'
+      : ('서버 오류('+r.status+')'+(text?(': '+text.slice(0,80)):'')+'. 잠시 후 다시 시도해주세요.'));
+  }
+}
+let _toastTimer=null;
+function showToast(msg){const t=$('toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(_toastTimer);_toastTimer=setTimeout(()=>t.classList.remove('show'),1900);}
+function showErr(msg){const e=$('errBox');e.textContent=msg;e.style.display='block';}
+function hideErr(){$('errBox').style.display='none';}
 
-// ── 녹음 ──
+/* ═══════════ 테마 ═══════════ */
+function applyTheme(){
+  let t; try{t=localStorage.getItem(THEME_KEY);}catch(e){}
+  if(t!=='light'&&t!=='dark'){ t=(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'; }
+  document.documentElement.setAttribute('data-theme', t);
+  $('themeToggle').textContent = t==='dark'?'☀️':'🌙';
+  const m=document.querySelector('meta[name=theme-color]'); if(m) m.setAttribute('content', t==='dark'?'#0f1713':'#1a4731');
+}
+function toggleTheme(){
+  const cur=document.documentElement.getAttribute('data-theme')==='dark'?'dark':'light';
+  const next=cur==='dark'?'light':'dark';
+  try{localStorage.setItem(THEME_KEY,next);}catch(e){}
+  applyTheme();
+}
+
+/* ═══════════ 탭 ═══════════ */
+function showTab(name){
+  const conv=name==='convert';
+  $('tabConvert').classList.toggle('hidden',!conv);
+  $('tabMy').classList.toggle('hidden',conv);
+  $('tabBtnConvert').classList.toggle('active',conv);
+  $('tabBtnMy').classList.toggle('active',!conv);
+  if(!conv){ refreshMyPage(); }
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function toggleAdv(){
+  const b=$('advBody'), open=b.classList.toggle('open');
+  $('advToggle').textContent = open?'⚙️ 고급 옵션 ▴':'⚙️ 고급 옵션 ▾';
+}
+
+/* ═══════════ 프로필 (로컬) ═══════════ */
+function getProfile(){ try{return JSON.parse(localStorage.getItem(PROFILE_KEY)||'null')||{};}catch(e){return {};} }
+function applyProfile(){
+  const p=getProfile(); const name=p.name||'사용자';
+  $('userName').textContent=name;
+  $('myName').textContent=name;
+  $('myAvatar').textContent=(name.trim()[0]||'S').toUpperCase();
+  $('myEmail').textContent=p.email||'로그인 정보 없음';
+}
+function editProfile(){
+  const p=getProfile();
+  const name=prompt('이름(닉네임)을 입력하세요', p.name||'');
+  if(name===null) return;
+  const email=prompt('이메일(선택)을 입력하세요', p.email||'');
+  const np={name:(name||'사용자').trim(), email:(email||'').trim()};
+  try{localStorage.setItem(PROFILE_KEY,JSON.stringify(np));}catch(e){}
+  applyProfile(); showToast('프로필이 저장되었습니다');
+}
+function logout(){
+  if(!confirm('로컬 프로필을 초기화할까요? (회의록 데이터는 유지됩니다)'))return;
+  try{localStorage.removeItem(PROFILE_KEY);}catch(e){}
+  applyProfile(); showToast('로그아웃되었습니다');
+}
+
+/* ═══════════ PWA 설치 ═══════════ */
+window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); _deferredPrompt=e; $('installBtn').style.display='inline-flex'; });
+function installApp(){ if(!_deferredPrompt)return; _deferredPrompt.prompt(); _deferredPrompt.userChoice.then(function(){_deferredPrompt=null;$('installBtn').style.display='none';}); }
+window.addEventListener('appinstalled', function(){ $('installBtn').style.display='none'; });
+
+/* ═══════════ 언어 선택 ═══════════ */
+function selectLang(btn){ document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); _selectedLang=btn.getAttribute('data-lang'); }
+
+/* ═══════════ 녹음 ═══════════ */
 async function toggleRec(){
-  const btn=document.getElementById('recBtn');
+  const btn=$('recBtn');
   if(recorder && recorder.state==='recording'){
-    recorder.stop();
-    btn.className='rec-btn done';
-    document.getElementById('recIcon').textContent='✅';
-    document.getElementById('recText').textContent='녹음 완료 - 회의록 생성 누르세요';
-    return;
+    recorder.stop(); btn.className='rec-btn done';
+    $('recIcon').textContent='✅'; $('recText').textContent='녹음 완료 — 변환 시작을 누르세요';
+    setStep(1,'done'); return;
   }
   try{
     chunks=[];recordedBlob=null;currentAudioFile=null;
@@ -232,73 +511,69 @@ async function toggleRec(){
     recorder.onstop=()=>{recordedBlob=new Blob(chunks,{type:'audio/webm'});stream.getTracks().forEach(t=>t.stop());};
     recorder.start();
     btn.className='rec-btn recording';
-    document.getElementById('recIcon').textContent='⏹';
-    document.getElementById('recText').textContent='녹음 중... (터치하여 종료)';
-  }catch(e){showErr('마이크 권한이 필요합니다: '+e.message);}
+    $('recIcon').textContent='⏹'; $('recText').textContent='녹음 중... (터치하여 종료)';
+    setStep(1,'active');
+  }catch(e){showErr('마이크 권한이 필요합니다: '+fmtErr(e));}
 }
 
-// ── 파일 ──
-function dropFile(e){e.preventDefault();document.getElementById('fileArea').classList.remove('drag');const f=e.dataTransfer.files[0];if(f)applyFile(f);}
+/* ═══════════ 파일 ═══════════ */
+function dropFile(e){e.preventDefault();$('fileArea').classList.remove('drag');const f=e.dataTransfer.files[0];if(f)applyFile(f);}
 function onFileSelect(input){if(input.files[0])applyFile(input.files[0]);}
 function applyFile(f){
   currentAudioFile=f;recordedBlob=null;
-  const area=document.getElementById('fileArea');
-  area.className='file-area has-file';
+  const area=$('fileArea'); area.className='file-area has-file';
   const mb=(f.size/1024/1024).toFixed(1);
-  document.getElementById('fileAreaText').innerHTML='<div class="file-name">'+f.name+'</div><div style="font-size:.75rem;margin-top:2px">'+mb+'MB</div>';
+  $('fileAreaText').innerHTML='<div class="file-name">'+esc(f.name)+'</div><div style="font-size:.75rem;margin-top:2px">'+mb+'MB</div>';
+  setStep(1,'done');
 }
 
-function setProgress(pct,step,detail){
-  const p=document.getElementById('progress');p.style.display='block';
-  document.getElementById('pBar').style.width=pct+'%';
-  document.getElementById('pStep').textContent=step;
-  document.getElementById('pDetail').textContent=detail||'';
+/* ═══════════ 4단계 상태 뱃지 ═══════════ */
+function setStep(n,state){ // state: wait|active|done
+  const b=$('badge'+n); if(!b)return;
+  b.className='status-badge '+state;
+  b.textContent = state==='active'?'진행중':(state==='done'?'완료':'대기');
+  const card=$('step'+n); if(card) card.classList.toggle('muted-card', state==='wait' && n>1);
 }
-function showErr(msg){const e=document.getElementById('errBox');e.textContent=msg;e.style.display='block';}
-function hideErr(){document.getElementById('errBox').style.display='none';}
+function resetSteps(){ setStep(1,'wait'); [2,3,4].forEach(n=>setStep(n,'wait'));
+  $('uploadProgress').style.display='none'; $('aiProgress').style.display='none';
+  $('step2Idle').style.display=''; $('step3Idle').style.display=''; $('step4Idle').style.display='';
+  $('resultArea').style.display='none';
+}
+function upProgress(pct,step,detail){ $('uploadProgress').style.display='block'; $('step2Idle').style.display='none';
+  $('upBar').style.width=pct+'%'; $('upStep').textContent=step; $('upDetail').textContent=detail||''; }
+function aiProgress(pct,step,detail){ $('aiProgress').style.display='block'; $('step3Idle').style.display='none';
+  $('aiBar').style.width=pct+'%'; $('aiStep').textContent=step; $('aiDetail').textContent=detail||''; }
 
-// ── 오디오를 WAV로 디코드 후 시간 단위 분할 (Vercel 4.5MB 우회) ──
-// 16kHz 모노 WAV로 변환 → Whisper 권장 포맷, 용량 대폭 감소
+/* ═══════════ 오디오 분할 (16kHz mono WAV, Vercel 4.5MB 우회) ═══════════ */
 async function audioToChunks(blob, chunkSeconds){
   const arrayBuf = await blob.arrayBuffer();
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const ctx = new AudioCtx();
   const audioBuf = await ctx.decodeAudioData(arrayBuf);
   ctx.close && ctx.close();
-
-  const targetRate = 16000; // 16kHz로 다운샘플
+  const targetRate = 16000;
   const totalDuration = audioBuf.duration;
   const chunkCount = Math.ceil(totalDuration / chunkSeconds);
   const chunks = [];
-
   for(let i=0; i<chunkCount; i++){
     const startSec = i * chunkSeconds;
     const endSec = Math.min(startSec + chunkSeconds, totalDuration);
-    const wav = encodeWavSlice(audioBuf, startSec, endSec, targetRate);
-    chunks.push(wav);
+    chunks.push(encodeWavSlice(audioBuf, startSec, endSec, targetRate));
   }
   return { chunks, totalDuration };
 }
-
-// AudioBuffer의 일부 구간을 16kHz 모노 WAV로 인코딩
 function encodeWavSlice(audioBuf, startSec, endSec, targetRate){
   const srcRate = audioBuf.sampleRate;
   const startFrame = Math.floor(startSec * srcRate);
   const endFrame = Math.floor(endSec * srcRate);
   const frameCount = endFrame - startFrame;
-  // 모노 다운믹스
   const ch = audioBuf.numberOfChannels;
   const mono = new Float32Array(frameCount);
-  for(let c=0;c<ch;c++){
-    const data=audioBuf.getChannelData(c);
-    for(let i=0;i<frameCount;i++){ mono[i]+=data[startFrame+i]/ch; }
-  }
-  // 다운샘플 16kHz
+  for(let c=0;c<ch;c++){ const data=audioBuf.getChannelData(c); for(let i=0;i<frameCount;i++){ mono[i]+=data[startFrame+i]/ch; } }
   const ratio = srcRate/targetRate;
   const outLen = Math.floor(frameCount/ratio);
   const out = new Float32Array(outLen);
   for(let i=0;i<outLen;i++){ out[i]=mono[Math.floor(i*ratio)]||0; }
-  // WAV 헤더 + PCM16
   const buffer=new ArrayBuffer(44+outLen*2);
   const view=new DataView(buffer);
   const writeStr=(off,s)=>{for(let i=0;i<s.length;i++)view.setUint8(off+i,s.charCodeAt(i));};
@@ -312,133 +587,113 @@ function encodeWavSlice(audioBuf, startSec, endSec, targetRate){
   return new Blob([buffer],{type:'audio/wav'});
 }
 
-// ── 메인 ──
+/* ═══════════ 메인 변환 ═══════════ */
 async function generate(){
   const audio=currentAudioFile||recordedBlob;
   if(!audio){showErr('음성 파일을 선택하거나 녹음해주세요.');return;}
-  hideErr();
-  document.getElementById('genBtn').disabled=true;
-  document.getElementById('resultSection').style.display='none';
+  hideErr(); $('genBtn').disabled=true;
+  resetSteps(); setStep(1,'done'); setStep(2,'active');
 
   try{
-    // 1. 오디오 분할 (16kHz mono WAV). 청크당 4.5MB(Vercel 본문 제한) 미만으로 유지해 413 방지.
-    setProgress(5,'🔧 음성 분석 중...','오디오를 변환하고 있습니다');
-    // 120초 × 16000Hz × 2byte ≈ 3.84MB < 4.5MB
-    const CHUNK_SEC = 120;
+    upProgress(5,'🔧 음성 분석 중...','오디오를 변환하고 있습니다');
+    const CHUNK_SEC = 120; // 120s × 16kHz × 2byte ≈ 3.84MB < 4.5MB (절대 5MB 금지)
     const sessionId = Date.now().toString(36) + Math.floor(Math.random()*1e6).toString(36);
     const { chunks, totalDuration } = await audioToChunks(audio, CHUNK_SEC);
     const mins = Math.round(totalDuration/60);
-    setProgress(10,'🎙 음성 변환 중...',`총 ${mins}분 · ${chunks.length}개 구간 처리`);
+    upProgress(12,'📤 청크 분할 전송','총 '+mins+'분 · '+chunks.length+'개 구간');
 
-    // 2. 각 청크 순차 STT
-    let fullText='';
+    // 각 청크 순차 STT — 한 청크가 실패해도 전체를 죽이지 않고 계속(끝에 경고)
+    let fullText=''; let failed=0;
     for(let i=0;i<chunks.length;i++){
-      const pct = 10 + Math.round((i/chunks.length)*45);
-      setProgress(pct,'🎙 음성 변환 중...',`구간 ${i+1}/${chunks.length} 변환 중`);
-      // 청크별 재시도 (Failed to fetch / 일시적 네트워크 오류 대응)
+      const pct = 12 + Math.round((i/chunks.length)*78);
+      upProgress(pct,'📤 청크 분할 전송','구간 '+(i+1)+'/'+chunks.length+' 전송·변환 중');
       let d=null, lastErr='';
       for(let attempt=0; attempt<3; attempt++){
         try{
           const fd=new FormData();
-          fd.append('audio',chunks[i],`chunk_${i}.wav`);
+          fd.append('audio',chunks[i],'chunk_'+i+'.wav');
           fd.append('prevText',fullText.slice(-200));
-          fd.append('sessionId',sessionId);
-          fd.append('index',String(i));
-          fd.append('lang',_selectedLang);
+          fd.append('sessionId',sessionId); fd.append('index',String(i)); fd.append('lang',_selectedLang);
           const r=await fetch('/api/transcribe',{method:'POST',body:fd});
           if(!r.ok){
             const txt=await r.text();
             lastErr='변환 실패('+r.status+'): '+txt.slice(0,80);
             if(r.status===413){ throw new Error(lastErr); } // 크기 초과는 재시도 무의미
-            await new Promise(s=>setTimeout(s,1500*(attempt+1)));
-            continue;
+            await new Promise(s=>setTimeout(s,1500*(attempt+1))); continue;
           }
-          d=await r.json();
+          d=await safeJson(r);
           if(!d.ok){ lastErr=d.message||'변환 실패'; await new Promise(s=>setTimeout(s,1500*(attempt+1))); continue; }
-          break; // 성공
+          break;
         }catch(err){
-          lastErr=err.message||'네트워크 오류';
-          if(lastErr.includes('413'))throw err;
-          setProgress(pct,'🎙 음성 변환 중...',`구간 ${i+1}/${chunks.length} 재시도 ${attempt+1}/3...`);
+          lastErr=fmtErr(err);
+          if(String(lastErr).includes('413')) throw err;
+          upProgress(pct,'📤 청크 분할 전송','구간 '+(i+1)+'/'+chunks.length+' 재시도 '+(attempt+1)+'/3...');
           await new Promise(s=>setTimeout(s,1500*(attempt+1)));
         }
       }
-      if(!d||!d.ok)throw new Error('구간 '+(i+1)+' 변환 실패: '+lastErr);
-      fullText += (fullText?' ':'') + d.text;
+      if(!d||!d.ok){ // 이 구간만 실패 → 표시 후 계속
+        failed++; fullText += (fullText?' ':'') + '[구간 '+(i+1)+' 변환 실패]';
+      }else{
+        fullText += (fullText?' ':'') + d.text;
+      }
     }
+    if(failed===chunks.length) throw new Error('모든 구간 변환 실패. 네트워크/서버 상태를 확인해주세요.');
+    if(!fullText.replace(/\[구간 \d+ 변환 실패\]/g,'').trim()) throw new Error('음성에서 텍스트를 추출하지 못했습니다 (무음 파일).');
+    upProgress(100,'✅ 업로드·전사 완료', failed?('일부 구간('+failed+') 실패 — 나머지로 진행'):'전 구간 전송 완료');
+    setStep(2,'done'); setStep(3,'active');
 
-    if(!fullText.trim())throw new Error('음성에서 텍스트를 추출하지 못했습니다 (무음 파일)');
-
-    // 3. AI 회의록
-    setProgress(60,'📝 회의록 작성 중...','회의록 작성 중');
+    aiProgress(40,'🤖 Whisper API 처리 → 회의록 작성','AI가 회의록을 작성하고 있습니다');
     const r2=await fetch('/api/summarize',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile?.name||'recording.webm'),sessionId,lang:_selectedLang})
+      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile&&currentAudioFile.name)||'recording.webm',sessionId,lang:_selectedLang,userInstruction:getInstructionText()})
     });
     if(!r2.ok){const txt=await r2.text();throw new Error('회의록 생성 실패('+r2.status+'): '+txt.slice(0,100));}
-    const d2=await r2.json();
+    const d2=await safeJson(r2);
     if(!d2.ok)throw new Error(d2.message||'회의록 생성 실패');
+    aiProgress(100,'✅ AI 변환 완료','회의록이 생성되었습니다');
+    setStep(3,'done'); setStep(4,'done');
 
-    setProgress(100,'✅ 완료!','회의록이 생성되었습니다');
     _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
-    document.getElementById('summaryBox').textContent=_summary;
-    document.getElementById('resultSection').style.display='block';
-    // 콘텐츠 종류별 복사 버튼 토글
-    document.getElementById('copyKwBtn').style.display=_keywords?'flex':'none';
-    document.getElementById('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
-    document.getElementById('copyLinksBtn').style.display=extractUrls(_summary).length?'flex':'none';
-    if(_driveLink)document.getElementById('driveBtn').style.display='flex';
-    saveSession();
-    document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
+    showResult(); $('step4').scrollIntoView({behavior:'smooth'});
 
-    // 경고 표시 (Drive/DB 저장 실패 시)
+    if(failed) showErr('⚠️ '+failed+'개 구간 변환에 실패했지만 나머지로 회의록을 생성했습니다.');
     if(d2.warnings && (d2.warnings.driveError||d2.warnings.dbError)){
       let w='';
       if(d2.warnings.driveError)w+='Drive 저장 실패: '+d2.warnings.driveError+'. ';
       if(d2.warnings.dbError)w+='DB 저장 실패: '+d2.warnings.dbError;
       showErr('⚠️ 회의록은 생성됐으나 일부 저장 실패: '+w);
     }
-    loadMeetings();
-    // 최근 녹음을 이 기기(IndexedDB)에 캐시 (최근 5개 유지)
-    idbSaveRecording(audio, (currentAudioFile?.name)||((d2.title||'recording')+'.webm'));
+    saveSession(); loadMeetings();
+    idbSaveRecording(audio, (currentAudioFile&&currentAudioFile.name)||((d2.title||'recording')+'.webm'));
   }catch(e){
-    showErr('오류: '+e.message);
-    setProgress(0,'실패','오류가 발생했습니다. 다시 시도해주세요.');
+    showErr('오류: '+fmtErr(e));
+    setStep(2,'wait'); setStep(3,'wait');
+    $('upStep') && (upProgress(0,'실패','오류가 발생했습니다. 다시 시도해주세요.'));
   }finally{
-    document.getElementById('genBtn').disabled=false;
+    $('genBtn').disabled=false;
   }
 }
-
-// ── 복사 유틸 (모던 클립보드 + 폴백 + 토스트) ──
-let _toastTimer=null;
-function showToast(msg){
-  const t=document.getElementById('toast');if(!t)return;
-  t.textContent=msg;t.classList.add('show');
-  clearTimeout(_toastTimer);_toastTimer=setTimeout(()=>t.classList.remove('show'),1800);
+function showResult(){
+  $('summaryBox').textContent=_summary;
+  $('step4Idle').style.display='none'; $('resultArea').style.display='block'; setStep(4,'done');
+  $('copyKwBtn').style.display=_keywords?'flex':'none';
+  $('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
+  $('copyLinksBtn').style.display=extractUrls(_summary).length?'flex':'none';
+  $('driveBtn').style.display=_driveLink?'flex':'none';
 }
+
+/* ═══════════ 복사 유틸 ═══════════ */
 function copyToClipboard(text){
   if(!text){showToast('복사할 내용이 없습니다');return Promise.resolve(false);}
   const fallback=()=>{try{const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();return true;}catch(e){return false;}};
   const done=ok=>{showToast(ok?'✓ 복사되었습니다':'복사 실패');return ok;};
-  if(navigator.clipboard&&navigator.clipboard.writeText){
-    return navigator.clipboard.writeText(text).then(()=>done(true)).catch(()=>done(fallback()));
-  }
+  if(navigator.clipboard&&navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(()=>done(true)).catch(()=>done(fallback()));
   return Promise.resolve(done(fallback()));
 }
-// 마크다운 표(연속된 | 행) 추출
-function extractTable(md){
-  const lines=(md||'').split('\n');const tbl=[];let inT=false;
-  for(const ln of lines){
-    if(/^\s*\|.*\|\s*$/.test(ln)){tbl.push(ln.trim());inT=true;}
-    else if(inT){break;}
-  }
-  return tbl.length>=2?tbl.join('\n'):'';
-}
-// URL 추출 (중복 제거)
-function extractUrls(md){
-  const m=(md||'').match(/https?:\/\/[^\s)]+/g)||[];
-  return [...new Set(m)];
-}
+function extractTable(md){ const lines=(md||'').split('\n');const tbl=[];let inT=false;
+  for(const ln of lines){ if(/^\s*\|.*\|\s*$/.test(ln)){tbl.push(ln.trim());inT=true;} else if(inT){break;} }
+  return tbl.length>=2?tbl.join('\n'):''; }
+function extractUrls(md){ const m=(md||'').match(/https?:\/\/[^\s)]+/g)||[]; return [...new Set(m)]; }
 function copyAll(){copyToClipboard(_summary);}
 function copyKeywords(){copyToClipboard(_keywords);}
 function copyTable(){const t=extractTable(_summary);copyToClipboard(t||_summary);}
@@ -448,276 +703,271 @@ function openDrive(){if(_driveLink)window.open(_driveLink,'_blank');}
 function resetAll(){
   recorder=null;chunks=[];recordedBlob=null;currentAudioFile=null;
   _summary='';_title='';_driveLink='';_keywords='';
-  ['copyKwBtn','copyTableBtn','copyLinksBtn','driveBtn'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});
-  document.getElementById('recBtn').className='rec-btn';
-  document.getElementById('recIcon').textContent='🎤';
-  document.getElementById('recText').textContent='터치하여 녹음 시작';
-  document.getElementById('fileArea').className='file-area';
-  document.getElementById('fileAreaText').innerHTML='파일 첨부';
-  document.getElementById('audioFile').value='';
+  $('recBtn').className='rec-btn'; $('recIcon').textContent='🎤'; $('recText').textContent='터치하여 녹음 시작';
+  $('fileArea').className='file-area'; $('fileAreaText').innerHTML='파일 첨부 (탭 또는 드래그)'; $('audioFile').value='';
   try{localStorage.removeItem(SESSION_KEY);}catch(e){}
-  document.getElementById('progress').style.display='none';
-  document.getElementById('resultSection').style.display='none';
-  hideErr();document.getElementById('genBtn').disabled=false;
+  resetSteps(); hideErr(); $('genBtn').disabled=false;
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 
-// ── 목록 / 검색 ──
-const LIST_CACHE_KEY='cl_meetings_list_cache';
+/* ═══════════ 회의록 이력 (변환 탭) ═══════════ */
 function renderMeetingItems(items){
-  return items.map(x=>`
-    <div class="meeting-item" onclick="showDetail(${x.id})">
-      <div class="mtitle">${esc(x.title||'회의록')}${x.drive_link?'<span class="badge">☁️ Drive</span>':''}</div>
-      <div class="mdate">${new Date(x.created_at).toLocaleString('ko-KR')} · ${x.transcript_chars||0}자</div>
-      ${x.keywords?'<div class="mkeywords">🔑 '+esc(x.keywords)+'</div>':''}
-    </div>`).join('');
+  return items.map(x=>'<div class="file-card"><div class="fc-ic">🎙️</div><div class="fc-main" onclick="showDetail('+x.id+')">'
+    +'<div class="fc-title">'+esc(x.title||'회의록')+(x.summary||x.keywords?'<span title="회의록 있음">📋</span>':'')+(x.keywords?'<span title="AI 요약">✨</span>':'')+(x.drive_link?'<span class="badge">☁️</span>':'')+'</div>'
+    +'<div class="fc-meta">'+new Date(x.created_at).toLocaleString('ko-KR')+' · '+(x.transcript_chars||0)+'자</div>'
+    +(x.keywords?'<div class="fc-kw">🔑 '+esc(x.keywords)+'</div>':'')+'</div></div>').join('');
 }
 async function loadMeetings(){
-  // Azure 호출 절감: 캐시된 목록을 먼저 즉시 표시한 뒤 백그라운드로 갱신
-  try{
-    const cached=JSON.parse(localStorage.getItem(LIST_CACHE_KEY)||'null');
-    if(cached&&Array.isArray(cached.items)&&cached.items.length){
-      document.getElementById('meetingList').innerHTML=renderMeetingItems(cached.items);
-    }
+  try{ const cached=JSON.parse(localStorage.getItem(LIST_CACHE_KEY)||'null');
+    if(cached&&Array.isArray(cached.items)&&cached.items.length){ _meetingsCache=cached.items; $('meetingList').innerHTML=renderMeetingItems(cached.items); }
   }catch(e){}
   renderList('/api/meetings',true);
 }
-async function doSearch(){
-  const q=document.getElementById('searchInput').value.trim();
-  if(!q){loadMeetings();return;}
-  renderList('/api/meetings?action=search&q='+encodeURIComponent(q));
-}
+async function doSearch(){ const q=$('searchInput').value.trim(); if(!q){loadMeetings();return;} renderList('/api/meetings?action=search&q='+encodeURIComponent(q)); }
 async function renderList(url,cache){
-  const list=document.getElementById('meetingList');
-  if(!(cache&&list.querySelector('.meeting-item')))
-    list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">불러오는 중...</p>';
+  const list=$('meetingList');
+  if(!(cache&&list.querySelector('.file-card'))) list.innerHTML='<div class="empty">불러오는 중...</div>';
   try{
-    const r=await fetch(url);
-    const d=await safeJson(r);
-    const items=d.items||[];
+    const r=await fetch(url); const d=await safeJson(r); const items=d.items||[];
+    _meetingsCache=items;
     if(cache){try{localStorage.setItem(LIST_CACHE_KEY,JSON.stringify({ts:Date.now(),items}));}catch(e){}}
-    if(!items.length){
-      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+(d.message||'회의록 없음')+'</p>';
-      return;
-    }
-    list.innerHTML=renderMeetingItems(items);
-  }catch(e){
-    if(!list.querySelector('.meeting-item'))
-      list.innerHTML='<p style="color:#ef4444;font-size:.82rem">목록 로드 실패: '+esc(e.message)+'</p>';
-  }
+    list.innerHTML = items.length?renderMeetingItems(items):('<div class="empty">'+esc(d.message||'회의록 없음')+'</div>');
+    if(!$('tabMy').classList.contains('hidden')) renderFiles();
+  }catch(e){ if(!list.querySelector('.file-card')) list.innerHTML='<div class="empty" style="color:var(--danger)">목록 로드 실패: '+esc(fmtErr(e))+'</div>'; }
 }
-
-// ── Google Drive 검색 ──
 async function doDriveSearch(){
-  const q=document.getElementById('searchInput').value.trim();
-  if(!q){loadMeetings();return;}
-  const list=document.getElementById('meetingList');
-  list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">☁️ Drive 검색 중...</p>';
+  const q=$('searchInput').value.trim(); if(!q){loadMeetings();return;}
+  const list=$('meetingList'); list.innerHTML='<div class="empty">☁️ Drive 검색 중...</div>';
   try{
-    const r=await fetch('/api/drive-search?q='+encodeURIComponent(q));
-    const d=await safeJson(r);
-    const items=d.items||[];
-    if(!items.length){
-      list.innerHTML='<p style="color:#9ca3af;font-size:.85rem;text-align:center;padding:20px">'+esc(d.message||'Drive 검색 결과 없음')+'</p>';
-      return;
-    }
-    list.innerHTML=items.map(f=>`
-      <div class="meeting-item" onclick="window.open('${encodeURI(f.webViewLink||'#')}','_blank')">
-        <div class="mtitle">${esc(f.name||'파일')}<span class="badge">☁️ Drive</span></div>
-        <div class="mdate">${f.modifiedTime?new Date(f.modifiedTime).toLocaleString('ko-KR'):''}</div>
-      </div>`).join('');
-  }catch(e){
-    list.innerHTML='<p style="color:#ef4444;font-size:.82rem">Drive 검색 실패: '+esc(e.message)+'</p>';
-  }
+    const r=await fetch('/api/drive-search?q='+encodeURIComponent(q)); const d=await safeJson(r); const items=d.items||[];
+    list.innerHTML = items.length? items.map(f=>'<div class="file-card"><div class="fc-ic">☁️</div><div class="fc-main" onclick="window.open(\''+encodeURI(f.webViewLink||'#')+'\',\'_blank\')"><div class="fc-title">'+esc(f.name||'파일')+'<span class="badge">Drive</span></div><div class="fc-meta">'+(f.modifiedTime?new Date(f.modifiedTime).toLocaleString('ko-KR'):'')+'</div></div></div>').join('') : '<div class="empty">'+esc(d.message||'Drive 검색 결과 없음')+'</div>';
+  }catch(e){ list.innerHTML='<div class="empty" style="color:var(--danger)">Drive 검색 실패: '+esc(fmtErr(e))+'</div>'; }
 }
 
-// ── 상세 ──
+/* ═══════════ 상세 모달 ═══════════ */
 async function showDetail(id){
-  const modal=document.getElementById('detailModal');
-  const content=document.getElementById('detailContent');
-  content.innerHTML='<p style="color:#9ca3af">불러오는 중...</p>';
-  modal.classList.add('show');
+  const modal=$('detailModal'), content=$('detailContent');
+  content.innerHTML='<p style="color:var(--text3)">불러오는 중...</p>'; modal.classList.add('show');
   try{
-    const r=await fetch('/api/meetings?action=detail&id='+id);
-    const d=await safeJson(r);
-    const it=d.item;
+    const r=await fetch('/api/meetings?action=detail&id='+id); const d=await safeJson(r); const it=d.item;
     if(!it){content.innerHTML='<p>회의록을 찾을 수 없습니다.</p>';return;}
     _detailSummary=it.summary||'';
-    content.innerHTML=`
-      <h2 style="font-size:1.2rem;margin-bottom:6px;padding-right:30px">${esc(it.title||'회의록')}</h2>
-      <p style="font-size:.78rem;color:#9ca3af;margin-bottom:12px">${new Date(it.created_at).toLocaleString('ko-KR')}</p>
-      ${it.keywords?'<p style="font-size:.8rem;color:#2d6a4f;margin-bottom:12px">🔑 '+esc(it.keywords)+'</p>':''}
-      <div style="background:#f9fafb;border-radius:12px;padding:14px;font-size:.85rem;line-height:1.7;white-space:pre-wrap;max-height:50vh;overflow-y:auto;border:1px solid #e5e7eb">${esc(it.summary||'')}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-        <button class="rbtn" onclick="copyDetailSummary()">📋 복사</button>
-        ${it.drive_link?'<button class="rbtn" onclick="window.open(\''+it.drive_link+'\',\'_blank\')">☁️ Drive</button>':'<button class="rbtn" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>'}
-      </div>
-      ${it.drive_link?'<button class="new-btn" style="margin-top:8px" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>':''}`;
-  }catch(e){content.innerHTML='<p style="color:#ef4444">로드 실패: '+esc(e.message)+'</p>';}
+    content.innerHTML='<h2 style="font-size:1.2rem;margin-bottom:6px;padding-right:30px">'+esc(it.title||'회의록')+'</h2>'
+      +'<p style="font-size:.78rem;color:var(--text3);margin-bottom:12px">'+new Date(it.created_at).toLocaleString('ko-KR')+'</p>'
+      +(it.keywords?'<p style="font-size:.8rem;color:var(--brand2);margin-bottom:12px">🔑 '+esc(it.keywords)+'</p>':'')
+      +'<div class="summary-box">'+esc(it.summary||'')+'</div>'
+      +'<div class="result-btns"><button class="rbtn" onclick="copyDetailSummary()">📋 복사</button>'
+      +(it.drive_link?'<button class="rbtn" onclick="window.open(\''+it.drive_link+'\',\'_blank\')">☁️ Drive</button>':'<button class="rbtn" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>')+'</div>'
+      +(it.drive_link?'<button class="new-btn" style="margin-top:8px" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>':'');
+  }catch(e){content.innerHTML='<p style="color:var(--danger)">로드 실패: '+esc(fmtErr(e))+'</p>';}
 }
-function closeDetail(){document.getElementById('detailModal').classList.remove('show');}
+function closeDetail(){$('detailModal').classList.remove('show');}
 function copyDetailSummary(){copyToClipboard(_detailSummary);}
 async function deleteMeeting(id){
   if(!confirm('이 회의록을 삭제하시겠습니까?'))return;
-  await fetch('/api/meetings?action=delete&id='+id);
-  closeDetail();loadMeetings();
-}
-function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-// 방어적 JSON 파싱: 서버가 평문(예: Vercel 타임아웃 에러 페이지)을 보내도
-// "Unexpected token" 대신 깔끔한 한국어 메시지를 보장한다.
-async function safeJson(r){
-  const text=await r.text();
-  try{ return JSON.parse(text); }
-  catch(e){
-    if(!r.ok){
-      throw new Error('서버 오류('+r.status+')로 응답을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
-    }
-    throw new Error('서버 응답 형식 오류로 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
-  }
+  try{ await fetch('/api/meetings?action=delete&id='+id); }catch(e){}
+  closeDetail(); loadMeetings(); showToast('삭제되었습니다');
 }
 
-// ── IndexedDB: 최근 녹음 5개를 이 기기에 캐시 ──
-const IDB_NAME='stella-clover', IDB_STORE='recordings', IDB_MAX=5;
-function idbOpen(){
-  return new Promise((res,rej)=>{
-    const rq=indexedDB.open(IDB_NAME,1);
-    rq.onupgradeneeded=()=>{const db=rq.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'});};
-    rq.onsuccess=()=>res(rq.result);
-    rq.onerror=()=>rej(rq.error);
+/* ═══════════ 마이페이지: 통계 · 지침 · 파일 ═══════════ */
+function refreshMyPage(){ applyProfile(); renderInstructions(); buildFolderUI(); renderStats(); renderFiles(); if(!_meetingsCache.length) loadMeetings(); }
+function renderStats(){
+  const items=_meetingsCache||[];
+  const files=items.length;
+  const chars=items.reduce((s,x)=>s+(Number(x.transcript_chars)||0),0);
+  const ai=items.filter(x=>x.summary||x.keywords).length;
+  $('statFiles').textContent=files.toLocaleString();
+  $('statChars').textContent=chars.toLocaleString();
+  $('statAi').textContent=ai.toLocaleString();
+  $('statInstr').textContent=getInstructions().length;
+}
+// 내 AI 지침
+function getInstructions(){ try{return JSON.parse(localStorage.getItem(INSTR_KEY)||'[]');}catch(e){return [];} }
+function setInstructions(arr){ try{localStorage.setItem(INSTR_KEY,JSON.stringify(arr));}catch(e){} }
+function getInstructionText(){ return getInstructions().join('\n'); }
+function renderInstructions(){
+  const arr=getInstructions(); $('instrCount').textContent=arr.length; $('statInstr')&&($('statInstr').textContent=arr.length);
+  $('instrList').innerHTML = arr.length? arr.map((t,i)=>'<div class="instr-item"><div class="t">'+esc(t)+'</div><button class="fc-act danger" onclick="delInstruction('+i+')">삭제</button></div>').join('') : '<div class="empty">등록된 지침이 없습니다.</div>';
+}
+function addInstruction(){
+  const v=$('instrInput').value.trim(); if(!v){showToast('지침 내용을 입력하세요');return;}
+  const arr=getInstructions(); arr.push(v.slice(0,1000)); setInstructions(arr);
+  $('instrInput').value=''; renderInstructions(); renderStats(); showToast('지침이 추가되었습니다');
+}
+function delInstruction(i){ const arr=getInstructions(); arr.splice(i,1); setInstructions(arr); renderInstructions(); renderStats(); }
+
+// 폴더/태그 (클라이언트 localStorage)
+function getFolders(){ try{return JSON.parse(localStorage.getItem(FOLDERS_KEY)||'[]');}catch(e){return [];} }
+function setFolders(a){ try{localStorage.setItem(FOLDERS_KEY,JSON.stringify(a));}catch(e){} }
+function getFileMeta(){ try{return JSON.parse(localStorage.getItem(FILEMETA_KEY)||'{}');}catch(e){return {};} }
+function setFileMeta(m){ try{localStorage.setItem(FILEMETA_KEY,JSON.stringify(m));}catch(e){} }
+function buildFolderUI(){
+  const folders=getFolders();
+  const sel=$('filterFolder'); const cur=sel.value;
+  sel.innerHTML='<option value="">폴더 전체</option>'+folders.map(f=>'<option value="'+esc(f)+'">'+esc(f)+'</option>').join('');
+  sel.value=cur;
+  const chips=['<button class="chip'+(_curFolder===''?' active':'')+'" onclick="selectFolder(\'\')">전체 파일</button>',
+    '<button class="chip'+(_curFolder==='__none__'?' active':'')+'" onclick="selectFolder(\'__none__\')">폴더 없음</button>']
+    .concat(folders.map(f=>'<button class="chip'+(_curFolder===f?' active':'')+'" onclick="selectFolder(\''+esc(f)+'\')">📁 '+esc(f)+'</button>'))
+    .concat(['<button class="chip" onclick="newFolder()">＋ 새 폴더</button>']);
+  $('folderChips').innerHTML=chips.join('');
+}
+function newFolder(){ const n=prompt('새 폴더 이름'); if(!n)return; const f=getFolders(); if(f.includes(n.trim())){showToast('이미 있는 폴더');return;} f.push(n.trim()); setFolders(f); buildFolderUI(); }
+function selectFolder(f){ _curFolder=f; buildFolderUI(); renderFiles(); }
+function selectType(btn){ document.querySelectorAll('.type-tab').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); _curType=btn.getAttribute('data-type'); renderFiles(); }
+function resetFilters(){ $('mySearch').value='';$('myTags').value='';$('filterFolder').value='';$('filterSort').value='new';_curFolder='';_curType='all';
+  document.querySelectorAll('.type-tab').forEach((b,i)=>b.classList.toggle('active',i===0)); buildFolderUI(); renderFiles(); }
+function moveFile(id){
+  const folders=getFolders(); if(!folders.length){showToast('먼저 폴더를 만드세요');return;}
+  const name=prompt('이동할 폴더 이름 ('+folders.join(', ')+')\n비우면 폴더에서 제거'); if(name===null)return;
+  const meta=getFileMeta(); meta[id]=meta[id]||{tags:[]}; meta[id].folder=(name||'').trim()||undefined; setFileMeta(meta); renderFiles(); showToast('이동되었습니다');
+}
+function tagFile(id){
+  const meta=getFileMeta(); const cur=(meta[id]&&meta[id].tags||[]).join(', ');
+  const v=prompt('태그 (쉼표 구분)', cur); if(v===null)return;
+  meta[id]=meta[id]||{}; meta[id].tags=v.split(',').map(s=>s.trim()).filter(Boolean); setFileMeta(meta); renderFiles();
+}
+function renderFiles(){
+  const box=$('fileList'); if(!box)return;
+  let items=(_meetingsCache||[]).slice();
+  const meta=getFileMeta();
+  const q=($('mySearch').value||'').trim().toLowerCase();
+  const tagq=($('myTags').value||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  // 타입 필터 (느슨): stt=전사 있음, minutes/ai=요약 있음
+  items=items.filter(x=>{
+    if(_curType==='stt') return (x.transcript_chars||0)>0;
+    if(_curType==='minutes'||_curType==='ai') return !!(x.summary||x.keywords);
+    return true;
   });
+  // 폴더 필터
+  items=items.filter(x=>{ const fm=meta[x.id]||{}; if(_curFolder==='')return true; if(_curFolder==='__none__')return !fm.folder; return fm.folder===_curFolder; });
+  // 검색
+  if(q) items=items.filter(x=>((x.title||'')+' '+(x.keywords||'')).toLowerCase().includes(q));
+  if(tagq.length) items=items.filter(x=>{ const t=(meta[x.id]&&meta[x.id].tags||[]).map(s=>s.toLowerCase()); return tagq.every(tq=>t.includes(tq)); });
+  // 정렬
+  const sort=$('filterSort').value;
+  items.sort((a,b)=> sort==='old'? a.id-b.id : sort==='chars'? (b.transcript_chars||0)-(a.transcript_chars||0) : b.id-a.id );
+  if(!items.length){ box.innerHTML='<div class="empty">조건에 맞는 파일이 없습니다.</div>'; return; }
+  box.innerHTML=items.map(x=>{
+    const fm=meta[x.id]||{}; const tags=(fm.tags||[]);
+    return '<div class="file-card"><div class="fc-ic">🎙️</div><div style="flex:1;min-width:0">'
+      +'<div class="fc-main" onclick="showDetail('+x.id+')"><div class="fc-title">'+esc(x.title||'회의록')
+      +(x.summary?'<span title="회의록 있음">📋</span>':'')+(x.keywords?'<span title="AI 요약">✨</span>':'')+(x.drive_link?'<span class="badge">☁️</span>':'')
+      +(fm.folder?'<span class="badge">📁 '+esc(fm.folder)+'</span>':'')+'</div>'
+      +'<div class="fc-meta">'+new Date(x.created_at).toLocaleString('ko-KR')+' · '+(x.transcript_chars||0)+'자'+(x.summary_chars?(' · 요약 '+x.summary_chars+'자'):'')+'</div>'
+      +(tags.length?'<div class="fc-kw">🏷 '+tags.map(esc).join(', ')+'</div>':'')+(x.keywords?'<div class="fc-kw">🔑 '+esc(x.keywords)+'</div>':'')+'</div>'
+      +'<div class="fc-actions">'
+      +(x.drive_link?'<button class="fc-act" onclick="shareFile(\''+x.drive_link+'\')">공유</button>':'')
+      +'<button class="fc-act" onclick="moveFile('+x.id+')">이동</button>'
+      +'<button class="fc-act" onclick="tagFile('+x.id+')">태그</button>'
+      +'<button class="fc-act" onclick="showDetail('+x.id+')">정보</button>'
+      +'<button class="fc-act" onclick="showSTT('+x.id+')">STT</button>'
+      +'<button class="fc-act danger" onclick="deleteMeeting('+x.id+')">삭제</button>'
+      +'</div></div></div>';
+  }).join('');
 }
+function shareFile(link){
+  if(navigator.share){ navigator.share({url:link}).catch(()=>{}); }
+  else { copyToClipboard(link); }
+}
+async function showSTT(id){
+  const modal=$('detailModal'), content=$('detailContent');
+  content.innerHTML='<p style="color:var(--text3)">STT 원문 불러오는 중...</p>'; modal.classList.add('show');
+  try{
+    const r=await fetch('/api/meetings?action=detail&id='+id); const d=await safeJson(r); const it=d.item;
+    if(!it){content.innerHTML='<p>찾을 수 없습니다.</p>';return;}
+    const stt=it.transcript||'(STT 원문이 저장되어 있지 않습니다)';
+    _detailSummary=stt;
+    content.innerHTML='<h2 style="font-size:1.15rem;margin-bottom:8px;padding-right:30px">🎙 STT 원본 — '+esc(it.title||'회의록')+'</h2>'
+      +'<div class="summary-box">'+esc(stt)+'</div>'
+      +'<div class="result-btns"><button class="rbtn full" onclick="copyDetailSummary()">📋 원문 복사</button></div>';
+  }catch(e){content.innerHTML='<p style="color:var(--danger)">로드 실패: '+esc(fmtErr(e))+'</p>';}
+}
+
+/* ═══════════ IndexedDB: 최근 녹음 ═══════════ */
+const IDB_NAME='stella-clover', IDB_STORE='recordings', IDB_MAX=5;
+function idbOpen(){ return new Promise((res,rej)=>{ const rq=indexedDB.open(IDB_NAME,1);
+  rq.onupgradeneeded=()=>{const db=rq.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE,{keyPath:'id'});};
+  rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error); }); }
 function idbTx(db,mode){return db.transaction(IDB_STORE,mode).objectStore(IDB_STORE);}
-async function idbAll(){
-  const db=await idbOpen();
-  return new Promise((res,rej)=>{const rq=idbTx(db,'readonly').getAll();rq.onsuccess=()=>res((rq.result||[]).sort((a,b)=>b.id-a.id));rq.onerror=()=>rej(rq.error);});
-}
+async function idbAll(){ const db=await idbOpen(); return new Promise((res,rej)=>{const rq=idbTx(db,'readonly').getAll();rq.onsuccess=()=>res((rq.result||[]).sort((a,b)=>b.id-a.id));rq.onerror=()=>rej(rq.error);}); }
 async function idbSaveRecording(blob,name){
   if(!blob||!('indexedDB' in window))return;
-  try{
-    const db=await idbOpen();
+  try{ const db=await idbOpen();
     const rec={id:Date.now(),name:name||'recording.webm',type:blob.type||'audio/webm',size:blob.size,date:new Date().toISOString(),blob};
     await new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(rec);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});
-    await idbTrim();
-    renderRecent();
-  }catch(e){/* 캐시는 베스트에포트 */}
+    await idbTrim(); renderRecent();
+  }catch(e){}
 }
-async function idbTrim(){
-  const all=await idbAll();
-  const extra=all.slice(IDB_MAX);
-  if(!extra.length)return;
-  const db=await idbOpen();
-  await new Promise(res=>{const tx=db.transaction(IDB_STORE,'readwrite');extra.forEach(r=>tx.objectStore(IDB_STORE).delete(r.id));tx.oncomplete=res;tx.onerror=res;});
-}
-async function idbDelete(id){
-  try{const db=await idbOpen();await new Promise(res=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).delete(id);tx.oncomplete=res;tx.onerror=res;});}catch(e){}
-  renderRecent();
-}
-async function loadRecent(id){
-  try{const all=await idbAll();const r=all.find(x=>x.id===id);if(!r)return;applyFile(new File([r.blob],r.name,{type:r.type}));window.scrollTo({top:0,behavior:'smooth'});}catch(e){}
-}
+async function idbTrim(){ const all=await idbAll(); const extra=all.slice(IDB_MAX); if(!extra.length)return;
+  const db=await idbOpen(); await new Promise(res=>{const tx=db.transaction(IDB_STORE,'readwrite');extra.forEach(r=>tx.objectStore(IDB_STORE).delete(r.id));tx.oncomplete=res;tx.onerror=res;}); }
+async function idbDelete(id){ try{const db=await idbOpen();await new Promise(res=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).delete(id);tx.oncomplete=res;tx.onerror=res;});}catch(e){} renderRecent(); }
+async function loadRecent(id){ try{const all=await idbAll();const r=all.find(x=>x.id===id);if(!r)return;applyFile(new File([r.blob],r.name,{type:r.type}));window.scrollTo({top:0,behavior:'smooth'});}catch(e){} }
 async function renderRecent(){
-  const card=document.getElementById('recentCard'), box=document.getElementById('recentList');
-  if(!box)return;
+  const card=$('recentCard'), box=$('recentList'); if(!box)return;
   if(!('indexedDB' in window)){card.style.display='none';return;}
-  try{
-    const all=await idbAll();
-    if(!all.length){card.style.display='none';return;}
+  try{ const all=await idbAll(); if(!all.length){card.style.display='none';return;}
     card.style.display='block';
-    box.innerHTML=all.map(r=>`
-      <div class="meeting-item" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div style="flex:1;cursor:pointer" onclick="loadRecent(${r.id})">
-          <div class="mtitle">${esc(r.name)}</div>
-          <div class="mdate">${new Date(r.date).toLocaleString('ko-KR')} · ${(r.size/1024/1024).toFixed(1)}MB</div>
-        </div>
-        <button onclick="idbDelete(${r.id})" title="삭제" style="border:none;background:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1">×</button>
-      </div>`).join('');
+    box.innerHTML=all.map(r=>'<div class="file-card"><div class="fc-ic">🎧</div><div class="fc-main" onclick="loadRecent('+r.id+')"><div class="fc-title">'+esc(r.name)+'</div><div class="fc-meta">'+new Date(r.date).toLocaleString('ko-KR')+' · '+(r.size/1024/1024).toFixed(1)+'MB</div></div><button class="fc-act danger" onclick="event.stopPropagation();idbDelete('+r.id+')">×</button></div>').join('');
   }catch(e){card.style.display='none';}
 }
 
-// ── 이미지 OCR (Tesseract.js, 필요 시 CDN 로드) ──
+/* ═══════════ 이미지 OCR ═══════════ */
 let _ocrImageFile=null, _tesseractLoaded=false;
-function onOcrImage(input){
-  const f=input.files[0];if(!f)return;
-  _ocrImageFile=f;
-  const img=document.getElementById('ocrPreview');
-  img.src=URL.createObjectURL(f);img.style.display='block';
-  document.getElementById('imgAreaText').textContent=f.name;
-  document.getElementById('ocrBtn').style.display='flex';
-  document.getElementById('ocrResult').style.display='none';
-  document.getElementById('ocrToMinutes').style.display='none';
-}
-function loadScript(src){
-  return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error('OCR 라이브러리 로드 실패'));document.head.appendChild(s);});
-}
+function onOcrImage(input){ const f=input.files[0];if(!f)return; _ocrImageFile=f;
+  const img=$('ocrPreview'); img.src=URL.createObjectURL(f);img.style.display='block';
+  $('imgAreaText').textContent=f.name; $('ocrBtn').style.display='flex'; $('ocrResult').style.display='none'; $('ocrToMinutes').style.display='none'; }
+function loadScript(src){ return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=()=>res();s.onerror=()=>rej(new Error('OCR 라이브러리 로드 실패'));document.head.appendChild(s);}); }
 async function runOcr(){
   if(!_ocrImageFile){showToast('이미지를 먼저 선택하세요');return;}
-  const prog=document.getElementById('ocrProgress'), btn=document.getElementById('ocrBtn');
-  prog.style.display='block';btn.disabled=true;
+  const prog=$('ocrProgress'), btn=$('ocrBtn'); prog.style.display='block';btn.disabled=true;
   try{
     if(!_tesseractLoaded){await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');_tesseractLoaded=true;}
     const worker=await Tesseract.createWorker('kor+eng');
-    const { data }=await worker.recognize(_ocrImageFile);
-    await worker.terminate();
+    const { data }=await worker.recognize(_ocrImageFile); await worker.terminate();
     const txt=((data&&data.text)||'').trim();
-    const box=document.getElementById('ocrResult');
-    box.textContent=txt||'(인식된 텍스트 없음)';box.style.display='block';
-    document.getElementById('ocrToMinutes').style.display=txt?'flex':'none';
-  }catch(e){showToast('OCR 실패: '+e.message);}
+    const box=$('ocrResult'); box.textContent=txt||'(인식된 텍스트 없음)';box.style.display='block';
+    $('ocrToMinutes').style.display=txt?'flex':'none';
+  }catch(e){showToast('OCR 실패: '+fmtErr(e));}
   finally{prog.style.display='none';btn.disabled=false;}
 }
 async function ocrToMinutes(){
-  const text=document.getElementById('ocrResult').textContent.trim();
+  const text=$('ocrResult').textContent.trim();
   if(!text||text==='(인식된 텍스트 없음)'){showToast('추출된 텍스트가 없습니다');return;}
-  const btn=document.getElementById('ocrToMinutes');btn.disabled=true;btn.textContent='⏳ 생성 중...';
+  const btn=$('ocrToMinutes');btn.disabled=true;btn.textContent='⏳ 생성 중...';
   try{
-    const r=await fetch('/api/summarize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,audioFileName:'ocr_image'})});
-    const d2=await r.json();
+    const r=await fetch('/api/summarize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,audioFileName:'ocr_image',lang:_selectedLang,userInstruction:getInstructionText()})});
+    const d2=await safeJson(r);
     if(!d2.ok)throw new Error(d2.message||'생성 실패');
     _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
-    document.getElementById('summaryBox').textContent=_summary;
-    document.getElementById('resultSection').style.display='block';
-    document.getElementById('copyKwBtn').style.display=_keywords?'flex':'none';
-    document.getElementById('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
-    document.getElementById('copyLinksBtn').style.display=extractUrls(_summary).length?'flex':'none';
-    document.getElementById('driveBtn').style.display=_driveLink?'flex':'none';
-    saveSession();loadMeetings();
-    document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
-  }catch(e){showToast('회의록 생성 실패: '+e.message);}
+    setStep(4,'done'); showResult(); saveSession(); loadMeetings();
+    $('step4').scrollIntoView({behavior:'smooth'});
+  }catch(e){showToast('회의록 생성 실패: '+fmtErr(e));}
   finally{btn.disabled=false;btn.textContent='✨ 이 텍스트로 회의록 생성';}
 }
 
-// ── 세션 유지: 마지막 회의록을 localStorage에 저장/복원 (이 기기) ──
-const SESSION_KEY='cl_last_session';
-function saveSession(){
-  try{localStorage.setItem(SESSION_KEY,JSON.stringify({summary:_summary,title:_title,keywords:_keywords,driveLink:_driveLink,ts:Date.now()}));}catch(e){}
-}
+/* ═══════════ 세션 유지 ═══════════ */
+function saveSession(){ try{localStorage.setItem(SESSION_KEY,JSON.stringify({summary:_summary,title:_title,keywords:_keywords,driveLink:_driveLink,ts:Date.now()}));}catch(e){} }
 function restoreSession(){
   let s;try{s=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch(e){return;}
   if(!s||!s.summary)return;
   _summary=s.summary;_title=s.title||'회의록';_keywords=s.keywords||'';_driveLink=s.driveLink||'';
-  document.getElementById('summaryBox').textContent=_summary;
-  document.getElementById('resultSection').style.display='block';
-  document.getElementById('copyKwBtn').style.display=_keywords?'flex':'none';
-  document.getElementById('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
-  document.getElementById('copyLinksBtn').style.display=extractUrls(_summary).length?'flex':'none';
-  if(_driveLink)document.getElementById('driveBtn').style.display='flex';
+  setStep(4,'done'); showResult();
 }
 
-// ── 자동저장: 5분마다 현재 회의록을 Google Drive(Drafts)에 백업 ──
+/* ═══════════ 자동저장 ═══════════ */
 let _lastAutosaved='';
 async function autosaveTick(){
   if(!_summary||!_summary.trim()||_summary===_lastAutosaved)return;
-  const content=_summary, name=(_title||'draft')+'_autosave';
-  try{
-    const r=await fetch('/api/autosave',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,name})});
-    const d=await r.json();
-    if(d.ok&&!d.skipped){_lastAutosaved=content;showToast('💾 자동저장됨');}
+  try{ const r=await fetch('/api/autosave',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:_summary,name:(_title||'draft')+'_autosave'})});
+    const d=await safeJson(r); if(d.ok&&!d.skipped){_lastAutosaved=_summary;showToast('💾 자동저장됨');}
   }catch(e){}
 }
 setInterval(autosaveTick,5*60*1000);
 
-loadMeetings();
-renderRecent();
-restoreSession();
+/* ═══════════ 초기화 ═══════════ */
+applyTheme(); applyProfile(); resetSteps();
+loadMeetings(); renderRecent(); restoreSession();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
 </body>
