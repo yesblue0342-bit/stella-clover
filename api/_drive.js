@@ -57,6 +57,15 @@ export async function uploadBuffer(drive, folderId, fileName, mimeType, buffer) 
   return r.data;
 }
 
+// 파일 id로 원본 바이트 다운로드 (worker가 Drive에 올린 청크를 다시 받아 전사).
+export async function downloadFileById(drive, fileId) {
+  const r = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: true },
+    { responseType: "arraybuffer" }
+  );
+  return Buffer.from(r.data);
+}
+
 // 지정 폴더에서 modifiedTime이 cutoffIso 이전인 파일을 모두 삭제. 삭제 개수 반환.
 export async function deleteOlderThan(drive, folderId, cutoffIso) {
   let deleted = 0, pageToken;

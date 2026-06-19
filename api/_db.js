@@ -98,4 +98,37 @@ export const CREATE_TABLE = `
   IF COL_LENGTH('cl_meetings','audio_file') IS NULL ALTER TABLE cl_meetings ADD audio_file NVARCHAR(300);
   IF COL_LENGTH('cl_meetings','audio_session') IS NULL ALTER TABLE cl_meetings ADD audio_session NVARCHAR(100);`;
 
+// 백그라운드 전사 작업 테이블 (B1). JSON 컬럼은 항상 JSON.stringify로 쓰고 read 시 try/catch 파싱.
+export const CREATE_JOBS = `
+  IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='transcribe_jobs')
+  CREATE TABLE transcribe_jobs (
+    job_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    user_id NVARCHAR(128),
+    language NVARCHAR(16),
+    model NVARCHAR(64),
+    status NVARCHAR(32) NOT NULL DEFAULT 'processing',
+    chunks_total INT NOT NULL DEFAULT 0,
+    chunks_done INT NOT NULL DEFAULT 0,
+    chunk_refs NVARCHAR(MAX),
+    segments_json NVARCHAR(MAX),
+    speakers_json NVARCHAR(MAX),
+    summary_json NVARCHAR(MAX),
+    audio_ref NVARCHAR(MAX),
+    title NVARCHAR(300),
+    error_msg NVARCHAR(MAX),
+    created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2 DEFAULT SYSUTCDATETIME()
+  );
+  IF COL_LENGTH('transcribe_jobs','segments_json') IS NULL ALTER TABLE transcribe_jobs ADD segments_json NVARCHAR(MAX);
+  IF COL_LENGTH('transcribe_jobs','speakers_json') IS NULL ALTER TABLE transcribe_jobs ADD speakers_json NVARCHAR(MAX);
+  IF COL_LENGTH('transcribe_jobs','summary_json') IS NULL ALTER TABLE transcribe_jobs ADD summary_json NVARCHAR(MAX);
+  IF COL_LENGTH('transcribe_jobs','audio_ref') IS NULL ALTER TABLE transcribe_jobs ADD audio_ref NVARCHAR(MAX);
+  IF COL_LENGTH('transcribe_jobs','title') IS NULL ALTER TABLE transcribe_jobs ADD title NVARCHAR(300);`;
+
+// JSON 컬럼 안전 파싱 (B1: 파싱 버그 방지)
+export function parseJson(v, fallback) {
+  if (v == null) return fallback;
+  try { const o = JSON.parse(v); return o == null ? fallback : o; } catch (e) { return fallback; }
+}
+
 export { sql };
