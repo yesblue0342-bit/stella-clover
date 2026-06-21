@@ -69,3 +69,8 @@ STATUS: DONE
    명시했고, 본 세션의 기존 패턴도 main 직접 푸시였다. 피처 브랜치
    `claude/todo-implementation-ju0mw8`는 origin/main보다 11커밋 뒤처진 stale 상태라
    이 핫픽스(현 main 코드 기반)를 거기에 올리면 다국어 기능이 누락되어 부적합.
+
+## [autopilot] 음성 재업로드/요약 확대/정확도 (2026-06-21)
+- CV1 근본원인: 같은 파일 재선택 시 file input change 미발화 + 새 파일 선택 시 이전 결과/단계 미초기화 → "다시 업로드해도 회의록 생성 안 됨"처럼 보임. 수정: onFileSelect input.value='' + applyFile resetSteps/결과변수 클리어/genBtn 활성.
+- CV2: 요약 길이는 프롬프트(요약 10~16줄 + 상세 논의 내용 섹션)+max_tokens 4000으로 확대.
+- CV3 가정: 정확도는 (1) 프롬프트의 사실충실/창작금지/불확실 표기, (2) summarize temperature 0.2, (3) Whisper temperature 0(결정적)으로 향상. 모델은 비용·"청구 중복 0" 정책상 gpt-4o-mini 유지(gpt-4o 업그레이드는 비용 증가라 보류). 실제 품질은 라이브(OPENAI_API_KEY) 호출에서만 확인 가능.

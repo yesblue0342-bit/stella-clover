@@ -28,7 +28,7 @@ export async function transcribeBuffer({ buffer, ext = ".wav", lang = "ko", mode
   const useTs = modelSupportsTimestamps(model);
   return await retry(async () => {
     const file = await toFile(buffer, `audio${ext}`);
-    const params = { file, model, prompt: SAP_PROMPT + (prevText ? " " + prevText : "") };
+    const params = { file, model, prompt: SAP_PROMPT + (prevText ? " " + prevText : ""), temperature: 0 }; // 정확도: 결정적(greedy) 디코딩
     if (lang && lang !== "auto") params.language = lang;
     params.response_format = useTs ? "verbose_json" : "text";
     const resp = await openai.audio.transcriptions.create(params);
