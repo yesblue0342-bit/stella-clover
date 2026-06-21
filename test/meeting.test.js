@@ -4,8 +4,24 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   prepareTranscript, needsMapReduce, splitTranscript, splitCoversAll, SINGLE_PASS_LIMIT,
-  buildMinutesSystemPrompt, buildSummarySystemPrompt, buildPartialSystemPrompt,
+  buildMinutesSystemPrompt, buildSummarySystemPrompt, buildPartialSystemPrompt, meetingDateFromName,
 } from "../api/_meeting.js";
+
+test("meetingDateFromName: 파일명에서 회의 날짜 추출(260612/20260612/2026-06-12)", () => {
+  assert.equal(meetingDateFromName("260612_주간회의.m4a"), "2026-06-12");
+  assert.equal(meetingDateFromName("20260612_회의.wav"), "2026-06-12");
+  assert.equal(meetingDateFromName("2026-06-12 회의.m4a"), "2026-06-12");
+  assert.equal(meetingDateFromName("회의록.m4a"), "");     // 날짜 없음
+  assert.equal(meetingDateFromName("recording.webm"), ""); // 날짜 없음
+  assert.equal(meetingDateFromName("261399_x.m4a"), "");   // 잘못된 월/일 거부
+});
+
+test("buildMinutesSystemPrompt: meetingDate 있으면 일시 기본값으로 파일 날짜 힌트", () => {
+  const p = buildMinutesSystemPrompt({ meetingDate: "2026-06-12" });
+  assert.match(p, /파일 날짜 2026-06-12/);
+  const p2 = buildMinutesSystemPrompt({}); // 없으면 미확인
+  assert.match(p2, /일시: \(본문에 명시되면 기재, 없으면 미확인\)/);
+});
 
 test("prepareTranscript: 트림/개행정규화만, 길이 컷 없음(전체 보존)", () => {
   const big = "가".repeat(50000);

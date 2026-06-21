@@ -2,7 +2,7 @@
 import OpenAI from "openai";
 import { getPool, sql } from "./_db.js";
 import { getDrive, ensurePath, uploadText, dateParts } from "./_drive.js";
-import { prepareTranscript, needsMapReduce, splitTranscript, buildMinutesSystemPrompt, buildPartialSystemPrompt } from "./_meeting.js";
+import { prepareTranscript, needsMapReduce, splitTranscript, buildMinutesSystemPrompt, buildPartialSystemPrompt, meetingDateFromName } from "./_meeting.js";
 
 export const config = { maxDuration: 120 };
 
@@ -49,7 +49,8 @@ export default async function handler(req, res) {
     });
     return resp.choices[0].message.content || "";
   }
-  const minutesSystem = buildMinutesSystemPrompt({ outLang, writtenDate, customBlock });
+  const meetingDate = meetingDateFromName(audioFileName); // 파일명(예: 260612_…)에서 회의 일시 추출
+  const minutesSystem = buildMinutesSystemPrompt({ outLang, writtenDate, meetingDate, customBlock });
 
   let summary;
   try {

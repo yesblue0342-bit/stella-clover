@@ -124,7 +124,7 @@ input[type=file]{display:none}
 .file-card .fc-main{flex:1;min-width:0;cursor:pointer}
 .fc-title{font-weight:700;font-size:.9rem;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .fc-meta{font-size:.74rem;color:var(--text3);margin-top:3px}
-.fc-kw{font-size:.72rem;color:var(--brand2);margin-top:4px}
+.fc-kw{font-size:.72rem;color:var(--brand2);margin-top:4px}.kw-chip{display:inline-block;cursor:pointer;padding:1px 7px;margin:1px 1px;border-radius:999px;background:var(--surface2,rgba(127,127,127,.12));border:1px solid var(--border,rgba(127,127,127,.25));color:inherit;font-size:.74rem;line-height:1.5}.kw-chip:hover{background:var(--brand,#7c5cff);color:#fff;border-color:transparent}
 .fc-actions{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
 .fc-act{border:1px solid var(--border);background:var(--surface2);border-radius:8px;padding:5px 8px;font-size:.72rem;font-weight:700;cursor:pointer;color:var(--text2)}
 .fc-act:hover{border-color:var(--brand2);color:var(--brand2)}
@@ -757,11 +757,12 @@ async function showDetail(id){
     _detailSummary=it.summary||'';
     content.innerHTML='<h2 style="font-size:1.2rem;margin-bottom:6px;padding-right:30px">'+esc(it.title||'회의록')+'</h2>'
       +'<p style="font-size:.78rem;color:var(--text3);margin-bottom:12px">'+new Date(it.created_at).toLocaleString('ko-KR')+'</p>'
-      +(it.keywords?'<p style="font-size:.8rem;color:var(--brand2);margin-bottom:12px">🔑 '+esc(it.keywords)+'</p>':'')
+      +(it.keywords?'<p style="font-size:.8rem;color:var(--brand2);margin-bottom:12px">🔑 '+String(it.keywords).split(',').map(function(s){return s.trim();}).filter(Boolean).map(function(k){return '<span class="kw-chip" onclick="filterByKeyword(\''+escAttr(k)+'\')">'+esc(k)+'</span>';}).join(' ')+'</p>':'')
       +'<div class="summary-box">'+esc(it.summary||'')+'</div>'
       +'<div class="result-btns"><button class="rbtn" onclick="copyDetailSummary()">📋 복사</button>'
-      +(it.drive_link?'<button class="rbtn" onclick="window.open(\''+it.drive_link+'\',\'_blank\')">☁️ Drive</button>':'<button class="rbtn" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>')+'</div>'
-      +(it.drive_link?'<button class="new-btn" style="margin-top:8px" onclick="deleteMeeting('+it.id+')">🗑 삭제</button>':'');
+      +'<button class="rbtn" onclick="showSTT('+it.id+')">🎙 STT 원본</button>'
+      +(it.drive_link?'<button class="rbtn" onclick="window.open(\''+it.drive_link+'\',\'_blank\')">☁️ 원본 파일</button>':'')
+      +'<button class="rbtn" onclick="deleteMeeting('+it.id+')">🗑 삭제</button></div>';
   }catch(e){content.innerHTML='<p style="color:var(--danger)">로드 실패: '+esc(fmtErr(e))+'</p>';}
 }
 function closeDetail(){$('detailModal').classList.remove('show');}
@@ -858,7 +859,8 @@ function renderFiles(){
       +(x.summary?'<span title="회의록 있음">📋</span>':'')+(x.keywords?'<span title="AI 요약">✨</span>':'')+(x.drive_link?'<span class="badge">☁️</span>':'')
       +(fm.folder?'<span class="badge">📁 '+esc(fm.folder)+'</span>':'')+'</div>'
       +'<div class="fc-meta">'+new Date(x.created_at).toLocaleString('ko-KR')+' · '+(x.transcript_chars||0)+'자'+(x.summary_chars?(' · 요약 '+x.summary_chars+'자'):'')+'</div>'
-      +(tags.length?'<div class="fc-kw">🏷 '+tags.map(esc).join(', ')+'</div>':'')+(x.keywords?'<div class="fc-kw">🔑 '+esc(x.keywords)+'</div>':'')+'</div>'
+      +(tags.length?'<div class="fc-kw">🏷 '+tags.map(function(t){return '<span class="kw-chip" onclick="event.stopPropagation();filterByTag(\''+escAttr(t)+'\')">'+esc(t)+'</span>';}).join(' ')+'</div>':'')
+      +(x.keywords?'<div class="fc-kw">🔑 '+String(x.keywords).split(',').map(function(s){return s.trim();}).filter(Boolean).map(function(k){return '<span class="kw-chip" onclick="event.stopPropagation();filterByKeyword(\''+escAttr(k)+'\')">'+esc(k)+'</span>';}).join(' ')+'</div>':'')+'</div>'
       +'<div class="fc-actions">'
       +(x.drive_link?'<button class="fc-act" onclick="shareFile(\''+x.drive_link+'\')">공유</button>':'')
       +'<button class="fc-act" onclick="moveFile('+x.id+')">이동</button>'
@@ -868,6 +870,26 @@ function renderFiles(){
       +'<button class="fc-act danger" onclick="deleteMeeting('+x.id+')">삭제</button>'
       +'</div></div></div>';
   }).join('');
+}
+// onclick 속성 안전용: 따옴표/백슬래시/꺾쇠 제거(표시 텍스트는 esc로 따로 처리)
+function escAttr(s){ return String(s==null?'':s).replace(/['"\\<>]/g,''); }
+// 🔑 키워드 클릭 → 그 키워드로 파일 필터(검색창에 반영). 🏷 태그 클릭 → 태그 필터.
+function filterByKeyword(kw){
+  kw=String(kw||'').trim(); if(!kw)return;
+  try{ closeDetail(); }catch(e){}
+  const el=$('mySearch'); if(el) el.value=kw;
+  const tg=$('myTags'); if(tg) tg.value=''; // 키워드 검색은 태그 필터 비움
+  _curType='all';
+  if($('tabMy').classList.contains('hidden')) showTab('my'); else renderFiles();
+  showToast('🔑 "'+kw+'" 로 필터됨');
+}
+function filterByTag(tag){
+  tag=String(tag||'').trim(); if(!tag)return;
+  try{ closeDetail(); }catch(e){}
+  const el=$('myTags'); if(el) el.value=tag;
+  const sr=$('mySearch'); if(sr) sr.value='';
+  if($('tabMy').classList.contains('hidden')) showTab('my'); else renderFiles();
+  showToast('🏷 "'+tag+'" 로 필터됨');
 }
 function shareFile(link){
   if(navigator.share){ navigator.share({url:link}).catch(()=>{}); }
