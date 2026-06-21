@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Stella Clover — 음성 텍스트</title>
+<title>Stella Clover</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#1a4731">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -169,7 +169,7 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
 
 <header class="appbar">
   <div class="appbar-in">
-    <div class="logo"><span class="leaf">🍀</span> 음성 텍스트</div>
+    <div class="logo"><span class="leaf">🍀</span> Stella Clover</div>
     <div class="tabs">
       <button class="tab active" id="tabBtnConvert" onclick="showTab('convert')">변환</button>
       <button class="tab" id="tabBtnMy" onclick="showTab('my')">마이</button>
@@ -648,7 +648,7 @@ async function generate(){
     aiProgress(40,'🤖 Whisper API 처리 → 회의록 작성','AI가 회의록을 작성하고 있습니다');
     const r2=await fetch('/api/summarize',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile&&currentAudioFile.name)||'recording.webm',sessionId,lang:_selectedLang,userInstruction:getInstructionText()})
+      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile&&currentAudioFile.name)||'recording.webm',fileDate:(currentAudioFile&&currentAudioFile.lastModified)?new Date(currentAudioFile.lastModified).toISOString().slice(0,10):'',sessionId,lang:_selectedLang,userInstruction:getInstructionText()})
     });
     if(!r2.ok){const txt=await r2.text();throw new Error('회의록 생성 실패('+r2.status+'): '+txt.slice(0,100));}
     const d2=await safeJson(r2);

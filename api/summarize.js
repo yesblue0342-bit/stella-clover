@@ -2,6 +2,7 @@
 import OpenAI from "openai";
 import { getPool, sql } from "./_db.js";
 import { getDrive, ensurePath, uploadText, dateParts } from "./_drive.js";
+import { prepareTranscript, needsMapReduce, splitTranscript, buildMinutesSystemPrompt, buildPartialSystemPrompt } from "./_meeting.js";
 
 export const config = { maxDuration: 120 };
 
@@ -19,7 +20,11 @@ async function retry(fn, times = 3, delay = 2000) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
 
-  const { transcript, audioFileName, sessionId, lang, userInstruction } = req.body || {};
+  const { transcript: rawTranscript, audioFileName, sessionId, lang, userInstruction, fileDate } = req.body || {};
+  // 전사 전체 사용(잘림 없음). 합본 원본을 회의록·요약 입력으로 그대로 전달.
+  const transcript = prepareTranscript(rawTranscript);
+  // 작성일: 파일 메타(fileDate, YYYY-MM-DD) 우선, 없으면 오늘.
+  const writtenDate = (String(fileDate || "").match(/\d{4}-\d{2}-\d{2}/) || [])[0] || new Date().toISOString().slice(0, 10);
   const LANG_NAMES = {
     ko: "한국어", en: "English", ja: "日本語", zh: "中文",
     vi: "Tiếng Việt", th: "ภาษาไทย", es: "Español", fr: "Français",
@@ -34,68 +39,34 @@ export default async function handler(req, res) {
     ? `\n\n[사용자 추가 지침 — 우선 반영]\n${customInstruction}\n`
     : "";
 
-  // 1. AI 회의록 (SAP/ERP 컨설팅 컨텍스트)
+  // 1. AI 회의록 — 전사 전체를 입력으로 사용(잘림 없음). 너무 길면 map-reduce(부분요약→통합)로 누락 0.
+  async function llmText(system, user, max_tokens) {
+    const resp = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      temperature: 0.2,
+      max_tokens,
+    });
+    return resp.choices[0].message.content || "";
+  }
+  const minutesSystem = buildMinutesSystemPrompt({ outLang, writtenDate, customBlock });
+
   let summary;
   try {
-    summary = await retry(async () => {
-      const resp = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `당신은 SAP/ERP 컨설팅 프로젝트 전문 회의록 작성 AI입니다.
-회의 참석자는 SAP 컨설턴트, 개발자, 현업 담당자입니다.
-SAP 전문용어(ABAP, BAPI, IDoc, BOM, MRP, QM, PP, MM, SD, FI, CO, S/4HANA, 검사로트, 자재마스터, 생산오더, 고도화, 인터페이스, 마이그레이션 등)를 정확히 이해하고 회의록에 반영하세요.
-
-[정확도 최우선 규칙]
-- 실제 전사(발언) 내용에만 근거하여 작성하고, 없는 사실을 추측·창작하지 마세요.
-- 음성 인식(STT) 오류로 보이는 단어만 SAP/업무 맥락에 맞게 신중히 교정하세요(과도한 의역 금지).
-- 발언이 불명확하거나 정보가 부족한 항목은 임의로 채우지 말고 "(불확실)" 또는 "(미상)"으로 표기하세요.
-- 숫자·일정·담당자·결정사항은 전사에 명시된 경우에만 기재하고, 추정 시 "(추정)"을 덧붙이세요.
-
-아래 형식으로 ${outLang} 회의록을 작성하세요. 모든 내용을 ${outLang}로 작성하세요:
-
-# 회의록
-
-## 회의 제목
-(내용에서 추론)
-
-## 회의 일시
-${new Date().toLocaleDateString("ko-KR")}
-
-## 참석자
-(추론 또는 "미상")
-
-## 회의 내용 요약
-(핵심을 충분히 상세하게 10~16줄로, 논의 배경·목적·핵심 쟁점·근거를 SAP 모듈/기능 중심으로 정리)
-
-## 상세 논의 내용
-(주제별로 소제목을 나눠 논의 흐름과 발언 요지를 구체적으로 서술 — 약 반 페이지 분량. 각 주제마다: 무엇을 왜 논의했는지, 어떤 의견·근거·이견이 오갔는지, 어떻게 정리되었는지를 단락으로 풀어 작성. 전사에 근거가 없는 내용은 만들지 말 것)
-
-## 주요 결정사항
-- (항목별, 결정 배경 한 줄 포함)
-
-## Action Item
-| 담당자 | 내용 | 완료 예정일 |
-|--------|------|------------|
-| | | |
-
-## 이슈 사항
-- (기술적 이슈, 미결정 사항, 리스크)
-
-## 차기 일정
-- (있으면)
-
-## 주요 키워드
-(이 회의의 핵심 SAP 용어/주제를 쉼표로 5~10개)${customBlock}`
-          },
-          { role: "user", content: `다음 SAP 프로젝트 회의 내용으로 회의록을 작성해주세요:\n\n${transcript}` }
-        ],
-        temperature: 0.2,
-        max_tokens: 4000
-      });
-      return resp.choices[0].message.content;
-    });
+    if (needsMapReduce(transcript)) {
+      // map: 분할 부분요약(누락 없이) → reduce: 통합 회의록
+      const parts = splitTranscript(transcript);
+      const partials = [];
+      for (let i = 0; i < parts.length; i++) {
+        const ps = buildPartialSystemPrompt({ outLang, idx: i, total: parts.length });
+        const pt = await retry(() => llmText(ps, parts[i], 2000));
+        partials.push(`[부분 ${i + 1}/${parts.length}]\n${pt}`);
+      }
+      const combined = partials.join("\n\n");
+      summary = await retry(() => llmText(minutesSystem, `다음은 회의 전사의 부분요약 모음입니다. 누락 없이 통합해 회의록을 작성하세요:\n\n${combined}`, 4000));
+    } else {
+      summary = await retry(() => llmText(minutesSystem, `다음 회의 전사 전체로 회의록을 작성해주세요:\n\n${transcript}`, 4000));
+    }
   } catch (e) {
     return res.status(500).json({ ok: false, message: "AI 회의록 생성 실패: " + e.message });
   }

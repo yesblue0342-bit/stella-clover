@@ -24,7 +24,7 @@ export async function structuredSummary(transcript, lang = "ko") {
 {"oneLine":"한 줄 요약","topics":["핵심 주제"],"decisions":["결정사항"],"actionItems":[{"who":"담당자 또는 미상","what":"할 일","due":"기한 또는 빈 문자열"}],"keywords":["키워드 5~10"]}
 SAP 전문용어(ABAP, BAPI, IDoc, BOM, MRP, QM, PP, MM, SD, FI, CO, S/4HANA, 검사로트, 자재마스터, 생산오더, 고도화, 인터페이스, 마이그레이션 등)를 정확히 반영하고, 음성 인식 오류로 보이는 용어는 SAP 맥락에 맞게 교정하세요.`
       },
-      { role: "user", content: String(transcript || "").slice(0, 24000) }
+      { role: "user", content: String(transcript || "").replace(/\r\n/g, "\n").trim() } /* 전사 전체 사용(24000자 잘림 제거) — AI 요약이 일부만 반영되던 문제 수정 */
     ]
   });
   const d = safeParse(resp.choices?.[0]?.message?.content, {});
