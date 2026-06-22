@@ -656,7 +656,7 @@ async function generate(){
     aiProgress(100,'✅ AI 변환 완료','회의록이 생성되었습니다');
     setStep(3,'done'); setStep(4,'done');
 
-    _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
+    _summary=d2.summary||'';_title=d2.title||defaultMeetingTitle();_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
     showResult(); $('step4').scrollIntoView({behavior:'smooth'});
 
     if(failed) showErr('⚠️ '+failed+'개 구간 변환에 실패했지만 나머지로 회의록을 생성했습니다.');
@@ -666,7 +666,7 @@ async function generate(){
       if(d2.warnings.dbError)w+='DB 저장 실패: '+d2.warnings.dbError;
       showErr('⚠️ 회의록은 생성됐으나 일부 저장 실패: '+w);
     }
-    saveSession(); loadMeetings();
+    saveSession(); invalidateListCache(); loadMeetings();
     idbSaveRecording(audio, (currentAudioFile&&currentAudioFile.name)||((d2.title||'recording')+'.webm'));
   }catch(e){
     showErr('오류: '+fmtErr(e));
@@ -715,9 +715,10 @@ function resetAll(){
 
 /* ═══════════ 회의록 이력 (변환 탭) ═══════════ */
 function renderMeetingItems(items){
-  return items.map(x=>'<div class="file-card"><div class="fc-ic">🎙️</div><div class="fc-main" onclick="showDetail('+x.id+')">'
-    +'<div class="fc-title">'+esc(x.title||'회의록')+(x.summary||x.keywords?'<span title="회의록 있음">📋</span>':'')+(x.keywords?'<span title="AI 요약">✨</span>':'')+(x.drive_link?'<span class="badge">☁️</span>':'')+'</div>'
-    +'<div class="fc-meta">'+new Date(x.created_at).toLocaleString('ko-KR')+' · '+(x.transcript_chars||0)+'자</div>'
+  return items.map(x=>'<div class="file-card"><div class="fc-ic">🎙️</div><div class="fc-main" style="flex:1;min-width:0">'
+    +'<div class="fc-title" onclick="showDetail('+x.id+')">'+esc(x.title||'회의록')+(x.summary||x.keywords?'<span title="회의록 있음">📋</span>':'')+(x.keywords?'<span title="AI 요약">✨</span>':'')+(x.drive_link?'<span class="badge">☁️</span>':'')
+    +'<span class="fc-edit" title="제목 변경" onclick="event.stopPropagation();renameMeeting('+x.id+')" style="cursor:pointer;margin-left:6px">✏️</span></div>'
+    +'<div class="fc-meta" onclick="showDetail('+x.id+')">'+new Date(x.created_at).toLocaleString('ko-KR')+' · '+(x.transcript_chars||0)+'자</div>'
     +(x.keywords?'<div class="fc-kw">🔑 '+esc(x.keywords)+'</div>':'')+'</div></div>').join('');
 }
 async function loadMeetings(){
@@ -731,7 +732,7 @@ async function renderList(url,cache){
   const list=$('meetingList');
   if(!(cache&&list.querySelector('.file-card'))) list.innerHTML='<div class="empty">불러오는 중...</div>';
   try{
-    const r=await fetch(url); const d=await safeJson(r); const items=d.items||[];
+    const r=await fetch(url,{cache:'no-store'}); const d=await safeJson(r); const items=d.items||[];
     _meetingsCache=items;
     if(cache){try{localStorage.setItem(LIST_CACHE_KEY,JSON.stringify({ts:Date.now(),items}));}catch(e){}}
     list.innerHTML = items.length?renderMeetingItems(items):('<div class="empty">'+esc(d.message||'회의록 없음')+'</div>');
@@ -770,8 +771,34 @@ function copyDetailSummary(){copyToClipboard(_detailSummary);}
 async function deleteMeeting(id){
   if(!confirm('이 회의록을 삭제하시겠습니까?'))return;
   try{ await fetch('/api/meetings?action=delete&id='+id); }catch(e){}
-  closeDetail(); loadMeetings(); showToast('삭제되었습니다');
+  invalidateListCache(); closeDetail(); loadMeetings(); showToast('삭제되었습니다');
 }
+// ✏️ 회의 저장 제목 변경. 현재 제목을 기본값으로 prompt → /api/meetings?action=rename → 캐시 즉시 반영.
+async function renameMeeting(id){
+  const cur=(_meetingsCache||[]).find(function(m){return String(m.id)===String(id);});
+  const old=(cur&&cur.title)||'';
+  const v=prompt('회의 저장 제목을 입력하세요', old);
+  if(v===null)return;
+  const title=v.trim();
+  if(!title){ showToast('제목을 입력하세요'); return; }
+  if(title===old)return;
+  try{
+    const r=await fetch('/api/meetings?action=rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,title:title})});
+    const d=await safeJson(r);
+    if(!d.ok){ showErr('제목 변경 실패: '+(d.message||r.status)); return; }
+    // 로컬 캐시 즉시 갱신 → 재호출 없이 화면 반영(최신화)
+    if(cur) cur.title=d.title||title;
+    invalidateListCache();
+    if($('meetingList')) $('meetingList').innerHTML=renderMeetingItems(_meetingsCache);
+    if(!$('tabMy').classList.contains('hidden')) renderFiles();
+    showToast('제목이 변경되었습니다');
+  }catch(e){ showErr('제목 변경 실패: '+fmtErr(e)); }
+}
+// 목록 캐시 무효화(저장/삭제/제목변경 후 오래된 목록이 먼저 보이는 것 방지).
+function invalidateListCache(){ try{ localStorage.removeItem(LIST_CACHE_KEY); }catch(e){} }
+// 업로드 기본(키) 제목 — 오늘날짜+지금시각 "YYYY-MM-DD HH:MM 회의록"(기기 로컬=KST).
+function defaultMeetingTitle(){ var d=new Date(),p=function(n){return String(n).padStart(2,'0');};
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+' 회의록'; }
 
 /* ═══════════ 마이페이지: 통계 · 지침 · 파일 ═══════════ */
 function refreshMyPage(){ applyProfile(); renderInstructions(); buildFolderUI(); renderStats(); renderFiles(); if(!_meetingsCache.length) loadMeetings(); }
@@ -862,6 +889,7 @@ function renderFiles(){
       +(tags.length?'<div class="fc-kw">🏷 '+tags.map(function(t){return '<span class="kw-chip" onclick="event.stopPropagation();filterByTag(\''+escAttr(t)+'\')">'+esc(t)+'</span>';}).join(' ')+'</div>':'')
       +(x.keywords?'<div class="fc-kw">🔑 '+String(x.keywords).split(',').map(function(s){return s.trim();}).filter(Boolean).map(function(k){return '<span class="kw-chip" onclick="event.stopPropagation();filterByKeyword(\''+escAttr(k)+'\')">'+esc(k)+'</span>';}).join(' ')+'</div>':'')+'</div>'
       +'<div class="fc-actions">'
+      +'<button class="fc-act" onclick="renameMeeting('+x.id+')" title="제목 변경">✏️ 제목</button>'
       +(x.drive_link?'<button class="fc-act" onclick="shareFile(\''+x.drive_link+'\')">공유</button>':'')
       +'<button class="fc-act" onclick="moveFile('+x.id+')">이동</button>'
       +'<button class="fc-act" onclick="tagFile('+x.id+')">태그</button>'

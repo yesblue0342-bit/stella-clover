@@ -5,7 +5,23 @@ import assert from "node:assert/strict";
 import {
   prepareTranscript, needsMapReduce, splitTranscript, splitCoversAll, SINGLE_PASS_LIMIT,
   buildMinutesSystemPrompt, buildSummarySystemPrompt, buildPartialSystemPrompt, meetingDateFromName,
+  defaultMeetingTitle, resolveMeetingTitle,
 } from "../api/_meeting.js";
+
+test("defaultMeetingTitle: KST 날짜+시각 키 제목", () => {
+  // 2026-06-22T10:38:00Z = KST 19:38
+  assert.equal(defaultMeetingTitle(new Date("2026-06-22T10:38:00Z")), "2026-06-22 19:38 회의록");
+  // 자정 경계: 2026-06-21T15:00:00Z = KST 2026-06-22 00:00
+  assert.equal(defaultMeetingTitle(new Date("2026-06-21T15:00:00Z")), "2026-06-22 00:00 회의록");
+  assert.match(defaultMeetingTitle(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} 회의록$/);
+});
+
+test("resolveMeetingTitle: 의미있는 제목 보존, generic/빈값은 날짜+시각", () => {
+  assert.equal(resolveMeetingTitle("SAP 프로젝트 점검", new Date("2026-06-22T10:38:00Z")), "SAP 프로젝트 점검");
+  assert.equal(resolveMeetingTitle("", new Date("2026-06-22T10:38:00Z")), "2026-06-22 19:38 회의록");
+  assert.equal(resolveMeetingTitle("회의록", new Date("2026-06-22T10:38:00Z")), "2026-06-22 19:38 회의록");
+  assert.equal(resolveMeetingTitle('보고/회의:점검', new Date()), "보고회의점검"); // 금지문자 제거
+});
 
 test("meetingDateFromName: 파일명에서 회의 날짜 추출(260612/20260612/2026-06-12)", () => {
   assert.equal(meetingDateFromName("260612_주간회의.m4a"), "2026-06-12");

@@ -2,7 +2,7 @@
 import OpenAI from "openai";
 import { getPool, sql } from "./_db.js";
 import { getDrive, ensurePath, uploadText, dateParts } from "./_drive.js";
-import { prepareTranscript, needsMapReduce, splitTranscript, buildMinutesSystemPrompt, buildPartialSystemPrompt, meetingDateFromName } from "./_meeting.js";
+import { prepareTranscript, needsMapReduce, splitTranscript, buildMinutesSystemPrompt, buildPartialSystemPrompt, meetingDateFromName, resolveMeetingTitle } from "./_meeting.js";
 
 export const config = { maxDuration: 120 };
 
@@ -74,8 +74,8 @@ export default async function handler(req, res) {
 
   // 2. 제목 + 키워드 추출
   const tm = summary.match(/##\s*회의 제목\s*\n+\s*([^\n]+)/);
-  let title = tm ? tm[1].trim().replace(/[\\/:*?"<>|]/g, "") : "회의록";
-  if (!title) title = "회의록";
+  // AI 제목이 없거나 generic이면 KST 날짜+시각 키 제목으로 대체(업로드별 구분 + 최신본 식별).
+  const title = resolveMeetingTitle(tm ? tm[1] : "", new Date());
 
   const km = summary.match(/##\s*주요 키워드\s*\n+\s*([^\n]+)/);
   const keywords = km ? km[1].trim() : "";

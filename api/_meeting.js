@@ -51,6 +51,26 @@ export function meetingDateFromName(name) {
   return "";
 }
 
+// 업로드 기본 제목(키 제목) — KST 기준 "YYYY-MM-DD HH:MM 회의록".
+// AI가 제목을 못 뽑거나 "회의록"만 나올 때 날짜+시각으로 각 업로드를 구분 가능하게.
+export function defaultMeetingTitle(date = new Date(), suffix = "회의록") {
+  const d = date instanceof Date ? date : new Date(date);
+  const kst = new Date((isNaN(d.getTime()) ? Date.now() : d.getTime()) + 9 * 60 * 60 * 1000);
+  const Y = kst.getUTCFullYear();
+  const M = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const D = String(kst.getUTCDate()).padStart(2, "0");
+  const h = String(kst.getUTCHours()).padStart(2, "0");
+  const mi = String(kst.getUTCMinutes()).padStart(2, "0");
+  return `${Y}-${M}-${D} ${h}:${mi}${suffix ? " " + suffix : ""}`;
+}
+
+// AI 추출 제목이 비었거나 일반(generic)이면 날짜+시각 키 제목으로 대체. 의미있는 제목은 보존.
+export function resolveMeetingTitle(aiTitle, date = new Date()) {
+  const t = String(aiTitle || "").replace(/[\\/:*?"<>|]/g, "").trim();
+  if (!t || t === "회의록" || t === "제목 없음" || t === "무제") return defaultMeetingTitle(date);
+  return t;
+}
+
 // 한국어 비즈니스 회의록 시스템 프롬프트. 본문에 없는 사실은 창작 금지, 일정/날짜는 빠짐없이.
 export function buildMinutesSystemPrompt({ outLang = "한국어", writtenDate = "", meetingDate = "", customBlock = "" } = {}) {
   const wd = String(writtenDate || "").trim() || "미확인";
@@ -120,4 +140,5 @@ export function buildPartialSystemPrompt({ outLang = "한국어", idx = 0, total
 export default {
   SINGLE_PASS_LIMIT, prepareTranscript, needsMapReduce, splitTranscript, splitCoversAll,
   buildMinutesSystemPrompt, buildSummarySystemPrompt, buildPartialSystemPrompt,
+  meetingDateFromName, defaultMeetingTitle, resolveMeetingTitle,
 };
