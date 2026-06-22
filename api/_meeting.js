@@ -4,9 +4,56 @@
 // 단일 호출로 안전한 길이(문자). 초과 시 map-reduce(부분요약→통합)로 잘림 없이 처리.
 export const SINGLE_PASS_LIMIT = 40000;
 
-// 전사 전처리: 개행 정규화 + 트림만. 길이 컷 절대 없음(전체 보존).
+// 한 줄 내 n-gram 반복 축소(개행은 호출부에서 보존).
+function collapseLine(line, maxRepeat) {
+  const cleanTok = (t) => t.replace(/[,.，。·!?~…\-]+$/u, "").trim().toLowerCase();
+  let toks = line.split(/\s+/).filter(Boolean);
+  if (toks.length < 2) return line; // 단일 토큰/빈 줄은 원형 보존(거대 토큰 길이 보존)
+  for (let n = 4; n >= 1; n--) {
+    const out = [];
+    let i = 0;
+    while (i < toks.length) {
+      const gram = i + n <= toks.length ? toks.slice(i, i + n).map(cleanTok).join(" ") : "";
+      if (gram && gram.replace(/\s/g, "")) {
+        let rep = 1;
+        while (i + (rep + 1) * n <= toks.length &&
+               toks.slice(i + rep * n, i + (rep + 1) * n).map(cleanTok).join(" ") === gram) rep++;
+        if (rep > maxRepeat) {
+          for (let k = 0; k < maxRepeat * n; k++) out.push(toks[i + k]);
+          i += rep * n;
+          continue;
+        }
+      }
+      out.push(toks[i]); i++;
+    }
+    toks = out;
+  }
+  return toks.join(" ").replace(/\s+([,.!?。])/g, "$1");
+}
+
+// Whisper 반복 환각("3, 3, 3, …", "네 네 네 …") 축소. n-gram(4→1)이 maxRepeat 초과 연속 반복되면
+// 앞 maxRepeat개만 남긴다. 개행 구조는 보존(줄 단위 처리), 정상 텍스트는 변형 없음.
+export function collapseRepeats(text, maxRepeat = 3) {
+  const raw = String(text == null ? "" : text);
+  if (!raw.trim()) return raw.trim();
+  return raw.split("\n").map((line) => collapseLine(line, maxRepeat)).join("\n");
+}
+
+// Whisper verbose_json 세그먼트가 "무음/반복 환각"인지 판정(말 없음 확률↑+확신도↓, 또는 압축비↑).
+// 보수적 기준 → 실제 발화 제거 위험 최소화.
+export function isHallucinatedSegment(s) {
+  const nsp = Number((s && s.no_speech_prob) || 0);
+  const alp = Number((s && s.avg_logprob) || 0);
+  const cr = Number((s && s.compression_ratio) || 0);
+  if (nsp >= 0.6 && alp <= -0.7) return true;   // 침묵/배경음 환각
+  if (cr >= 2.6 && alp <= -0.5) return true;     // 비정상 반복(압축비 큼)
+  return false;
+}
+
+// 전사 전처리: 개행 정규화 + 트림 + 반복 환각 축소(길이 컷 절대 없음, 정상 내용 보존).
 export function prepareTranscript(t) {
-  return String(t == null ? "" : t).replace(/\r\n/g, "\n").trim();
+  const s = String(t == null ? "" : t).replace(/\r\n/g, "\n").trim();
+  return collapseRepeats(s);
 }
 
 // 단일 호출로 처리 불가(너무 김) 여부.
@@ -140,5 +187,5 @@ export function buildPartialSystemPrompt({ outLang = "한국어", idx = 0, total
 export default {
   SINGLE_PASS_LIMIT, prepareTranscript, needsMapReduce, splitTranscript, splitCoversAll,
   buildMinutesSystemPrompt, buildSummarySystemPrompt, buildPartialSystemPrompt,
-  meetingDateFromName, defaultMeetingTitle, resolveMeetingTitle,
+  meetingDateFromName, defaultMeetingTitle, resolveMeetingTitle, collapseRepeats, isHallucinatedSegment,
 };

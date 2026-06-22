@@ -901,6 +901,32 @@ function renderFiles(){
 }
 // onclick 속성 안전용: 따옴표/백슬래시/꺾쇠 제거(표시 텍스트는 esc로 따로 처리)
 function escAttr(s){ return String(s==null?'':s).replace(/['"\\<>]/g,''); }
+// STT 반복 환각("3, 3, 3, …") 표시용 축소 — 서버 _meeting.collapseRepeats의 클라 미러(줄 단위, 정상 텍스트 보존).
+function collapseRepeatsClient(text, maxRepeat){
+  maxRepeat=maxRepeat||3;
+  var raw=String(text==null?'':text);
+  if(!raw.trim())return '';
+  var cleanTok=function(t){return t.replace(/[,.，。·!?~…\-]+$/u,'').trim().toLowerCase();};
+  function line(ln){
+    var toks=ln.split(/\s+/).filter(Boolean);
+    if(toks.length<2)return ln;
+    for(var n=4;n>=1;n--){
+      var out=[],i=0;
+      while(i<toks.length){
+        var gram=(i+n<=toks.length)?toks.slice(i,i+n).map(cleanTok).join(' '):'';
+        if(gram&&gram.replace(/\s/g,'')){
+          var rep=1;
+          while(i+(rep+1)*n<=toks.length&&toks.slice(i+rep*n,i+(rep+1)*n).map(cleanTok).join(' ')===gram)rep++;
+          if(rep>maxRepeat){ for(var k=0;k<maxRepeat*n;k++)out.push(toks[i+k]); i+=rep*n; continue; }
+        }
+        out.push(toks[i]); i++;
+      }
+      toks=out;
+    }
+    return toks.join(' ').replace(/\s+([,.!?。])/g,'$1');
+  }
+  return raw.split('\n').map(line).join('\n');
+}
 // 🔑 키워드 클릭 → 그 키워드로 파일 필터(검색창에 반영). 🏷 태그 클릭 → 태그 필터.
 function filterByKeyword(kw){
   kw=String(kw||'').trim(); if(!kw)return;
@@ -929,7 +955,8 @@ async function showSTT(id){
   try{
     const r=await fetch('/api/meetings?action=detail&id='+id); const d=await safeJson(r); const it=d.item;
     if(!it){content.innerHTML='<p>찾을 수 없습니다.</p>';return;}
-    const stt=it.transcript||'(STT 원문이 저장되어 있지 않습니다)';
+    // 표시 시점에도 반복 환각 축소(기존에 저장된 오래된 원문도 깔끔히 보이게 — DB는 변경 안 함).
+    const stt=collapseRepeatsClient(it.transcript||'')||'(STT 원문이 저장되어 있지 않습니다)';
     _detailSummary=stt;
     content.innerHTML='<h2 style="font-size:1.15rem;margin-bottom:8px;padding-right:30px">🎙 STT 원본 — '+esc(it.title||'회의록')+'</h2>'
       +'<div class="summary-box">'+esc(stt)+'</div>'

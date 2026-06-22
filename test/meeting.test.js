@@ -5,8 +5,34 @@ import assert from "node:assert/strict";
 import {
   prepareTranscript, needsMapReduce, splitTranscript, splitCoversAll, SINGLE_PASS_LIMIT,
   buildMinutesSystemPrompt, buildSummarySystemPrompt, buildPartialSystemPrompt, meetingDateFromName,
-  defaultMeetingTitle, resolveMeetingTitle,
+  defaultMeetingTitle, resolveMeetingTitle, collapseRepeats, isHallucinatedSegment,
 } from "../api/_meeting.js";
+
+test("collapseRepeats: '3, 3, 3, …' 런어웨이 반복 축소", () => {
+  const bad = "고. 네. 그리고 이 " + "3, ".repeat(200).trim();
+  const out = collapseRepeats(bad);
+  assert.ok(/그리고 이 3, 3, 3,?$/.test(out), out.slice(-40));
+  assert.ok((out.match(/3/g) || []).length <= 4, "3 반복이 충분히 줄어야 함");
+});
+
+test("collapseRepeats: 단어/구 반복 축소 + 정상 문장 보존", () => {
+  assert.equal(collapseRepeats("네 네 네 네 네 네"), "네 네 네");
+  assert.equal(collapseRepeats("그리고 이 그리고 이 그리고 이 그리고 이 끝"), "그리고 이 그리고 이 그리고 이 끝");
+  const normal = "오늘 회의는 자재 마스터와 컷오버 일정을 점검했습니다.";
+  assert.equal(collapseRepeats(normal), normal); // 정상 텍스트는 변형 없음
+  assert.equal(collapseRepeats(""), "");
+});
+
+test("prepareTranscript: 반복 축소까지 적용", () => {
+  assert.ok(!/3, 3, 3, 3, 3, 3/.test(prepareTranscript("회의 " + "3, ".repeat(50))));
+});
+
+test("isHallucinatedSegment: 무음/반복 환각만 true", () => {
+  assert.equal(isHallucinatedSegment({ no_speech_prob: 0.9, avg_logprob: -1.2 }), true);  // 침묵 환각
+  assert.equal(isHallucinatedSegment({ compression_ratio: 5.0, avg_logprob: -0.6 }), true); // 반복
+  assert.equal(isHallucinatedSegment({ no_speech_prob: 0.1, avg_logprob: -0.3, compression_ratio: 1.4 }), false); // 정상
+  assert.equal(isHallucinatedSegment({ no_speech_prob: 0.7, avg_logprob: -0.2 }), false); // 말없음 높지만 확신도 높음 → 보존
+});
 
 test("defaultMeetingTitle: KST 날짜+시각 키 제목", () => {
   // 2026-06-22T10:38:00Z = KST 19:38

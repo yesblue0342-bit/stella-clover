@@ -1,6 +1,7 @@
 // api/_stt.js - 청크 전사 공통 모듈 (모델 선택 + verbose_json 세그먼트 + 글로벌 offset 보정)
 // transcribe.js(레거시 직접 호출)와 worker.js(백그라운드)가 공유. 토큰은 env에서만.
 import OpenAI, { toFile } from "openai";
+import { collapseRepeats, isHallucinatedSegment } from "./_meeting.js";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -28,23 +29,27 @@ export async function transcribeBuffer({ buffer, ext = ".wav", lang = "ko", mode
   const useTs = modelSupportsTimestamps(model);
   return await retry(async () => {
     const file = await toFile(buffer, `audio${ext}`);
-    const params = { file, model, prompt: SAP_PROMPT + (prevText ? " " + prevText : ""), temperature: 0 }; // 정확도: 결정적(greedy) 디코딩
+    // prevText는 반복 환각을 제거해 다음 청크 프롬프트로 전파되지 않게 한다(연쇄 반복 차단).
+    const cleanPrev = collapseRepeats(String(prevText || "")).slice(-200);
+    const params = { file, model, prompt: SAP_PROMPT + (cleanPrev ? " " + cleanPrev : ""), temperature: 0 }; // 정확도: 결정적(greedy) 디코딩
     if (lang && lang !== "auto") params.language = lang;
     params.response_format = useTs ? "verbose_json" : "text";
     const resp = await openai.audio.transcriptions.create(params);
 
-    // 모델이 verbose_json을 안 줬거나 text만 온 경우(데이터 기반 판정)
-    if (typeof resp === "string") return { text: resp, segments: [], duration: 0, hasTimestamps: false };
-    const text = resp.text || "";
+    // 모델이 verbose_json을 안 줬거나 text만 온 경우(데이터 기반 판정) — 반복 환각 축소.
+    if (typeof resp === "string") return { text: collapseRepeats(resp), segments: [], duration: 0, hasTimestamps: false };
     const hasSegs = Array.isArray(resp.segments) && resp.segments.length > 0;
-    if (!hasSegs) return { text, segments: [], duration: Number(resp.duration || 0), hasTimestamps: false };
+    if (!hasSegs) return { text: collapseRepeats(resp.text || ""), segments: [], duration: Number(resp.duration || 0), hasTimestamps: false };
 
     const off = Number(offsetSec) || 0;
-    const segments = resp.segments.map(s => ({
+    // 무음/반복 환각 세그먼트 제거 → 남은 세그먼트에서 텍스트 재구성 + 반복 축소.
+    const kept = resp.segments.filter(s => !isHallucinatedSegment(s));
+    const segments = kept.map(s => ({
       start: Number(s.start || 0) + off,
       end: Number(s.end || 0) + off,
-      text: String(s.text || "").trim(),
+      text: collapseRepeats(String(s.text || "").trim()),
     })).filter(s => s.text);
+    const text = collapseRepeats(segments.map(s => s.text).join(" "));
     return { text, segments, duration: Number(resp.duration || 0), hasTimestamps: true };
   });
 }
