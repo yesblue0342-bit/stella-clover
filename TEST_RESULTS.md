@@ -182,6 +182,20 @@
 - 변경: api/workspace.js(action=search+스니펫) · workspace.html(검색/이동/하이라이트) · sw.js(v12) · test/workspace.test.js · TODO.md · TEST_RESULTS.md.
 - 한 줄: Stella GPT 사이드바 🔍가 채팅 메시지 내용까지 전역 검색→클릭 시 해당 위치 이동. Azure·Vercel 런타임 의존 0으로 OCI 완전 독립 확인.
 
+## (J) 2026-06-27 (RALPH team) · 검색 "결과 없음" 수정 → 하이브리드 전역 검색(프로젝트 포함) · pass 36/36
+> 증상: 돋보기는 눌리나 키워드 검색 결과가 안 나옴(노트/채팅/프로젝트 미조회), 클릭 점프 검증 불가. (라이브는 구버전 풀페이지 뷰 — 백엔드 action=search 미배포 가능성.)
+- **근본 원인 2가지**: ① 프로젝트가 검색 대상에서 누락. ② 검색이 서버 `action=search` 단독 의존 → 백엔드 미배포 시 전부 "결과 없음".
+- **하이브리드 검색(workspace.html)**: (1) 즉시 — 이미 로드된 `_state`(action=all)로 **프로젝트명 + 채팅 제목 + 노트 제목/내용** 클라이언트 검색(배포 지연 무관 항상 동작). (2) 보강 — 서버 `action=search`로 **채팅 메시지 내용**까지 병합(중복 제거, 실패해도 로컬 결과 유지).
+- **점프(클릭 이동)**: 채팅→`openSession`+일치 메시지 스크롤·하이라이트 / 노트→`openNote`+본문 위치 select / **프로젝트→사이드바 열고 펼친 뒤 스크롤·하이라이트**(`.search-hit` 일반 규칙 추가).
+- **UX**: 결과 아이콘 💬채팅/📝노트/📁프로젝트 + 스니펫. 빈 결과 문구 `검색 결과 없음: "키워드"`. **sw v12→v13**.
+- **검증**: workspace.html 인라인 JS 파싱 OK · `npm test` **36/36 PASS** · node --check 15/15.
+- **★ 사용자 조치(중요)**: 라이브(gpt.이후.com)가 구버전이라 결과가 안 나온 것 — **workspace.html + api/workspace.js 둘 다 최신으로 재배포**(OCI: git pull → npm install → 재시작) 필요. SW v13이 캐시 자동 갱신.
+
+## FINAL (RALPH team / 하이브리드 검색)
+- `npm test` **36/36 PASS** · node --check 15/15 · workspace.html 파싱 OK.
+- 변경: workspace.html(하이브리드 검색+프로젝트 점프) · sw.js(v13) · TODO.md · TEST_RESULTS.md.
+- 한 줄: 노트·채팅·프로젝트 전체를 즉시(로컬)+보강(서버 메시지내용) 하이브리드로 검색하고 클릭 시 해당 글로 점프. 백엔드 배포 지연에도 결과가 비지 않음.
+
 ## 2026-06-22 · 회의 제목 변경(✏️) + 기본 날짜·시각 제목 + 최신화 · pass 12/12
 - node --check api/_meeting·summarize·meetings OK · node --test 12/12(+2) · index.html new Function 파싱 OK · vercel.json JSON.parse OK · 시크릿 0 · sw v7→v8
 - T1 제목변경: api/meetings.js action=rename(id+title, CREATE_TABLE 가드, 금지문자 제거, rowsAffected 확인) + index.html renameMeeting()(prompt→POST→캐시 즉시 반영) + 파일카드/이력카드 ✏️ 버튼.
