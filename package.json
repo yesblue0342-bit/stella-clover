@@ -2,7 +2,9 @@
   "name": "stella-clover",
   "version": "1.0.0",
   "type": "module",
-  "scripts": { "dev": "vercel dev" },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
   "dependencies": {
     "pg": "^8.13.1",
     "openai": "^4.47.1",

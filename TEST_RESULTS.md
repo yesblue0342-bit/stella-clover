@@ -58,7 +58,8 @@
 ※ 단, Stella Workspace(채팅/노트/프로젝트)는 기기 간 동기화를 위해 **PostgreSQL**(`ws_*`)에 저장한다.
 
 ## 배포 상태
-- main 푸시 → Vercel 자동 배포. (샌드박스는 Deployment Protection 403으로 라이브 URL 직접 확인 불가 — 코드/문법/체크리스트 정적 검증 완료. 실제 동작은 KH 브라우저에서 확인.)
+- **2026-06-27 이후: OCI(Ubuntu) 배포** (Vercel에서 독립). 소스=GitHub, 데이터=Google Drive, 메타데이터=OCI PostgreSQL.
+- (이전: main 푸시 → Vercel 자동 배포 — 레거시.) 샌드박스는 라이브 URL 직접 확인 불가 — 코드/문법/테스트 정적 검증까지. 실제 동작은 OCI 배포본/브라우저에서 확인.
 
 ## 2026-06-21 (autopilot) · 재업로드/요약확대/정확도 · pass 6/6
 - node --check api/summarize.js·_stt.js·transcribe.js·worker.js·jobs.js OK (5/5)
@@ -123,6 +124,19 @@
 - node --test **23/23 PASS** · node --check api/*.js 14/14 · 잔여 Azure 추적 0(소비자).
 - 변경: api/_db.js(재작성), api/_sqlshim.js(신규), api/{meetings,summarize,jobs,worker,workspace}.js, package.json, vercel.json, CLAUDE.md, PROGRESS.md(신규), test/db.test.js(신규).
 - 한 줄: Azure SQL(mssql) 전면 제거 → 자체 호스팅 PostgreSQL(Ubuntu/OCI) 일원화. 메타데이터·워크스페이스 단일 진실원천, 호환 셰임으로 호출부 안정.
+
+## (F) 2026-06-27 (RALPH team) · Vercel 의존 제거 → OCI 배포 정합 · pass 24/24
+> 맥락: Vercel 무료화·독립, 배포는 OCI(Ubuntu), 소스=GitHub, 데이터=Google Drive, 메타데이터=OCI PostgreSQL. 직전 SSRF 수정에서 들어간 `VERCEL_URL`을 사용자가 지적 → 배포 환경 중립화.
+- **기능 변경(코드)**: `jobs.js`/`worker.js` `baseUrl()` — `VERCEL_URL` 제거 → `PUBLIC_BASE_URL`/`APP_BASE_URL` + forwarded 헤더 폴백(OCI LB 뒤에서 정확). 셀프 트리거가 배포처 무관 동작.
+- **비기능/문서**: `cleanup.js` 주석 "Vercel Cron"→OCI crontab(예시 추가) / `package.json` `vercel dev` 제거 + `test` 스크립트 추가(=`node --test test/*.test.js`, `npm test` 동작) / `index.html` 청크 주석 "Vercel 4.5MB"→"서버 본문 한도" + **sw v9→v10** / `CLAUDE.md` 배포·환경변수·플레이북 OCI화.
+- **보존(삭제 안 함)**: `vercel.json`, `export const config={maxDuration}` — OCI에선 무시되는 레거시 호환. 삭제 시 가동 중 OCI 설정 파손 위험 → 문서로 무력화 명시.
+- **검증**: node --check api/*.js 14/14 · `npm test` **24/24 PASS** · 코드/설정 잔여 Vercel 결합 0(문서 외) · index.html `new Function` 파싱 OK · JSON 설정 `JSON.parse` OK · 시크릿 0.
+- **사용자 조치**: OCI에 `DATABASE_URL`(또는 `PG*`)·`OPENAI_API_KEY`·`GOOGLE_*`·`CRON_SECRET`·`PUBLIC_BASE_URL` 주입 / cleanup은 OCI crontab으로 `/api/cleanup` 호출.
+
+## FINAL (RALPH team / Vercel→OCI)
+- `npm test` **24/24 PASS** · node --check api/*.js 14/14 · 코드 내 `VERCEL_URL`/`vercel dev` 0건.
+- 변경: api/{jobs,worker,cleanup}.js, package.json, index.html, sw.js(v10), CLAUDE.md, PROGRESS.md, TEST_RESULTS.md.
+- 한 줄: 배포 의존을 Vercel→OCI로 중립화. 코드는 `PUBLIC_BASE_URL`/forwarded 헤더로 배포처 무관, 크론은 OCI crontab, 시크릿은 OCI 주입. DB는 Google Drive(데이터)+OCI PostgreSQL(메타데이터) 유지.
 
 ## 2026-06-22 · 회의 제목 변경(✏️) + 기본 날짜·시각 제목 + 최신화 · pass 12/12
 - node --check api/_meeting·summarize·meetings OK · node --test 12/12(+2) · index.html new Function 파싱 OK · vercel.json JSON.parse OK · 시크릿 0 · sw v7→v8

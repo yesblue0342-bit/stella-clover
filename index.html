@@ -547,7 +547,7 @@ function upProgress(pct,step,detail){ $('uploadProgress').style.display='block';
 function aiProgress(pct,step,detail){ $('aiProgress').style.display='block'; $('step3Idle').style.display='none';
   $('aiBar').style.width=pct+'%'; $('aiStep').textContent=step; $('aiDetail').textContent=detail||''; }
 
-/* ═══════════ 오디오 분할 (16kHz mono WAV, Vercel 4.5MB 우회) ═══════════ */
+/* ═══════════ 오디오 분할 (16kHz mono WAV, 서버 본문 한도 우회·청크 ≈3.84MB) ═══════════ */
 async function audioToChunks(blob, chunkSeconds){
   const arrayBuf = await blob.arrayBuffer();
   const AudioCtx = window.AudioContext || window.webkitAudioContext;

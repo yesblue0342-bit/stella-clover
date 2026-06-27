@@ -5,7 +5,7 @@
 - **연결 설정**: `DATABASE_URL` 우선, 없으면 표준 `PG*` 변수. SSL은 `PGSSL`로 제어(원격 OCI는 `require` 권장). 구 Azure 변수(`CL_DB_*`)는 완전히 제거.
 - **메타데이터 일원화**: "메타데이터만 azure에서 읽어옴" 증상의 원인은 `_db.js`가 여전히 `mssql`이었던 것. 모든 DB 소비자(`meetings/summarize/jobs/worker/workspace`)를 단일 PostgreSQL 풀로 통일 → 기기·엔드포인트 무관 단일 진실원천.
 - **소비자 호환**: 호출부 변경 최소화를 위해 `_db.js`에 mssql 스타일(`pool.request().input(@name).query()`) 호환 셰임 유지. 셰임이 `@name`→`$n` 변환. SQL **방언만** PostgreSQL로 재작성.
-- **배포**: 샌드박스에서 `vercel --prod`/OCI 배포 자격증명 없음 → 지정 브랜치 `claude/stella-ai-workspace-repo-d9ktip`에 push(연동 CI/CD가 배포 트리거). 실제 prod 반영은 사용자 환경에서.
+- **배포**: **Vercel에서 독립 → OCI(Ubuntu) 배포**. 소스=GitHub, 데이터/파일=Google Drive, 메타데이터=OCI PostgreSQL. 시크릿은 더 이상 Vercel 스토어 아님 → OCI env/.env/Vault 주입(`process.env.*` 그대로). 샌드박스는 배포 자격증명 없음 → 지정 브랜치 push(파이프라인/직접 pull로 OCI 반영). `VERCEL_URL` 의존 제거(`PUBLIC_BASE_URL`/forwarded 헤더). `vercel.json`은 레거시 호환용으로 보존(삭제하지 않음 — OCI에선 무시).
 
 ## 변경 요약 (Azure SQL → PostgreSQL)
 - `_db.js`: `pg` 풀 + 호환 셰임 + `ensureSchema`(콜드스타트 1회) + PostgreSQL 방언 스키마(`cl_meetings`/`transcribe_jobs`/`ws_*`).

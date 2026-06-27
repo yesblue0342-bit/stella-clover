@@ -8,9 +8,10 @@ import { getPool, sql, parseJson, hasDbConfig } from "./_db.js";
 export const config = { maxDuration: 30 };
 
 function baseUrl(req) {
-  // 신뢰 가능한 고정 베이스 우선(헤더 스푸핑/SSRF 방지). Vercel은 VERCEL_URL 자동 주입.
+  // 신뢰 가능한 고정 베이스 우선(헤더 스푸핑/SSRF 방지). OCI 등 배포 환경에서 PUBLIC_BASE_URL 권장.
   if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/+$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, "");
+  // 리버스 프록시(OCI LB 등) 뒤에서는 forwarded 헤더가 공개 호스트를 반영.
   const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   return `${proto}://${host}`;
