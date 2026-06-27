@@ -196,6 +196,17 @@
 - 변경: workspace.html(하이브리드 검색+프로젝트 점프) · sw.js(v13) · TODO.md · TEST_RESULTS.md.
 - 한 줄: 노트·채팅·프로젝트 전체를 즉시(로컬)+보강(서버 메시지내용) 하이브리드로 검색하고 클릭 시 해당 글로 점프. 백엔드 배포 지연에도 결과가 비지 않음.
 
+## (K) 2026-06-27 (RALPH team) · 한글 IME 조합 검색 버그 수정 · pass 36/36
+> 증상: 헤더는 "민상원"인데 실제 검색은 "민상ㅇㅓㄴ"(자모 분리 중간값), "이예은"→"잉". 한글 조합이 끝나기 전 oninput이 발동해 반쪽 글자로 검색 → 항상 결과 없음.
+- **수정(workspace.html)**: 입력에 `compositionstart/compositionend` 연결 — 조합 중(`_composing=true`)엔 검색 보류, **확정 시점(compositionend)·Enter·🔍 클릭**에만 최종 input.value로 검색. `event.isComposing` 가드 병행. 디바운스 250ms/조합후 120ms. 인라인 핸들러는 전역 함수(onCompStart/onCompEnd) 호출로 브라우저 호환 확보. **sw v13→v14**.
+- **검증**: workspace.html 인라인 JS 파싱 OK · onCompStart/onCompEnd/onSearchInput/onSearchCommitted 정의 확인 · `npm test` **36/36 PASS** · node --check 15/15.
+- **★ 라이브 불일치 경고**: 스크린샷의 풀페이지 검색 뷰("닫기" 버튼 + `"X" 검색 결과` 헤더)는 **git 레포 workspace.html에 존재하지 않음**(grep 0건). 즉 배포본이 레포와 갈라져 있음(OCI 서버 로컬 수정분 추정). 이 브랜치 재배포 시 레포 버전(드롭다운+IME안전)으로 통일됨 — 배포 소스 확인 필요.
+
+## FINAL (RALPH team / IME 조합 검색)
+- `npm test` **36/36 PASS** · node --check 15/15 · workspace.html 파싱 OK.
+- 변경: workspace.html(IME 조합 가드) · sw.js(v14) · TODO.md · TEST_RESULTS.md.
+- 한 줄: 한글 조합 중간값 검색 버그 제거 — 글자 확정 후에만 검색. (라이브 풀페이지 검색 UI는 레포에 없어 배포본 갈라짐 — 재배포로 통일 필요.)
+
 ## 2026-06-22 · 회의 제목 변경(✏️) + 기본 날짜·시각 제목 + 최신화 · pass 12/12
 - node --check api/_meeting·summarize·meetings OK · node --test 12/12(+2) · index.html new Function 파싱 OK · vercel.json JSON.parse OK · 시크릿 0 · sw v7→v8
 - T1 제목변경: api/meetings.js action=rename(id+title, CREATE_TABLE 가드, 금지문자 제거, rowsAffected 확인) + index.html renameMeeting()(prompt→POST→캐시 즉시 반영) + 파일카드/이력카드 ✏️ 버튼.

@@ -920,7 +920,10 @@ html, body {
             autocomplete="off"
             inputmode="search"
             aria-label="검색"
-            oninput="onSearchInput(this.value)"
+            oninput="onSearchInput(event)"
+            oncompositionstart="onCompStart()"
+            oncompositionend="onCompEnd()"
+            onkeydown="if(event.key==='Enter'){event.preventDefault(); doSearch();}"
           >
           <button class="search-btn" id="searchBtn" onclick="doSearch()" aria-label="검색">🔍</button>
           <div class="search-results" id="searchResults"></div>
@@ -1486,9 +1489,22 @@ async function deleteNote(id) {
 
 // ===== SEARCH =====
 let _searchTimer = null;
-function onSearchInput(q) {
+let _composing = false; // 한글 IME 조합 중 플래그 (자모 중간값 검색 방지)
+function onCompStart() { _composing = true; }
+function onCompEnd() { _composing = false; onSearchCommitted(); }
+
+// oninput: 조합 중('민상ㅇㅓㄴ' 같은 중간값)이면 검색하지 않는다. 조합 완료/영문은 디바운스 검색.
+function onSearchInput(e) {
+  // event.isComposing 또는 자체 플래그로 조합 상태 판정(브라우저 호환)
+  if (_composing || (e && e.isComposing)) return;
   clearTimeout(_searchTimer);
-  _searchTimer = setTimeout(() => doSearch(q), 200);
+  _searchTimer = setTimeout(() => doSearch(), 250);
+}
+
+// compositionend(한글 글자 확정) 직후: 확정된 최종 입력값으로 검색
+function onSearchCommitted() {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => doSearch(), 120);
 }
 
 let _lastSearchQuery = '';
