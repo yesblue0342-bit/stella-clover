@@ -13,3 +13,17 @@
 | node --check (api/*.js, lib/*.js) | 통과 |
 | node --test (sttTerms + meeting) | **21/21 pass, 0 fail** |
 | 회귀(전사 잘림 없음, prompt 빌더) | 유지 |
+
+## 회차 2 — 항목 3/4 (오디오 정규화 + 청크 오버랩 디듀프)
+- `index.html` `encodeWavSlice`: 피크 볼륨 정규화(게인 상한 8x, 무음 미증폭) — 타이밍 불변.
+- `index.html` `audioToChunks`: i>0 청크 시작을 overlap(3s)만큼 앞당겨 겹쳐 자름. 청크 수 불변.
+- 신규 `lib/sttMerge.js`: `dedupOverlapTokens`(꼬리/머리 토큰 겹침 제거) + index.html 인라인 복제.
+- 병합 루프에 dedup 적용(첫 청크 원형, 이후 중복 제거).
+- SW 캐시 v9 → **v10** bump(프런트 변경 반영).
+
+| 항목 | 결과 |
+|------|------|
+| index.html 인라인 JS (`new Function`) | 통과(1 block) |
+| node --check (sw.js, lib/sttMerge.js) | 통과 |
+| node --test (전체 4 파일) | **27/27 pass, 0 fail** |
+| 청크 크기(123s≈3.94MB<4.5MB) | 한도 내 |

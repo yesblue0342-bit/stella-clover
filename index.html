@@ -548,22 +548,40 @@ function aiProgress(pct,step,detail){ $('aiProgress').style.display='block'; $('
   $('aiBar').style.width=pct+'%'; $('aiStep').textContent=step; $('aiDetail').textContent=detail||''; }
 
 /* ═══════════ 오디오 분할 (16kHz mono WAV, Vercel 4.5MB 우회) ═══════════ */
-async function audioToChunks(blob, chunkSeconds){
+async function audioToChunks(blob, chunkSeconds, overlapSec){
   const arrayBuf = await blob.arrayBuffer();
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const ctx = new AudioCtx();
   const audioBuf = await ctx.decodeAudioData(arrayBuf);
   ctx.close && ctx.close();
   const targetRate = 16000;
+  const ov = Math.max(0, overlapSec||0);
   const totalDuration = audioBuf.duration;
   const chunkCount = Math.ceil(totalDuration / chunkSeconds);
   const chunks = [];
   for(let i=0; i<chunkCount; i++){
-    const startSec = i * chunkSeconds;
-    const endSec = Math.min(startSec + chunkSeconds, totalDuration);
+    // 항목4: 경계 단어 누락 방지 — i>0 청크는 시작을 overlap만큼 앞당겨 겹쳐 자른다.
+    // stride는 chunkSeconds 유지(청크 수 불변), 각 청크 길이 ≤ chunkSeconds+overlap (4.5MB 한도 내).
+    const startSec = Math.max(0, i*chunkSeconds - (i>0?ov:0));
+    const endSec = Math.min(i*chunkSeconds + chunkSeconds, totalDuration);
     chunks.push(encodeWavSlice(audioBuf, startSec, endSec, targetRate));
   }
   return { chunks, totalDuration };
+}
+/* 청크 경계 중복 디듀프 — lib/sttMerge.js와 동일 로직(단일파일 PWA 인라인 복제). */
+function _normTok(t){ return String(t||'').replace(/[.,!?…·~\-"'()「」『』]/g,'').toLowerCase(); }
+function dedupOverlapTokens(prev, next, maxTokens){
+  maxTokens=maxTokens||40;
+  const n=String(next==null?'':next).trim(), p=String(prev==null?'':prev).trim();
+  if(!p||!n) return n;
+  const pt=p.split(/\s+/), nt=n.split(/\s+/);
+  const maxK=Math.min(maxTokens, pt.length, nt.length);
+  for(let k=maxK;k>=2;k--){
+    const ptail=pt.slice(pt.length-k).map(_normTok).join(' ');
+    const nhead=nt.slice(0,k).map(_normTok).join(' ');
+    if(ptail && ptail===nhead) return nt.slice(k).join(' ');
+  }
+  return n;
 }
 function encodeWavSlice(audioBuf, startSec, endSec, targetRate){
   const srcRate = audioBuf.sampleRate;
@@ -577,6 +595,10 @@ function encodeWavSlice(audioBuf, startSec, endSec, targetRate){
   const outLen = Math.floor(frameCount/ratio);
   const out = new Float32Array(outLen);
   for(let i=0;i<outLen;i++){ out[i]=mono[Math.floor(i*ratio)]||0; }
+  // 항목3: 볼륨 정규화 — 조용한 녹음을 일정 피크로 끌어올려 STT 인식률↑.
+  // 피크가 너무 작으면(무음/노이즈만) 증폭 안 함, 게인 상한(8x)으로 배경잡음 폭주 방지.
+  let peak=0; for(let i=0;i<outLen;i++){ const a=Math.abs(out[i]); if(a>peak)peak=a; }
+  if(peak>0.02 && peak<0.97){ const gain=Math.min(0.97/peak,8); for(let i=0;i<outLen;i++) out[i]*=gain; }
   const buffer=new ArrayBuffer(44+outLen*2);
   const view=new DataView(buffer);
   const writeStr=(off,s)=>{for(let i=0;i<s.length;i++)view.setUint8(off+i,s.charCodeAt(i));};
@@ -600,8 +622,9 @@ async function generate(){
   try{
     upProgress(5,'🔧 음성 분석 중...','오디오를 변환하고 있습니다');
     const CHUNK_SEC = 120; // 120s × 16kHz × 2byte ≈ 3.84MB < 4.5MB (절대 5MB 금지)
+    const OVERLAP_SEC = 3; // 경계 오버랩(123s ≈ 3.94MB < 4.5MB). 병합 시 중복 토큰 디듀프.
     const sessionId = Date.now().toString(36) + Math.floor(Math.random()*1e6).toString(36);
-    const { chunks, totalDuration } = await audioToChunks(audio, CHUNK_SEC);
+    const { chunks, totalDuration } = await audioToChunks(audio, CHUNK_SEC, OVERLAP_SEC);
     const mins = Math.round(totalDuration/60);
     upProgress(12,'📤 청크 분할 전송','총 '+mins+'분 · '+chunks.length+'개 구간');
 
@@ -637,7 +660,9 @@ async function generate(){
       if(!d||!d.ok){ // 이 구간만 실패 → 표시 후 계속
         failed++; fullText += (fullText?' ':'') + '[구간 '+(i+1)+' 변환 실패]';
       }else{
-        fullText += (fullText?' ':'') + d.text;
+        // 항목4: 오버랩 청크의 경계 중복 제거 후 누적(첫 청크는 원형).
+        const piece = i>0 ? dedupOverlapTokens(fullText, d.text) : d.text;
+        if(piece) fullText += (fullText?' ':'') + piece;
       }
     }
     if(failed===chunks.length) throw new Error('모든 구간 변환 실패. 네트워크/서버 상태를 확인해주세요.');
