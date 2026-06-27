@@ -41,7 +41,7 @@
 ## (C) 백엔드 — 유지·안정화
 - [x] transcribe: Whisper + SAP 프롬프트 + lang + prevText 연속성 (변경 없음)
 - [x] summarize: gpt-4o-mini 구조화 회의록 + 선택 언어 + **"내 AI 지침"(userInstruction) 반영**(신규 라우트 0, 기존 라우트 재사용)
-- [x] 저장: Drive(Meeting/AI_Report/Metadata) + Azure SQL cl_meetings (변경 없음)
+- [x] 저장: Drive(Meeting/AI_Report/Metadata) + **PostgreSQL** cl_meetings (2026-06-27 Azure SQL→PostgreSQL 마이그레이션, 아래 (E) 참조)
 - [x] 신규 API 키·라우트 0 → **청구 중복 0**
 
 ## 검증
@@ -53,8 +53,9 @@
 
 ## 폴더/태그/프로필/지침 = 클라이언트 저장 (가정 로그)
 백엔드에 폴더·태그·사용자 계정 라우트가 없고 "신규 라우트 금지" 제약이 있어,
-폴더·태그·프로필·AI지침은 **localStorage**(이 기기)로 구현. 회의록 본문/검색은 기존 Azure/Drive 그대로.
+폴더·태그·프로필·AI지침은 **localStorage**(이 기기)로 구현. 회의록 본문/검색은 PostgreSQL/Drive.
 로그인은 별도 인증 백엔드가 없어 **로컬 프로필**(이름/이메일)로 대체.
+※ 단, Stella Workspace(채팅/노트/프로젝트)는 기기 간 동기화를 위해 **PostgreSQL**(`ws_*`)에 저장한다.
 
 ## 배포 상태
 - main 푸시 → Vercel 자동 배포. (샌드박스는 Deployment Protection 403으로 라이브 URL 직접 확인 불가 — 코드/문법/체크리스트 정적 검증 완료. 실제 동작은 KH 브라우저에서 확인.)
@@ -94,6 +95,34 @@
 ## FINAL (RALPH clover2)
 - node --test 10/10 PASS. 변경: api/_meeting.js(meetingDateFromName), api/summarize.js, index.html(클릭필터+상세버튼+kw-chip CSS), test/meeting.test.js, sw.js v7.
 - 한 줄: 키워드/태그 클릭 필터 + 상세에서 원문 파일 오픈 + 파일명 날짜로 회의 일시 정확도 개선.
+
+## (E) 2026-06-27 (RALPH team / autopilot) · Azure SQL → PostgreSQL(Ubuntu/OCI) 마이그레이션 · pass 23/23
+> 증상: "azure 걷어내고 우분투로 교체했는데 메타데이터만 azure에서 읽어옴" → 원인은 `_db.js`가 여전히 `mssql`(Azure SQL)이었던 것. 모든 DB 소비자를 단일 PostgreSQL 풀로 일원화.
+
+**검증**
+- `node --check api/*.js` 전부 통과(14/14) · `node --test test/meeting.test.js test/db.test.js` **23/23 PASS**(기존 16 + 신규 셰임 7)
+- 소비자(meetings/summarize/jobs/worker/workspace)에 잔여 T-SQL(mssql/CL_DB_/SYSUTCDATETIME/NVARCHAR/OUTPUT INSERTED/sys.tables/IDENTITY/TOP N/COL_LENGTH) **0건**
+- `vercel.json`/`package.json`/`manifest.json` `JSON.parse` 통과 · 시크릿 스캔 0
+- 멀티에이전트 감사 1회(5 스캐너+머지) + 적대적 검증 1회 — 마이그레이션 PG-유효 확인, 발견된 사전 버그 반영
+
+**변경**
+- `_db.js`: `mssql`→`pg`. 풀 싱글턴 + mssql 호환 셰임(`request().input(@name).query()` 유지) + `ensureSchema`(콜드스타트 1회, ws_* 포함) + PostgreSQL 방언 DDL(SERIAL/BIGSERIAL·TEXT·TIMESTAMPTZ·IF NOT EXISTS). `int8`(job_id) 타입파서로 Number 반환.
+- `_sqlshim.js`(신규): `@name`→`$n` 변환(중복명 동일 $n) + `sql` 타입 토큰. pg 비의존 → 단위 테스트 7건.
+- `meetings.js`: `TOP 50`→`LIMIT 50`, `LIKE`+대괄호→`ILIKE`+`\` 이스케이프, CREATE 프리픽스 제거, `hasDbConfig()` 가드.
+- `summarize.js`: 인라인 T-SQL CREATE+INSERT → 순수 `INSERT`.
+- `jobs.js`: `OUTPUT INSERTED`→`RETURNING`, `TOP 20`→`LIMIT 20`. `worker.js`: `SYSUTCDATETIME()`→`now()`.
+- `workspace.js`: 자체 INIT_SQL/ensureDb 제거(중앙화), env 가드 추가, `delete_project` 트랜잭션화, 입력 길이 클램프.
+- `package.json` mssql→pg · `vercel.json` `/api/workspace` rewrite 추가(누락 수정).
+- 사전 버그 개선: job_id 문자열↔숫자 불일치(타입파서), 워커 self-trigger 호스트 스푸핑(VERCEL_URL 고정), 워크스페이스 입력 검증.
+
+**가정(autopilot)**: "우분투/OCI" 자체호스팅 관계형 DB = PostgreSQL로 가정. 연결은 `DATABASE_URL` 우선, `PG*` 폴백, `PGSSL`로 SSL 제어. 상세 PROGRESS.md.
+
+**환경변수 조치 필요(사용자)**: Vercel/OCI에 `DATABASE_URL`(또는 `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD`) + 필요 시 `PGSSL=require` 설정. 구 `CL_DB_*`는 미사용.
+
+## FINAL (RALPH team / PostgreSQL 마이그레이션)
+- node --test **23/23 PASS** · node --check api/*.js 14/14 · 잔여 Azure 추적 0(소비자).
+- 변경: api/_db.js(재작성), api/_sqlshim.js(신규), api/{meetings,summarize,jobs,worker,workspace}.js, package.json, vercel.json, CLAUDE.md, PROGRESS.md(신규), test/db.test.js(신규).
+- 한 줄: Azure SQL(mssql) 전면 제거 → 자체 호스팅 PostgreSQL(Ubuntu/OCI) 일원화. 메타데이터·워크스페이스 단일 진실원천, 호환 셰임으로 호출부 안정.
 
 ## 2026-06-22 · 회의 제목 변경(✏️) + 기본 날짜·시각 제목 + 최신화 · pass 12/12
 - node --check api/_meeting·summarize·meetings OK · node --test 12/12(+2) · index.html new Function 파싱 OK · vercel.json JSON.parse OK · 시크릿 0 · sw v7→v8

@@ -1,4 +1,4 @@
-// api/summarize.js - 텍스트 → AI 회의록 + Drive 저장 + Azure(전문 저장)
+// api/summarize.js - 텍스트 → AI 회의록 + Drive 저장 + PostgreSQL(전문 저장)
 import OpenAI from "openai";
 import { getPool, sql } from "./_db.js";
 import { getDrive, ensurePath, uploadText, dateParts } from "./_drive.js";
@@ -96,7 +96,7 @@ export default async function handler(req, res) {
       const rawFolder = await ensurePath(drive, ["AI_Report", Y, YM]);
       await uploadText(drive, rawFolder, `${fileBase}_전사.txt`, transcript);
     } catch (e2) {}
-    // 메타데이터 JSON 미러 (Azure SQL이 원본, Drive는 포터블 백업)
+    // 메타데이터 JSON 미러 (PostgreSQL이 원본, Drive는 포터블 백업)
     try {
       const metaFolder = await ensurePath(drive, ["Metadata", Y, YM]);
       const meta = {
@@ -115,7 +115,7 @@ export default async function handler(req, res) {
     driveError = e.message;
   }
 
-  // 4. Azure SQL - 전문 저장 (키워드 검색용)
+  // 4. PostgreSQL - 전문 저장 (키워드 검색용). 스키마는 getPool()에서 1회 보장.
   let dbError = null;
   try {
     const pool = await getPool();
@@ -131,20 +131,6 @@ export default async function handler(req, res) {
       .input("audio", sql.NVarChar(300), audioFileName || "")
       .input("asession", sql.NVarChar(100), audioSession || "")
       .query(`
-        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='cl_meetings')
-        CREATE TABLE cl_meetings (
-          id INT IDENTITY PRIMARY KEY,
-          title NVARCHAR(300), keywords NVARCHAR(500),
-          summary NVARCHAR(MAX), transcript NVARCHAR(MAX),
-          transcript_chars INT, summary_chars INT,
-          drive_file_id NVARCHAR(200), drive_link NVARCHAR(500),
-          audio_file NVARCHAR(300), audio_session NVARCHAR(100),
-          created_at DATETIME2 DEFAULT SYSUTCDATETIME()
-        );
-        IF COL_LENGTH('cl_meetings','keywords') IS NULL ALTER TABLE cl_meetings ADD keywords NVARCHAR(500);
-        IF COL_LENGTH('cl_meetings','summary') IS NULL ALTER TABLE cl_meetings ADD summary NVARCHAR(MAX);
-        IF COL_LENGTH('cl_meetings','transcript') IS NULL ALTER TABLE cl_meetings ADD transcript NVARCHAR(MAX);
-        IF COL_LENGTH('cl_meetings','audio_session') IS NULL ALTER TABLE cl_meetings ADD audio_session NVARCHAR(100);
         INSERT INTO cl_meetings (title,keywords,summary,transcript,transcript_chars,summary_chars,drive_file_id,drive_link,audio_file,audio_session)
         VALUES (@title,@keywords,@summary,@transcript,@tc,@sc,@fid,@link,@audio,@asession)
       `);

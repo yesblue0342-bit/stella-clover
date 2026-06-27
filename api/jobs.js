@@ -2,12 +2,15 @@
 //   POST /api/jobs           : 작업 생성(INSERT status=processing) + worker 1회 트리거 → { job_id }
 //   GET  /api/jobs?id=N      : 상태/진행률/segments/speakers/summary
 //   GET  /api/jobs?action=list&userId= : 사용자의 비종료(processing/summarizing) 작업 목록
-// 모든 경로 항상 JSON 반환(프런트 safeJson과 짝). Azure cold-start는 _db.js 재시도로 흡수.
-import { getPool, sql, CREATE_JOBS, parseJson } from "./_db.js";
+// 모든 경로 항상 JSON 반환(프런트 safeJson과 짝). DB 콜드스타트는 _db.js 재시도로 흡수.
+import { getPool, sql, parseJson, hasDbConfig } from "./_db.js";
 
 export const config = { maxDuration: 30 };
 
 function baseUrl(req) {
+  // 신뢰 가능한 고정 베이스 우선(헤더 스푸핑/SSRF 방지). Vercel은 VERCEL_URL 자동 주입.
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/+$/, "");
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   return `${proto}://${host}`;
@@ -20,8 +23,8 @@ function triggerWorker(req, jobId) {
 
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  if (!process.env.CL_DB_SV || !process.env.CL_DB_USR || !process.env.CL_DB_PW) {
-    return res.status(200).json({ ok: false, message: "DB 환경변수 미설정" });
+  if (!hasDbConfig()) {
+    return res.status(200).json({ ok: false, message: "DB 환경변수 미설정 (DATABASE_URL 또는 PGHOST 확인)" });
   }
   try {
     const pool = await getPool();
@@ -44,10 +47,10 @@ export default async function handler(req, res) {
         .input("refs", sql.NVarChar(sql.MAX), JSON.stringify(chunkRefs))
         .input("aref", sql.NVarChar(sql.MAX), audioRef ? JSON.stringify(audioRef) : null)
         .input("title", sql.NVarChar(300), title)
-        .query(`${CREATE_JOBS}
+        .query(`
           INSERT INTO transcribe_jobs (user_id,language,model,status,chunks_total,chunks_done,chunk_refs,segments_json,audio_ref,title)
-          OUTPUT INSERTED.job_id
-          VALUES (@uid,@lang,@model,'processing',@ct,0,@refs,'[]',@aref,@title)`);
+          VALUES (@uid,@lang,@model,'processing',@ct,0,@refs,'[]',@aref,@title)
+          RETURNING job_id`);
       const jobId = r.recordset[0].job_id;
       triggerWorker(req, jobId);
       return res.status(200).json({ ok: true, job_id: jobId });
@@ -58,16 +61,16 @@ export default async function handler(req, res) {
       if (action === "list") {
         const userId = String(req.query.userId || "anon").slice(0, 128);
         const r = await pool.request().input("uid", sql.NVarChar(128), userId)
-          .query(`${CREATE_JOBS}
-            SELECT TOP 20 job_id,title,status,chunks_total,chunks_done,model,language,updated_at
+          .query(`
+            SELECT job_id,title,status,chunks_total,chunks_done,model,language,updated_at
             FROM transcribe_jobs WHERE user_id=@uid AND status IN ('processing','summarizing')
-            ORDER BY job_id DESC`);
+            ORDER BY job_id DESC LIMIT 20`);
         return res.status(200).json({ ok: true, jobs: r.recordset || [] });
       }
       const id = parseInt(req.query.id, 10);
       if (!Number.isInteger(id)) return res.status(400).json({ ok: false, message: "id 필요" });
       const r = await pool.request().input("id", sql.BigInt, id)
-        .query(`${CREATE_JOBS} SELECT * FROM transcribe_jobs WHERE job_id=@id`);
+        .query(`SELECT * FROM transcribe_jobs WHERE job_id=@id`);
       const j = r.recordset[0];
       if (!j) return res.status(200).json({ ok: false, message: "작업을 찾을 수 없습니다." });
       const segments = parseJson(j.segments_json, []);

@@ -1,55 +1,12 @@
-// api/workspace.js — Stella Workspace 백엔드 (ESM)
-import { getPool, sql } from './_db.js';
+// api/workspace.js — Stella Workspace 백엔드 (PostgreSQL, ESM)
+// ws_projects / ws_sessions / ws_notes 스키마는 _db.js getPool() 에서 1회 보장된다.
+import { getPool, sql, hasDbConfig } from './_db.js';
 import OpenAI from 'openai';
 import { randomUUID } from 'crypto';
 
 export const config = { maxDuration: 60 };
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// --- 테이블 초기화 (멱등) ---
-const INIT_SQL = `
-  IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='ws_projects')
-  CREATE TABLE ws_projects (
-    id NVARCHAR(36) PRIMARY KEY,
-    user_id NVARCHAR(200) NOT NULL,
-    name NVARCHAR(200) NOT NULL,
-    color NVARCHAR(20) DEFAULT '#1a4731',
-    created_at DATETIME2 DEFAULT SYSUTCDATETIME()
-  );
-
-  IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='ws_sessions')
-  CREATE TABLE ws_sessions (
-    id NVARCHAR(36) PRIMARY KEY,
-    user_id NVARCHAR(200) NOT NULL,
-    project_id NVARCHAR(36),
-    title NVARCHAR(500) DEFAULT N'새 채팅',
-    messages NVARCHAR(MAX) DEFAULT N'[]',
-    msg_count INT DEFAULT 0,
-    created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
-    updated_at DATETIME2 DEFAULT SYSUTCDATETIME()
-  );
-  IF COL_LENGTH('ws_sessions','project_id') IS NULL ALTER TABLE ws_sessions ADD project_id NVARCHAR(36);
-  IF COL_LENGTH('ws_sessions','msg_count') IS NULL ALTER TABLE ws_sessions ADD msg_count INT DEFAULT 0;
-
-  IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='ws_notes')
-  CREATE TABLE ws_notes (
-    id NVARCHAR(36) PRIMARY KEY,
-    user_id NVARCHAR(200) NOT NULL,
-    title NVARCHAR(500) DEFAULT N'새 노트',
-    content NVARCHAR(MAX) DEFAULT N'',
-    created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
-    updated_at DATETIME2 DEFAULT SYSUTCDATETIME()
-  );
-`;
-
-let dbInited = false;
-async function ensureDb() {
-  if (dbInited) return;
-  const pool = await getPool();
-  await pool.request().query(INIT_SQL);
-  dbInited = true;
-}
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -71,8 +28,9 @@ export default async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(204).end();
 
+  if (!hasDbConfig()) return err(res, 200, 'DB 환경변수 미설정 (DATABASE_URL 또는 PGHOST 확인)');
+
   try {
-    await ensureDb();
     const pool = await getPool();
 
     // --- GET ---
@@ -129,16 +87,18 @@ export default async function handler(req, res) {
       }
 
       if (action === 'new_session') {
-        const { user, project_id, title } = body;
+        const { user, title } = body;
         if (!user) return err(res, 400, 'user required');
+        // project_id 는 VARCHAR(36) → 초과 시 pg 22001(500) 방지 위해 길이 클램프
+        const project_id = body.project_id ? String(body.project_id).slice(0, 36) : null;
         const id = randomUUID();
         await pool.request()
           .input('id', sql.NVarChar, id)
           .input('u', sql.NVarChar, user)
-          .input('p', sql.NVarChar, project_id || null)
+          .input('p', sql.NVarChar, project_id)
           .input('t', sql.NVarChar, (title || '새 채팅').slice(0, 500))
           .query('INSERT INTO ws_sessions (id,user_id,project_id,title) VALUES (@id,@u,@p,@t)');
-        return ok(res, { session: { id, user_id: user, project_id: project_id || null, title: title || '새 채팅', messages: [], msg_count: 0 } });
+        return ok(res, { session: { id, user_id: user, project_id, title: title || '새 채팅', messages: [], msg_count: 0 } });
       }
 
       if (action === 'new_note') {
@@ -155,7 +115,8 @@ export default async function handler(req, res) {
       }
 
       if (action === 'chat') {
-        const { session_id, user, message } = body;
+        const { session_id, user } = body;
+        const message = String(body.message || '').slice(0, 8000); // 비용/저장 폭증 방지
         if (!session_id || !user || !message) return err(res, 400, 'session_id, user, message required');
 
         const r = await pool.request().input('id', sql.NVarChar, session_id)
@@ -196,7 +157,7 @@ export default async function handler(req, res) {
           .input('msgs', sql.NVarChar, messagesJson)
           .input('cnt', sql.Int, msgCount)
           .input('title', sql.NVarChar, newTitle)
-          .query('UPDATE ws_sessions SET messages=@msgs, msg_count=@cnt, title=@title, updated_at=SYSUTCDATETIME() WHERE id=@id');
+          .query('UPDATE ws_sessions SET messages=@msgs, msg_count=@cnt, title=@title, updated_at=now() WHERE id=@id');
 
         return ok(res, { reply, title: newTitle, messages, msg_count: msgCount });
       }
@@ -207,7 +168,7 @@ export default async function handler(req, res) {
         await pool.request()
           .input('id', sql.NVarChar, id)
           .input('t', sql.NVarChar, (title || '').slice(0, 500))
-          .query('UPDATE ws_sessions SET title=@t, updated_at=SYSUTCDATETIME() WHERE id=@id');
+          .query('UPDATE ws_sessions SET title=@t, updated_at=now() WHERE id=@id');
         return ok(res, {});
       }
 
@@ -218,7 +179,7 @@ export default async function handler(req, res) {
           .input('id', sql.NVarChar, id)
           .input('t', sql.NVarChar, (title || '').slice(0, 500))
           .input('c', sql.NVarChar, content || '')
-          .query('UPDATE ws_notes SET title=@t, content=@c, updated_at=SYSUTCDATETIME() WHERE id=@id');
+          .query('UPDATE ws_notes SET title=@t, content=@c, updated_at=now() WHERE id=@id');
         return ok(res, {});
       }
 
@@ -245,15 +206,19 @@ export default async function handler(req, res) {
       if (action === 'delete_project') {
         const { id, user } = body;
         if (!id || !user) return err(res, 400, 'id, user required');
-        // 프로젝트 내 세션도 삭제
-        await pool.request()
-          .input('p', sql.NVarChar, id)
-          .input('u', sql.NVarChar, user)
-          .query('DELETE FROM ws_sessions WHERE project_id=@p AND user_id=@u');
-        await pool.request()
-          .input('id', sql.NVarChar, id)
-          .input('u', sql.NVarChar, user)
-          .query('DELETE FROM ws_projects WHERE id=@id AND user_id=@u');
+        // 세션 + 프로젝트 삭제를 한 트랜잭션으로 — 중간 실패 시 세션 고아 방지.
+        const client = await pool._pg.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('DELETE FROM ws_sessions WHERE project_id=$1 AND user_id=$2', [id, user]);
+          await client.query('DELETE FROM ws_projects WHERE id=$1 AND user_id=$2', [id, user]);
+          await client.query('COMMIT');
+        } catch (e) {
+          try { await client.query('ROLLBACK'); } catch (_) {}
+          throw e;
+        } finally {
+          client.release();
+        }
         return ok(res, {});
       }
 

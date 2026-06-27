@@ -4,7 +4,7 @@
 //   · Drive에서 청크 받아 [선택 model]로 전사, timestamps 있으면 글로벌 offset 보정(A1)
 //   · segments append, chunks_done++ (CAS 가드로 중복 처리 방지), 남으면 worker 재트리거
 //   · 다 끝나면 status=summarizing → 화자(A4)+구조화요약(A5) → status=done
-import { getPool, sql, CREATE_JOBS, parseJson } from "./_db.js";
+import { getPool, sql, parseJson } from "./_db.js";
 import { getDrive, downloadFileById } from "./_drive.js";
 import { transcribeBuffer } from "./_stt.js";
 import { labelSpeakers, structuredSummary } from "./_analyze.js";
@@ -12,6 +12,9 @@ import { labelSpeakers, structuredSummary } from "./_analyze.js";
 export const config = { maxDuration: 300 }; // 청크 1개 전사 커버
 
 function baseUrl(req) {
+  // 신뢰 가능한 고정 베이스 우선(헤더 스푸핑/SSRF 방지). Vercel은 VERCEL_URL 자동 주입.
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/+$/, "");
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   return `${proto}://${host}`;
@@ -32,7 +35,7 @@ export default async function handler(req, res) {
 
   try {
     const r = await pool.request().input("id", sql.BigInt, id)
-      .query(`${CREATE_JOBS} SELECT * FROM transcribe_jobs WHERE job_id=@id`);
+      .query(`SELECT * FROM transcribe_jobs WHERE job_id=@id`);
     const j = r.recordset[0];
     if (!j) return res.status(200).json({ ok: false, message: "작업 없음" });
     if (j.status === "done" || j.status === "error") return res.status(200).json({ ok: true, done: true, status: j.status });
@@ -46,7 +49,7 @@ export default async function handler(req, res) {
       const ref = refs[cur];
       if (!ref || !ref.id) {
         await pool.request().input("id", sql.BigInt, id).input("e", sql.NVarChar(sql.MAX), `청크 ref 누락(index ${cur})`)
-          .query("UPDATE transcribe_jobs SET status='error', error_msg=@e, updated_at=SYSUTCDATETIME() WHERE job_id=@id");
+          .query("UPDATE transcribe_jobs SET status='error', error_msg=@e, updated_at=now() WHERE job_id=@id");
         return res.status(200).json({ ok: false, message: "청크 ref 누락" });
       }
       const offsetSec = refs.slice(0, cur).reduce((a, x) => a + (Number(x.durationSec) || 0), 0);
@@ -70,7 +73,7 @@ export default async function handler(req, res) {
         .input("cur", sql.Int, cur)
         .input("next", sql.Int, next)
         .input("seg", sql.NVarChar(sql.MAX), JSON.stringify(newSegs))
-        .query("UPDATE transcribe_jobs SET chunks_done=@next, segments_json=@seg, updated_at=SYSUTCDATETIME() WHERE job_id=@id AND chunks_done=@cur");
+        .query("UPDATE transcribe_jobs SET chunks_done=@next, segments_json=@seg, updated_at=now() WHERE job_id=@id AND chunks_done=@cur");
       if (!upd.rowsAffected[0]) return res.status(200).json({ ok: true, skipped: "다른 워커가 이미 진행" });
 
       if (next < total) { retrigger(req, id); return res.status(200).json({ ok: true, processed: next, total }); }
@@ -79,7 +82,7 @@ export default async function handler(req, res) {
 
     // ── 모든 청크 완료 → 화자 + 요약 ──
     await pool.request().input("id", sql.BigInt, id)
-      .query("UPDATE transcribe_jobs SET status='summarizing', updated_at=SYSUTCDATETIME() WHERE job_id=@id AND status<>'done'");
+      .query("UPDATE transcribe_jobs SET status='summarizing', updated_at=now() WHERE job_id=@id AND status<>'done'");
     const segs = parseJson(
       (await pool.request().input("id", sql.BigInt, id).query("SELECT segments_json FROM transcribe_jobs WHERE job_id=@id")).recordset[0]?.segments_json,
       []
@@ -93,12 +96,12 @@ export default async function handler(req, res) {
       .input("id", sql.BigInt, id)
       .input("sp", sql.NVarChar(sql.MAX), JSON.stringify(speakers))
       .input("sm", sql.NVarChar(sql.MAX), summary ? JSON.stringify(summary) : null)
-      .query("UPDATE transcribe_jobs SET status='done', speakers_json=@sp, summary_json=@sm, updated_at=SYSUTCDATETIME() WHERE job_id=@id");
+      .query("UPDATE transcribe_jobs SET status='done', speakers_json=@sp, summary_json=@sm, updated_at=now() WHERE job_id=@id");
     return res.status(200).json({ ok: true, done: true });
   } catch (e) {
     try {
       await pool.request().input("id", sql.BigInt, id).input("e", sql.NVarChar(sql.MAX), String(e.message || e).slice(0, 1000))
-        .query("UPDATE transcribe_jobs SET status='error', error_msg=@e, updated_at=SYSUTCDATETIME() WHERE job_id=@id");
+        .query("UPDATE transcribe_jobs SET status='error', error_msg=@e, updated_at=now() WHERE job_id=@id");
     } catch (e2) {}
     return res.status(200).json({ ok: false, message: "워커 오류: " + e.message });
   }

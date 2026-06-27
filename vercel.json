@@ -9,6 +9,7 @@
     { "source": "/api/jobs", "destination": "/api/jobs" },
     { "source": "/api/worker", "destination": "/api/worker" },
     { "source": "/api/audio", "destination": "/api/audio" },
+    { "source": "/api/workspace", "destination": "/api/workspace" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "crons": [

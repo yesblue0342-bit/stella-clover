@@ -1,58 +1,217 @@
-// api/_db.js - Azure SQL 공유 연결 풀 + 테이블 정의 (ESM)
-import sql from "mssql";
+// api/_db.js - PostgreSQL(자체 호스팅, Ubuntu VM on OCI) 공유 풀 + mssql 호환 셰임 + 스키마 (ESM)
+//
+// ▣ 이전: Azure SQL (mssql). ▣ 현재: PostgreSQL (node-postgres `pg`).
+// 소비자 코드는 mssql 스타일을 그대로 쓴다:
+//     const pool = await getPool();
+//     const r = await pool.request().input("id", sql.Int, id).query("SELECT * FROM t WHERE id=@id");
+//     r.recordset / r.rowsAffected[0]
+// 이 모듈의 셰임이 `@name` → `$1` 위치 파라미터로 변환하고, 결과를
+// { recordset, rowsAffected, rowCount } 형태로 돌려준다. (mssql 타입(`sql.Int` 등)은 무시)
+//
+// 스키마 생성은 getPool() 안에서 콜드스타트당 1회(ensureSchema) 실행한다.
+// → pg는 파라미터가 있는 쿼리에 여러 문장을 넣을 수 없으므로, 더 이상
+//   각 쿼리 앞에 CREATE_TABLE 을 붙이지 않는다(붙이면 깨진다).
 
-let poolPromise;
+import pg from "pg";
+import { toPositional, sql } from "./_sqlshim.js";
+const { Pool } = pg;
 
-function required(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing environment variable: ${name}`);
-  return value;
+// int8(bigint, type OID 20)을 JS Number로 파싱. node-postgres 기본은 문자열 반환이라
+// job_id(BIGSERIAL)가 RETURNING/SELECT 경로에서 string ↔ number 불일치를 일으킨다.
+// transcribe_jobs.job_id 는 2^53 을 넘을 일이 없어 안전. (SQL NULL 은 파서를 거치지 않음)
+pg.types.setTypeParser(20, v => (v == null ? v : parseInt(v, 10)));
+
+// mssql 호환 타입 토큰 재노출 (예: sql.NVarChar(sql.MAX))
+export { sql };
+
+let rawPoolSingleton;     // 원본 pg.Pool (인스턴스당 1개)
+let poolPromise;          // Promise<ShimPool> (스키마 보장 후 resolve)
+
+// ── 연결 설정: DATABASE_URL 우선, 없으면 표준 PG* 변수 ──
+export function hasDbConfig() {
+  return !!(process.env.DATABASE_URL || process.env.PG_URL ||
+            process.env.PGHOST || process.env.DB_HOST);
 }
 
-function getConfig() {
+function buildConfig() {
+  const url = process.env.DATABASE_URL || process.env.PG_URL;
+
+  // SSL: 원격(OCI) Postgres는 보통 필요. PGSSL=disable 면 끈다. 미지정이면 드라이버 기본.
+  const sslEnv = String(process.env.PGSSL || process.env.DB_SSL || "").toLowerCase();
+  let ssl;
+  if (["disable", "false", "off", "0"].includes(sslEnv)) ssl = false;
+  else if (["require", "true", "on", "1"].includes(sslEnv)) ssl = { rejectUnauthorized: false };
+  else ssl = undefined; // URL 의 sslmode 등 드라이버 기본에 위임
+
+  const common = {
+    max: Number(process.env.PG_POOL_MAX || 3),
+    idleTimeoutMillis: 30000,
+    // 콜드스타트/원격 지연 흡수. 호출 함수 maxDuration ≥ 60 권장.
+    connectionTimeoutMillis: 30000,
+  };
+
+  if (url) {
+    const cfg = { connectionString: url, ...common };
+    if (ssl !== undefined) cfg.ssl = ssl;
+    return cfg;
+  }
+  const cfg = {
+    host: process.env.PGHOST || process.env.DB_HOST,
+    port: Number(process.env.PGPORT || process.env.DB_PORT || 5432),
+    database: process.env.PGDATABASE || process.env.DB_NAME,
+    user: process.env.PGUSER || process.env.DB_USER,
+    password: process.env.PGPASSWORD || process.env.DB_PASSWORD,
+    ...common,
+  };
+  if (ssl !== undefined) cfg.ssl = ssl;
+  return cfg;
+}
+
+function rawPool() {
+  if (!rawPoolSingleton) {
+    rawPoolSingleton = new Pool(buildConfig());
+    // idle 클라이언트 오류로 서버리스 프로세스가 죽지 않게 흡수
+    rawPoolSingleton.on("error", () => {});
+  }
+  return rawPoolSingleton;
+}
+
+// 인증/DB부재 오류는 재시도 무의미 → 즉시 중단. 연결/타임아웃만 재시도.
+function isRetryable(err) {
+  const code = err && err.code;
+  // 28P01 invalid_password, 28000 invalid_authorization, 3D000 invalid_catalog(db없음)
+  if (code === "28P01" || code === "28000" || code === "3D000") return false;
+  const retry = ["ETIMEDOUT", "ETIMEOUT", "ESOCKET", "ECONNRESET", "ECONNREFUSED", "EHOSTUNREACH", "ENOTFOUND", "EPIPE"];
+  if (retry.includes(code)) return true;
+  const msg = String((err && err.message) || "");
+  return /timeout|connect|terminat|socket|ECONN|getaddrinfo/i.test(msg);
+}
+
+// ── mssql 호환 셰임 ──
+class ShimRequest {
+  constructor(pool) { this._pool = pool; this._params = {}; }
+  // mssql: .input(name, type, value) | .input(name, value) 모두 허용. 타입은 무시.
+  input(name, typeOrVal, maybeVal) {
+    this._params[name] = (maybeVal === undefined) ? typeOrVal : maybeVal;
+    return this;
+  }
+  async query(text) {
+    const { text: sqlText, values } = toPositional(text, this._params);
+    const r = await this._pool.query(sqlText, values);
+    return { recordset: r.rows || [], rowsAffected: [r.rowCount || 0], rowCount: r.rowCount || 0 };
+  }
+}
+
+function shimPool(pool) {
   return {
-    server: required("CL_DB_SV"),
-    database: required("CL_DB_NM"),
-    user: required("CL_DB_USR"),
-    password: required("CL_DB_PW"),
-    options: {
-      encrypt: true,
-      trustServerCertificate: false,
-      enableArithAbort: true
-    },
-    // Azure SQL 서버리스(auto-pause) 티어는 비활성 후 첫 연결 시 DB 재개(resume)에
-    // 수십 초가 걸린다. 짧은 타임아웃이면 재개 전에 끊겨 실패하므로 30초로 상향.
-    connectionTimeout: 30000,
-    requestTimeout: 30000,
-    pool: {
-      max: 3,
-      min: 0,
-      idleTimeoutMillis: 30000
-    }
+    request: () => new ShimRequest(pool),
+    query: (text, params) => pool.query(text, params),
+    _pg: pool,
   };
 }
 
-// 인증 오류(로그인 실패)는 재시도해도 소용없으므로 즉시 중단.
-// 타임아웃/연결 오류(특히 auto-pause DB 재개 대기)만 재시도 대상.
-function isRetryable(err) {
-  const code = (err && (err.code || (err.originalError && err.originalError.code))) || "";
-  const num = (err && (err.number || (err.originalError && err.originalError.number))) || 0;
-  // 로그인 실패(ELOGIN / SQL error 18456)는 재시도 금지
-  if (code === "ELOGIN" || num === 18456) return false;
-  const retryCodes = ["ETIMEOUT", "ETIMEDOUT", "ESOCKET", "ECONNCLOSED", "ECONNREFUSED", "EHOSTUNREACH", "ENOTOPEN"];
-  if (retryCodes.includes(code)) return true;
-  // 메시지 기반 폴백 (예: "Failed to connect ... in 30000ms")
-  const msg = String((err && err.message) || "");
-  return /timeout|failed to connect|socket hang up|getaddrinfo|connection is closed/i.test(msg);
-}
+// ── 스키마 (PostgreSQL). 멱등: CREATE/ALTER ... IF NOT EXISTS. ──
+// 파라미터 없는 다중 문장이므로 pg simple-query 로 안전하게 실행된다.
 
-// 일시정지된 DB가 깨어날 시간을 확보: 최대 3회, 시도 간 3초 대기.
-// 재시도 불가(인증) 오류는 즉시, 마지막 시도 실패도 throw.
-async function connectWithRetry(retries = 3, delay = 3000) {
+// 회의록 (전문 검색 인덱스)
+export const CREATE_TABLE = `
+  CREATE TABLE IF NOT EXISTS cl_meetings (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(300),
+    keywords VARCHAR(500),
+    summary TEXT,
+    transcript TEXT,
+    transcript_chars INT,
+    summary_chars INT,
+    drive_file_id VARCHAR(200),
+    drive_link VARCHAR(500),
+    audio_file VARCHAR(300),
+    audio_session VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT now()
+  );
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS keywords VARCHAR(500);
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS summary TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS transcript TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS transcript_chars INT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS summary_chars INT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS drive_file_id VARCHAR(200);
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS drive_link VARCHAR(500);
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS audio_file VARCHAR(300);
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS audio_session VARCHAR(100);
+`;
+
+// 백그라운드 전사 작업
+export const CREATE_JOBS = `
+  CREATE TABLE IF NOT EXISTS transcribe_jobs (
+    job_id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(128),
+    language VARCHAR(16),
+    model VARCHAR(64),
+    status VARCHAR(32) NOT NULL DEFAULT 'processing',
+    chunks_total INT NOT NULL DEFAULT 0,
+    chunks_done INT NOT NULL DEFAULT 0,
+    chunk_refs TEXT,
+    segments_json TEXT,
+    speakers_json TEXT,
+    summary_json TEXT,
+    audio_ref TEXT,
+    title VARCHAR(300),
+    error_msg TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+  );
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS segments_json TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS speakers_json TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS summary_json TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS audio_ref TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS title VARCHAR(300);
+`;
+
+// 워크스페이스(채팅/노트/프로젝트) — 기기 간 동기화의 단일 진실원천
+export const CREATE_WORKSPACE = `
+  CREATE TABLE IF NOT EXISTS ws_projects (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(200) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    color VARCHAR(20) DEFAULT '#1a4731',
+    created_at TIMESTAMPTZ DEFAULT now()
+  );
+  CREATE TABLE IF NOT EXISTS ws_sessions (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(200) NOT NULL,
+    project_id VARCHAR(36),
+    title VARCHAR(500) DEFAULT '새 채팅',
+    messages TEXT DEFAULT '[]',
+    msg_count INT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+  );
+  ALTER TABLE ws_sessions ADD COLUMN IF NOT EXISTS project_id VARCHAR(36);
+  ALTER TABLE ws_sessions ADD COLUMN IF NOT EXISTS msg_count INT DEFAULT 0;
+  CREATE TABLE IF NOT EXISTS ws_notes (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(200) NOT NULL,
+    title VARCHAR(500) DEFAULT '새 노트',
+    content TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS ix_ws_sessions_user ON ws_sessions(user_id);
+  CREATE INDEX IF NOT EXISTS ix_ws_notes_user ON ws_notes(user_id);
+  CREATE INDEX IF NOT EXISTS ix_ws_projects_user ON ws_projects(user_id);
+`;
+
+let schemaReady = false;
+async function ensureSchema(pool, retries = 3, delay = 3000) {
+  if (schemaReady) return;
   let lastErr;
   for (let i = 0; i < retries; i++) {
     try {
-      return await new sql.ConnectionPool(getConfig()).connect();
+      await pool.query(CREATE_TABLE);
+      await pool.query(CREATE_JOBS);
+      await pool.query(CREATE_WORKSPACE);
+      schemaReady = true;
+      return;
     } catch (err) {
       lastErr = err;
       if (!isRetryable(err) || i === retries - 1) throw err;
@@ -62,73 +221,24 @@ async function connectWithRetry(retries = 3, delay = 3000) {
   throw lastErr;
 }
 
-// 서버리스 인스턴스당 단일 풀을 재사용한다.
-// (요청마다 connect/close 하면 동시 요청 시 풀이 닫혀 오류가 난다.)
+// 서버리스 인스턴스당 단일 풀 재사용 + 스키마 1회 보장.
 export function getPool() {
   if (!poolPromise) {
-    poolPromise = connectWithRetry()
-      .catch(err => {
-        poolPromise = undefined; // 실패 시 다음 요청에서 재시도
-        throw err;
-      });
+    poolPromise = (async () => {
+      const pool = rawPool();
+      await ensureSchema(pool);
+      return shimPool(pool);
+    })().catch(err => {
+      poolPromise = undefined; // 실패 시 다음 요청에서 재시도
+      throw err;
+    });
   }
   return poolPromise;
 }
 
-// cl_meetings 테이블 보장 (멱등). 실제 사용 스키마와 일치.
-// ALTER ADD 가드로 스키마 드리프트(컬럼 누락)에도 SELECT가 깨지지 않게 한다.
-export const CREATE_TABLE = `
-  IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='cl_meetings')
-  CREATE TABLE cl_meetings (
-    id INT IDENTITY PRIMARY KEY,
-    title NVARCHAR(300), keywords NVARCHAR(500),
-    summary NVARCHAR(MAX), transcript NVARCHAR(MAX),
-    transcript_chars INT, summary_chars INT,
-    drive_file_id NVARCHAR(200), drive_link NVARCHAR(500),
-    audio_file NVARCHAR(300), audio_session NVARCHAR(100),
-    created_at DATETIME2 DEFAULT SYSUTCDATETIME()
-  );
-  IF COL_LENGTH('cl_meetings','keywords') IS NULL ALTER TABLE cl_meetings ADD keywords NVARCHAR(500);
-  IF COL_LENGTH('cl_meetings','summary') IS NULL ALTER TABLE cl_meetings ADD summary NVARCHAR(MAX);
-  IF COL_LENGTH('cl_meetings','transcript') IS NULL ALTER TABLE cl_meetings ADD transcript NVARCHAR(MAX);
-  IF COL_LENGTH('cl_meetings','transcript_chars') IS NULL ALTER TABLE cl_meetings ADD transcript_chars INT;
-  IF COL_LENGTH('cl_meetings','summary_chars') IS NULL ALTER TABLE cl_meetings ADD summary_chars INT;
-  IF COL_LENGTH('cl_meetings','drive_file_id') IS NULL ALTER TABLE cl_meetings ADD drive_file_id NVARCHAR(200);
-  IF COL_LENGTH('cl_meetings','drive_link') IS NULL ALTER TABLE cl_meetings ADD drive_link NVARCHAR(500);
-  IF COL_LENGTH('cl_meetings','audio_file') IS NULL ALTER TABLE cl_meetings ADD audio_file NVARCHAR(300);
-  IF COL_LENGTH('cl_meetings','audio_session') IS NULL ALTER TABLE cl_meetings ADD audio_session NVARCHAR(100);`;
-
-// 백그라운드 전사 작업 테이블 (B1). JSON 컬럼은 항상 JSON.stringify로 쓰고 read 시 try/catch 파싱.
-export const CREATE_JOBS = `
-  IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='transcribe_jobs')
-  CREATE TABLE transcribe_jobs (
-    job_id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    user_id NVARCHAR(128),
-    language NVARCHAR(16),
-    model NVARCHAR(64),
-    status NVARCHAR(32) NOT NULL DEFAULT 'processing',
-    chunks_total INT NOT NULL DEFAULT 0,
-    chunks_done INT NOT NULL DEFAULT 0,
-    chunk_refs NVARCHAR(MAX),
-    segments_json NVARCHAR(MAX),
-    speakers_json NVARCHAR(MAX),
-    summary_json NVARCHAR(MAX),
-    audio_ref NVARCHAR(MAX),
-    title NVARCHAR(300),
-    error_msg NVARCHAR(MAX),
-    created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
-    updated_at DATETIME2 DEFAULT SYSUTCDATETIME()
-  );
-  IF COL_LENGTH('transcribe_jobs','segments_json') IS NULL ALTER TABLE transcribe_jobs ADD segments_json NVARCHAR(MAX);
-  IF COL_LENGTH('transcribe_jobs','speakers_json') IS NULL ALTER TABLE transcribe_jobs ADD speakers_json NVARCHAR(MAX);
-  IF COL_LENGTH('transcribe_jobs','summary_json') IS NULL ALTER TABLE transcribe_jobs ADD summary_json NVARCHAR(MAX);
-  IF COL_LENGTH('transcribe_jobs','audio_ref') IS NULL ALTER TABLE transcribe_jobs ADD audio_ref NVARCHAR(MAX);
-  IF COL_LENGTH('transcribe_jobs','title') IS NULL ALTER TABLE transcribe_jobs ADD title NVARCHAR(300);`;
-
-// JSON 컬럼 안전 파싱 (B1: 파싱 버그 방지)
+// JSON 컬럼 안전 파싱
 export function parseJson(v, fallback) {
   if (v == null) return fallback;
+  if (typeof v === "object") return v; // 혹시 드라이버가 이미 파싱한 경우
   try { const o = JSON.parse(v); return o == null ? fallback : o; } catch (e) { return fallback; }
 }
-
-export { sql };
