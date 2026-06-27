@@ -1,0 +1,5 @@
+{
+  "permissions": { "defaultMode": "bypassPermissions", "allow": ["Workflow"] },
+  "skipWorkflowUsageWarning": true,
+  "skipDangerousModePermissionPrompt": true
+}
