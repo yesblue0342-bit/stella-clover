@@ -21,3 +21,5 @@
 - [x] INF-3. Vercel 의존 제거 → 배포 환경 중립. VERCEL_URL 제거(PUBLIC_BASE_URL), vercel dev 제거, npm test 추가, 문서 OCI화.
 - [x] INF-4. raw Node 독립 실행 진입점 server.js — 정적+/api 어댑터, 본문 한도 25MB(413 차단), /api 항상 JSON(평문 파싱오류 차단), 헬스체크. (부팅 스모크 테스트)
 - [x] INF-5. 반복 오류 구조적 차단 — 413(서버+nginx 한도), Unexpected token(항상 JSON), 함수 타임아웃(raw Node), 배포(OCI) 플레이북 갱신.
+- [x] INF-6. 워크스페이스 서버측 소유권 스코프 — session 조회/chat/update_session/update_note 를 모두 `user_id=@u` 로 스코프 + `user` 필수 가드. 프런트(get-session·update_note)에 user 전달. (소스 회귀 테스트 4건)
+- [x] INF-7. 워커 워치독 — cleanup 크론이 멈춘(>10분) transcribe_jobs 를 worker 재트리거(best-effort). 오디오 정리와 독립.

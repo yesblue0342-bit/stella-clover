@@ -55,9 +55,10 @@ export default async function handler(req, res) {
       }
 
       if (action === 'session') {
-        if (!id) return err(res, 400, 'id required');
-        const r = await pool.request().input('id', sql.NVarChar, id)
-          .query('SELECT * FROM ws_sessions WHERE id=@id');
+        if (!id || !user) return err(res, 400, 'id, user required');
+        // 소유권 스코프: 본인(user_id) 세션만 조회 가능
+        const r = await pool.request().input('id', sql.NVarChar, id).input('u', sql.NVarChar, user)
+          .query('SELECT * FROM ws_sessions WHERE id=@id AND user_id=@u');
         if (!r.recordset.length) return err(res, 404, 'session not found');
         const s = r.recordset[0];
         let messages = [];
@@ -120,8 +121,9 @@ export default async function handler(req, res) {
         if (!session_id || !user || !message) return err(res, 400, 'session_id, user, message required');
         if (!process.env.OPENAI_API_KEY) return err(res, 200, 'OpenAI API 키 미설정 (OPENAI_API_KEY 확인)');
 
-        const r = await pool.request().input('id', sql.NVarChar, session_id)
-          .query('SELECT * FROM ws_sessions WHERE id=@id');
+        // 소유권 스코프: 본인 세션에만 채팅 가능
+        const r = await pool.request().input('id', sql.NVarChar, session_id).input('u', sql.NVarChar, user)
+          .query('SELECT * FROM ws_sessions WHERE id=@id AND user_id=@u');
         if (!r.recordset.length) return err(res, 404, 'session not found');
 
         const sess = r.recordset[0];
@@ -155,32 +157,35 @@ export default async function handler(req, res) {
 
         await pool.request()
           .input('id', sql.NVarChar, session_id)
+          .input('u', sql.NVarChar, user)
           .input('msgs', sql.NVarChar, messagesJson)
           .input('cnt', sql.Int, msgCount)
           .input('title', sql.NVarChar, newTitle)
-          .query('UPDATE ws_sessions SET messages=@msgs, msg_count=@cnt, title=@title, updated_at=now() WHERE id=@id');
+          .query('UPDATE ws_sessions SET messages=@msgs, msg_count=@cnt, title=@title, updated_at=now() WHERE id=@id AND user_id=@u');
 
         return ok(res, { reply, title: newTitle, messages, msg_count: msgCount });
       }
 
       if (action === 'update_session') {
-        const { id, title } = body;
-        if (!id) return err(res, 400, 'id required');
+        const { id, user, title } = body;
+        if (!id || !user) return err(res, 400, 'id, user required');
         await pool.request()
           .input('id', sql.NVarChar, id)
+          .input('u', sql.NVarChar, user)
           .input('t', sql.NVarChar, (title || '').slice(0, 500))
-          .query('UPDATE ws_sessions SET title=@t, updated_at=now() WHERE id=@id');
+          .query('UPDATE ws_sessions SET title=@t, updated_at=now() WHERE id=@id AND user_id=@u');
         return ok(res, {});
       }
 
       if (action === 'update_note') {
-        const { id, title, content } = body;
-        if (!id) return err(res, 400, 'id required');
+        const { id, user, title, content } = body;
+        if (!id || !user) return err(res, 400, 'id, user required');
         await pool.request()
           .input('id', sql.NVarChar, id)
+          .input('u', sql.NVarChar, user)
           .input('t', sql.NVarChar, (title || '').slice(0, 500))
           .input('c', sql.NVarChar, content || '')
-          .query('UPDATE ws_notes SET title=@t, content=@c, updated_at=now() WHERE id=@id');
+          .query('UPDATE ws_notes SET title=@t, content=@c, updated_at=now() WHERE id=@id AND user_id=@u');
         return ok(res, {});
       }
 

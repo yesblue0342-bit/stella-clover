@@ -1209,7 +1209,7 @@ async function openSession(id) {
     return t;
   })());
 
-  const d = await safeJson(fetch(`${API}?action=session&id=${encodeURIComponent(id)}`, { cache: 'no-store' }));
+  const d = await safeJson(fetch(`${API}?action=session&id=${encodeURIComponent(id)}&user=${encodeURIComponent(_state.user.email)}`, { cache: 'no-store' }));
   if (!d.ok || !d.session) { toast('대화 로드 실패'); return; }
 
   _state.currentSession = d.session;
@@ -1426,7 +1426,7 @@ async function saveNote() {
   const d = await safeJson(fetch(API, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'update_note', id: _state.currentNote.id, title, content }),
+    body: JSON.stringify({ action: 'update_note', id: _state.currentNote.id, user: _state.user.email, title, content }),
   }));
   if (!d.ok) { toast('저장 실패'); return; }
   const idx = _state.notes.findIndex(n => n.id === _state.currentNote.id);

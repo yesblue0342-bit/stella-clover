@@ -154,6 +154,19 @@
 - 변경: server.js(신규)·test/server.test.js(신규)·api/{summarize,workspace}.js(OpenAI 키 가드)·package.json(start)·CLAUDE.md·TODO.md·TEST_RESULTS.md.
 - 한 줄: Vercel 없이 OCI에서 `npm start`로 구동되는 의존성 0 어댑터. 413·평문JSON·타임아웃 콜드컷 등 반복 오류를 인프라 레벨에서 구조적으로 차단.
 
+## (H) 2026-06-27 (RALPH team) · 워크스페이스 소유권 스코프 + 워커 워치독 · pass 35/35
+> 검증에서 지적된 "클라이언트 제공 id로 타인 데이터 접근" 갭을 강제 가능한 범위에서 차단. (전용 인증 백엔드는 별도 과제 — 신원=로컬 프로필 이메일.)
+- **소유권 스코프(workspace.js)**: `session` 조회·`chat`(세션 SELECT+UPDATE)·`update_session`·`update_note` 를 모두 `WHERE id=@id AND user_id=@u` 로 스코프 + `user` 필수 가드. UUID 미추측성 + user 스코프로 무단 접근 차단.
+- **프런트 정합(workspace.html)**: get-session·update_note 호출에 `user` 추가. **sw v10→v11**.
+- **워커 워치독(cleanup.js)**: 크론이 `processing/summarizing` 인데 >10분 미갱신 잡을 골라 `/api/worker` 재트리거(best-effort, 오디오 정리와 독립, DB 미설정 시 skip). 탭 닫힘/콜드스타트로 멈춘 전사 자동 복구.
+- **검증**: node --check 15/15 · `npm test` **35/35 PASS**(소유권/워치독 회귀 4건 포함: id 단독 무방비 쿼리 부재 가드 포함) · workspace.html 인라인 JS 파싱 OK.
+- **남은 한계**: 신원이 클라이언트 제공 이메일이라 완전한 인증(자격증명/세션)은 아님 → 진짜 보안엔 로그인 백엔드 필요(별도 과제). 현재는 UUID+user 스코프로 실질 무단접근만 차단.
+
+## FINAL (RALPH team / 소유권 스코프 + 워치독)
+- `npm test` **35/35 PASS** · node --check 15/15 · workspace.html 파싱 OK.
+- 변경: api/{workspace,cleanup}.js · workspace.html · sw.js(v11) · test/workspace.test.js(신규) · TODO.md · TEST_RESULTS.md.
+- 한 줄: 워크스페이스 모든 id 기반 read/write를 user_id로 서버측 스코프(무단접근 차단) + 멈춘 전사 잡 크론 워치독으로 자동 복구.
+
 ## 2026-06-22 · 회의 제목 변경(✏️) + 기본 날짜·시각 제목 + 최신화 · pass 12/12
 - node --check api/_meeting·summarize·meetings OK · node --test 12/12(+2) · index.html new Function 파싱 OK · vercel.json JSON.parse OK · 시크릿 0 · sw v7→v8
 - T1 제목변경: api/meetings.js action=rename(id+title, CREATE_TABLE 가드, 금지문자 제거, rowsAffected 확인) + index.html renameMeeting()(prompt→POST→캐시 즉시 반영) + 파일카드/이력카드 ✏️ 버튼.
