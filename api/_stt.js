@@ -2,16 +2,34 @@
 // transcribe.js(레거시 직접 호출)와 worker.js(백그라운드)가 공유. 토큰은 env에서만.
 import OpenAI, { toFile } from "openai";
 import { collapseRepeats, isHallucinatedSegment } from "./_meeting.js";
+import { SAP_PROMPT, applyCorrections } from "../lib/sttTerms.js";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// SAP/ERP 전문용어 - Whisper 인식 정확도 향상용 프롬프트 (A6: 기존 유지·확장)
-export const SAP_PROMPT = "SAP, ERP, ABAP, BAPI, IDoc, BOM, MRP, QM, PP, MM, SD, FI, CO, WM, PM, S/4HANA, ECC, 모듈, 트랜잭션, 인터페이스, 배치, 마스터데이터, 자재마스터, 구매오더, 생산오더, 품질검사, 검사로트, 입고, 출고, 재고, 워크플로우, 커스터마이징, 컨피그, 스프린트, 고도화, 마이그레이션, 롤아웃, 표준화, 단위테스트, 통합테스트, 컷오버, 운영이관.";
+// SAP/ERP 전문용어 프롬프트 + 후처리 교정 사전은 lib/sttTerms.js로 단일화(중복 출처 제거).
+export { SAP_PROMPT };
 
 // 타임스탬프 지원 여부는 모델명 하드코딩이 아니라 "응답에 segments 있는지"로 최종 판정한다.
 // 다만 요청 시 verbose_json은 timestamps 지원 모델에만 보낸다(현재 whisper-1).
 export function modelSupportsTimestamps(model) {
   return String(model || "whisper-1") === "whisper-1";
+}
+
+// A5: avg_logprob가 임계값보다 낮은(=신뢰도 낮은) 세그먼트를 로깅. 텍스트는 건드리지 않음.
+// LOGPROB_WARN 임계는 환경변수로 조정 가능(기본 -0.9). Whisper는 보통 -0.5↑이 정상.
+const LOGPROB_WARN = Number(process.env.STT_LOGPROB_WARN || -0.9);
+function logLowConfidence(segments, off = 0) {
+  try {
+    if (!Array.isArray(segments)) return;
+    const low = segments.filter(s => Number(s && s.avg_logprob) < LOGPROB_WARN);
+    if (!low.length) return;
+    const sample = low.slice(0, 5).map(s => ({
+      t: `${(Number(s.start || 0) + off).toFixed(1)}s`,
+      lp: Number(s.avg_logprob || 0).toFixed(2),
+      txt: String(s.text || "").trim().slice(0, 40),
+    }));
+    console.warn(`[STT] 저신뢰 세그먼트 ${low.length}개(avg_logprob<${LOGPROB_WARN})`, JSON.stringify(sample));
+  } catch (e) { /* 로깅 실패는 무시 */ }
 }
 
 async function retry(fn, times = 3) {
@@ -36,20 +54,22 @@ export async function transcribeBuffer({ buffer, ext = ".wav", lang = "ko", mode
     params.response_format = useTs ? "verbose_json" : "text";
     const resp = await openai.audio.transcriptions.create(params);
 
-    // 모델이 verbose_json을 안 줬거나 text만 온 경우(데이터 기반 판정) — 반복 환각 축소.
-    if (typeof resp === "string") return { text: collapseRepeats(resp), segments: [], duration: 0, hasTimestamps: false };
+    // 모델이 verbose_json을 안 줬거나 text만 온 경우(데이터 기반 판정) — 반복 환각 축소 + 교정.
+    if (typeof resp === "string") return { text: applyCorrections(collapseRepeats(resp)), segments: [], duration: 0, hasTimestamps: false };
     const hasSegs = Array.isArray(resp.segments) && resp.segments.length > 0;
-    if (!hasSegs) return { text: collapseRepeats(resp.text || ""), segments: [], duration: Number(resp.duration || 0), hasTimestamps: false };
+    if (!hasSegs) return { text: applyCorrections(collapseRepeats(resp.text || "")), segments: [], duration: Number(resp.duration || 0), hasTimestamps: false };
 
     const off = Number(offsetSec) || 0;
-    // 무음/반복 환각 세그먼트 제거 → 남은 세그먼트에서 텍스트 재구성 + 반복 축소.
+    // A5: 저신뢰(avg_logprob 낮음) 구간 로깅 — 운영 로그에서 재학습/프롬프트 보강 단서. (텍스트는 보존)
+    logLowConfidence(resp.segments, off);
+    // 무음/반복 환각 세그먼트 제거 → 남은 세그먼트에서 텍스트 재구성 + 반복 축소 + 교정.
     const kept = resp.segments.filter(s => !isHallucinatedSegment(s));
     const segments = kept.map(s => ({
       start: Number(s.start || 0) + off,
       end: Number(s.end || 0) + off,
-      text: collapseRepeats(String(s.text || "").trim()),
+      text: applyCorrections(collapseRepeats(String(s.text || "").trim())),
     })).filter(s => s.text);
-    const text = collapseRepeats(segments.map(s => s.text).join(" "));
+    const text = applyCorrections(collapseRepeats(segments.map(s => s.text).join(" ")));
     return { text, segments, duration: Number(resp.duration || 0), hasTimestamps: true };
   });
 }

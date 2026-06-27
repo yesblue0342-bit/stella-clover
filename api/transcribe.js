@@ -8,17 +8,7 @@ import { transcribeBuffer } from "./_stt.js";
 
 export const config = { api: { bodyParser: false }, maxDuration: 300 };
 
-// SAP/ERP 전문용어 - Whisper 인식 정확도 향상용 프롬프트
-const SAP_PROMPT = "SAP, ERP, ABAP, BAPI, IDoc, BOM, MRP, QM, PP, MM, SD, FI, CO, WM, PM, S/4HANA, ECC, 모듈, 트랜잭션, 인터페이스, 배치, 마스터데이터, 자재마스터, 구매오더, 생산오더, 품질검사, 검사로트, 입고, 출고, 재고, 워크플로우, 커스터마이징, 컨피그, 스프린트, 고도화, 인터페이스, 마이그레이션, 롤아웃.";
-
-async function retry(fn, times = 3) {
-  let lastErr;
-  for (let i = 0; i < times; i++) {
-    try { return await fn(); }
-    catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 1500 * (i + 1))); }
-  }
-  throw lastErr;
-}
+// SAP 프롬프트·재시도·교정은 _stt.js(→ lib/sttTerms.js)로 단일화. 여기선 transcribeBuffer만 호출.
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
