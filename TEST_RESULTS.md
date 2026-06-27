@@ -167,6 +167,21 @@
 - 변경: api/{workspace,cleanup}.js · workspace.html · sw.js(v11) · test/workspace.test.js(신규) · TODO.md · TEST_RESULTS.md.
 - 한 줄: 워크스페이스 모든 id 기반 read/write를 user_id로 서버측 스코프(무단접근 차단) + 멈춘 전사 잡 크론 워치독으로 자동 복구.
 
+## (I) 2026-06-27 (RALPH team) · Stella GPT 전역 검색 + Azure·Vercel 완전 독립 확인 · pass 36/36
+> 증상: 사이드바 🔍 검색이 메모만 동작(채팅은 제목만). "채팅 내역" 키워드가 안 나옴. → 채팅 메시지 내용까지 전역 검색 + 결과 클릭 시 해당 위치 이동.
+- **전역 검색(workspace.js `action=search`)**: 채팅(`title` + `messages` ILIKE)·노트(`title` + `content` ILIKE) 동시 검색, **본인(user_id) 스코프**, 서버측 스니펫(키워드 ±40자) + updated_at 정렬. ILIKE 와일드카드 `\` 이스케이프 + 파라미터 바인딩(인젝션 안전).
+- **프런트(workspace.html)**: `doSearch` 비동기 서버 호출(레이스 가드 `_lastSearchQuery`), 스니펫 표시, `searchSelect`→채팅은 `openSession(id,q)` 후 일치 메시지로 스크롤+하이라이트(`.search-hit`), 노트는 `openNote(id,q)` 후 본문 일치 위치 select. 결과 제목·스니펫 모두 `esc()` XSS 방어. **sw v11→v12**.
+- **Azure·Vercel 완전 독립(인라인 grep 확증)**:
+  · Azure: `package.json`=pg only(mssql 0) · `import mssql` 0 · `CL_DB_` 코드참조 0 · 쿼리문자열 실 T-SQL 0(`sql.NVarChar`는 무해한 셰임 토큰) · DB env=`DATABASE_URL`/`PG*`.
+  · Vercel: `process.env.VERCEL*` 참조 0 · `vercel` CLI 스크립트 0 · `@vercel` 의존 0 · `vercel.app` URL 0. 런타임=`server.js`(`node server.js`) 단독.
+  · (잔존은 모두 doc/legacy: `vercel.json` inert, `export const config` off-Vercel 무시, .md 이력)
+- **검증**: node --check api+server 15/15 · `npm test` **36/36 PASS**(검색 user 스코프 회귀 포함) · workspace.html 인라인 JS 파싱 OK.
+
+## FINAL (RALPH team / 전역 검색 + 완전 독립)
+- `npm test` **36/36 PASS** · node --check 15/15 · 런타임 Azure/Vercel 결합 0.
+- 변경: api/workspace.js(action=search+스니펫) · workspace.html(검색/이동/하이라이트) · sw.js(v12) · test/workspace.test.js · TODO.md · TEST_RESULTS.md.
+- 한 줄: Stella GPT 사이드바 🔍가 채팅 메시지 내용까지 전역 검색→클릭 시 해당 위치 이동. Azure·Vercel 런타임 의존 0으로 OCI 완전 독립 확인.
+
 ## 2026-06-22 · 회의 제목 변경(✏️) + 기본 날짜·시각 제목 + 최신화 · pass 12/12
 - node --check api/_meeting·summarize·meetings OK · node --test 12/12(+2) · index.html new Function 파싱 OK · vercel.json JSON.parse OK · 시크릿 0 · sw v7→v8
 - T1 제목변경: api/meetings.js action=rename(id+title, CREATE_TABLE 가드, 금지문자 제거, rowsAffected 확인) + index.html renameMeeting()(prompt→POST→캐시 즉시 반영) + 파일카드/이력카드 ✏️ 버튼.

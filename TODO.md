@@ -23,3 +23,5 @@
 - [x] INF-5. 반복 오류 구조적 차단 — 413(서버+nginx 한도), Unexpected token(항상 JSON), 함수 타임아웃(raw Node), 배포(OCI) 플레이북 갱신.
 - [x] INF-6. 워크스페이스 서버측 소유권 스코프 — session 조회/chat/update_session/update_note 를 모두 `user_id=@u` 로 스코프 + `user` 필수 가드. 프런트(get-session·update_note)에 user 전달. (소스 회귀 테스트 4건)
 - [x] INF-7. 워커 워치독 — cleanup 크론이 멈춘(>10분) transcribe_jobs 를 worker 재트리거(best-effort). 오디오 정리와 독립.
+- [x] INF-8. Stella GPT 전역 검색 — 사이드바 🔍가 채팅(제목+메시지 내용)+노트(제목+내용) 전역 검색(서버 action=search, user 스코프), 스니펫 표시, 클릭 시 해당 채팅/노트로 이동+키워드 위치 스크롤·하이라이트. (기존 채팅은 제목만 검색되던 버그 수정)
+- [x] INF-9. Azure·Vercel 완전 독립 확인 — 코드/설정 런타임 결합 0 (pg only·process.env.VERCEL 0·mssql 0·CL_DB_ 0·실 T-SQL 0). server.js 단독 구동.

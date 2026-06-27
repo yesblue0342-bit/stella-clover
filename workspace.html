@@ -794,7 +794,10 @@ html, body {
 .search-result-item:last-child { border-bottom: none; }
 .search-result-item:hover { background: rgba(255,255,255,0.05); }
 .search-result-title { font-size: 13px; font-weight: 500; }
+.search-result-snippet { font-size: 12px; color: var(--text-secondary, #c7c7d1); margin-top: 3px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .search-result-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.msg-bubble.search-hit { outline: 2px solid var(--brand-light, #4ade80); outline-offset: 2px; animation: searchHitPulse 2.4s ease; }
+@keyframes searchHitPulse { 0%,100% { background: inherit; } 25% { background: rgba(74,222,128,0.22); } }
 
 /* ===== TOAST ===== */
 .toast {
@@ -1196,7 +1199,7 @@ function toggleUncategorized() {
 }
 
 // ===== SESSIONS =====
-async function openSession(id) {
+async function openSession(id, highlight) {
   closeSidebar();
   showChat();
   document.getElementById('emptyState').style.display = 'none';
@@ -1216,7 +1219,8 @@ async function openSession(id) {
   document.getElementById('chatHeaderTitle').textContent = d.session.title || '새 채팅';
   renderMessages(d.session.messages || []);
   updateActiveChat(id);
-  document.getElementById('composerInput').focus();
+  if (highlight) highlightInMessages(highlight);
+  else document.getElementById('composerInput').focus();
 }
 
 function renderMessages(messages) {
@@ -1393,7 +1397,7 @@ function renderNotesList() {
   }).join('');
 }
 
-function openNote(id) {
+function openNote(id, highlight) {
   const note = _state.notes.find(n => n.id === id);
   if (!note) return;
   _state.currentNote = note;
@@ -1409,6 +1413,18 @@ function openNote(id) {
       <button class="btn-sm btn-brand" onclick="saveNote()">저장</button>
       <button class="btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger);" onclick="deleteNote('${esc(id)}')">삭제</button>
     </div>`;
+
+  // 검색에서 진입 시: 본문에서 키워드 위치로 스크롤 + 선택
+  if (highlight) {
+    const body = document.getElementById('noteBodyInput');
+    const idx = (note.content || '').toLowerCase().indexOf(highlight.toLowerCase());
+    if (body && idx >= 0) {
+      try { body.focus(); body.setSelectionRange(idx, idx + highlight.length); } catch (e) {}
+      // 대략적 스크롤(라인 높이 기반)
+      const before = (note.content || '').slice(0, idx).split('\n').length;
+      body.scrollTop = Math.max(0, (before - 3) * 20);
+    }
+  }
 }
 
 function noteChanged() {
@@ -1474,35 +1490,35 @@ function onSearchInput(q) {
   _searchTimer = setTimeout(() => doSearch(q), 200);
 }
 
-function doSearch(q) {
+let _lastSearchQuery = '';
+async function doSearch(q) {
   const input = document.getElementById('searchInput');
-  const query = (q !== undefined ? q : input.value).trim().toLowerCase();
+  const query = (q !== undefined ? q : input.value).trim();
   const resultsEl = document.getElementById('searchResults');
+  _lastSearchQuery = query;
 
   if (!query) {
     resultsEl.classList.remove('show');
     resultsEl.innerHTML = '';
     return;
   }
+  if (!_state.user) return;
 
-  const matched = [];
-  _state.sessions.forEach(s => {
-    if ((s.title || '').toLowerCase().includes(query)) {
-      matched.push({ type: 'chat', id: s.id, title: s.title || '새 채팅', meta: (s.msg_count || 0) + '개 메시지' });
-    }
-  });
-  _state.notes.forEach(n => {
-    if ((n.title || '').toLowerCase().includes(query) || (n.content || '').toLowerCase().includes(query)) {
-      matched.push({ type: 'note', id: n.id, title: n.title || '새 노트', meta: '노트' });
-    }
-  });
+  resultsEl.classList.add('show');
+  resultsEl.innerHTML = '<div style="padding:12px 14px;color:var(--text-muted);font-size:13px;">검색 중…</div>';
 
+  // 서버 전역 검색: 채팅(제목+메시지 내용) + 노트(제목+내용)
+  const d = await safeJson(fetch(`${API}?action=search&user=${encodeURIComponent(_state.user.email)}&q=${encodeURIComponent(query)}`, { cache: 'no-store' }));
+  if (_lastSearchQuery !== query) return; // 더 최신 입력이 있으면 이 응답 무시(레이스 방지)
+
+  const matched = (d && d.ok && Array.isArray(d.results)) ? d.results : [];
   if (!matched.length) {
     resultsEl.innerHTML = '<div style="padding:12px 14px;color:var(--text-muted);font-size:13px;">검색 결과 없음</div>';
   } else {
-    resultsEl.innerHTML = matched.slice(0, 20).map(m =>
+    resultsEl.innerHTML = matched.slice(0, 30).map(m =>
       `<div class="search-result-item" onclick="searchSelect('${esc(m.type)}','${esc(m.id)}')">
         <div class="search-result-title">${m.type === 'note' ? '📝 ' : '💬 '}${esc(m.title)}</div>
+        ${m.snippet ? `<div class="search-result-snippet">${esc(m.snippet)}</div>` : ''}
         <div class="search-result-meta">${esc(m.meta)}</div>
       </div>`
     ).join('');
@@ -1511,10 +1527,26 @@ function doSearch(q) {
 }
 
 function searchSelect(type, id) {
+  const q = _lastSearchQuery;
   document.getElementById('searchResults').classList.remove('show');
   document.getElementById('searchInput').value = '';
-  if (type === 'chat') openSession(id);
-  else if (type === 'note') { showNotes(); openNote(id); }
+  _lastSearchQuery = '';
+  if (type === 'chat') openSession(id, q);
+  else if (type === 'note') { showNotes(); openNote(id, q); }
+}
+
+// 채팅/노트 열람 후 키워드가 있는 위치로 스크롤 + 잠깐 하이라이트
+function highlightInMessages(q) {
+  if (!q) return;
+  const area = document.getElementById('messagesArea');
+  if (!area) return;
+  const ql = q.toLowerCase();
+  const hit = [...area.querySelectorAll('.msg-bubble')].find(b => (b.textContent || '').toLowerCase().includes(ql));
+  if (hit) {
+    hit.classList.add('search-hit');
+    hit.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => hit.classList.remove('search-hit'), 2600);
+  }
 }
 
 // Close search results on outside click

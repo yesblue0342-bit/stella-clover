@@ -24,6 +24,27 @@ function err(res, status, message) {
   return res.status(status).json({ ok: false, message });
 }
 
+// 검색 스니펫: 키워드 주변 ~40자 발췌(공백 정리)
+function snippetAround(text, q, ctx = 40) {
+  const t = String(text || '');
+  if (!t) return '';
+  const i = t.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return t.slice(0, ctx * 2).replace(/\s+/g, ' ').trim();
+  const start = Math.max(0, i - ctx), end = Math.min(t.length, i + q.length + ctx);
+  return (start > 0 ? '…' : '') + t.slice(start, end).replace(/\s+/g, ' ').trim() + (end < t.length ? '…' : '');
+}
+// 채팅 메시지(JSON)에서 키워드 포함 첫 메시지의 스니펫
+function chatSnippet(messagesJson, q) {
+  let msgs = [];
+  try { msgs = JSON.parse(messagesJson || '[]'); } catch (_) {}
+  const ql = q.toLowerCase();
+  for (const m of msgs) {
+    const c = String((m && m.content) || '');
+    if (c.toLowerCase().includes(ql)) return snippetAround(c, q);
+  }
+  return '';
+}
+
 export default async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -64,6 +85,35 @@ export default async function handler(req, res) {
         let messages = [];
         try { messages = JSON.parse(s.messages || '[]'); } catch (_) {}
         return ok(res, { session: { ...s, messages } });
+      }
+
+      // 전역 검색: 채팅(제목+메시지 내용) + 노트(제목+내용). 본인(user_id) 데이터만.
+      if (action === 'search') {
+        if (!user) return err(res, 400, 'user required');
+        const q = String(req.query.q || '').trim().slice(0, 100);
+        if (!q) return ok(res, { results: [] });
+        const like = '%' + q.replace(/[\\%_]/g, m => '\\' + m) + '%';
+        const [sessR, noteR] = await Promise.all([
+          pool.request().input('u', sql.NVarChar, user).input('q', sql.NVarChar, like)
+            .query(`SELECT id, title, msg_count, messages, updated_at FROM ws_sessions
+                    WHERE user_id=@u AND (title ILIKE @q OR messages ILIKE @q)
+                    ORDER BY updated_at DESC LIMIT 30`),
+          pool.request().input('u', sql.NVarChar, user).input('q', sql.NVarChar, like)
+            .query(`SELECT id, title, content, updated_at FROM ws_notes
+                    WHERE user_id=@u AND (title ILIKE @q OR content ILIKE @q)
+                    ORDER BY updated_at DESC LIMIT 30`),
+        ]);
+        const results = [];
+        for (const s of sessR.recordset) {
+          results.push({ type: 'chat', id: s.id, title: s.title || '새 채팅',
+            snippet: chatSnippet(s.messages, q), meta: (s.msg_count || 0) + '개 메시지', ts: s.updated_at });
+        }
+        for (const n of noteR.recordset) {
+          results.push({ type: 'note', id: n.id, title: n.title || '새 노트',
+            snippet: snippetAround(n.content, q), meta: '노트', ts: n.updated_at });
+        }
+        results.sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0));
+        return ok(res, { results });
       }
 
       return err(res, 400, 'unknown action');

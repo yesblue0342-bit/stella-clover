@@ -31,3 +31,13 @@ test("cleanup: 멈춘 전사 잡 워치독 포함", () => {
   assert.match(cl, /\/api\/worker/);
   assert.match(cl, /status IN \('processing','summarizing'\)/);
 });
+
+test("전역 검색: 채팅(제목+메시지)·노트(제목+내용) 모두 + user_id 스코프", () => {
+  assert.match(ws, /action === 'search'/);
+  // 채팅: 제목 + 메시지 내용 검색, 본인 스코프
+  assert.match(ws, /FROM ws_sessions\s+WHERE user_id=@u AND \(title ILIKE @q OR messages ILIKE @q\)/);
+  // 노트: 제목 + 내용 검색, 본인 스코프
+  assert.match(ws, /FROM ws_notes\s+WHERE user_id=@u AND \(title ILIKE @q OR content ILIKE @q\)/);
+  // 검색도 user 필수
+  assert.match(ws, /action === 'search'[^]*?if \(!user\) return err/);
+});
