@@ -132,8 +132,14 @@ function readBody(req, res) {
       size += c.length;
       if (size > MAX_BODY_BYTES) {
         aborted = true;
-        sendJson(res, 413, { ok: false, message: `요청 본문이 너무 큽니다 (최대 ${Math.floor(MAX_BODY_BYTES / 1048576)}MB).` });
-        req.destroy();
+        // keep-alive 소켓을 req.destroy()로 RST 하면 다음 재사용 요청이 'socket hang up'.
+        // Connection: close 로 정상 종료 → 본문은 전달되고 소켓은 FIN 으로 깔끔히 닫힘.
+        if (!res.headersSent) {
+          res.statusCode = 413;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.setHeader("Connection", "close");
+          res.end(JSON.stringify({ ok: false, message: `요청 본문이 너무 큽니다 (최대 ${Math.floor(MAX_BODY_BYTES / 1048576)}MB).` }));
+        }
         return resolve(false);
       }
       chunks.push(c);

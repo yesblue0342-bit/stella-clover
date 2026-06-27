@@ -138,6 +138,22 @@
 - 변경: api/{jobs,worker,cleanup}.js, package.json, index.html, sw.js(v10), CLAUDE.md, PROGRESS.md, TEST_RESULTS.md.
 - 한 줄: 배포 의존을 Vercel→OCI로 중립화. 코드는 `PUBLIC_BASE_URL`/forwarded 헤더로 배포처 무관, 크론은 OCI crontab, 시크릿은 OCI 주입. DB는 Google Drive(데이터)+OCI PostgreSQL(메타데이터) 유지.
 
+## (G) 2026-06-27 (RALPH team) · raw Node 독립 서버 + 반복오류 구조적 차단 · pass 31/31
+> "raw Node 구조" 발전적 개선 + "반복 오류 재발 방지" 요청 반영. 의존성 0 `server.js`로 OCI 직접 구동.
+- **server.js(신규)**: 정적(html/sw/manifest) 화이트리스트 서빙 + SPA 폴백 + `/api/*` 동적 라우팅 어댑터(`req.query`/`req.body`/`res.status().json()` 제공). `/healthz`. `npm start`.
+- **반복오류 구조적 차단**:
+  · 413 — 본문 한도 `MAX_BODY_BYTES`(25MB), transcribe는 rawBody(formidable)로 우회. 한도 초과 시 **Connection: close** 정상 종료(소켓 RST/'socket hang up' 방지). 앞단 nginx `client_max_body_size 30m` 문서화.
+  · "Unexpected token"(평문) — `/api/*`는 import 실패/throw/미응답 어떤 경우에도 **항상 JSON**. (회귀 테스트: 의존성 없는 핸들러 로드 실패도 JSON 응답 확인)
+  · 함수 타임아웃 콜드컷 — raw Node라 인위적 함수 타임아웃 없음(`server.requestTimeout` 10분).
+- **추가 폴리시(검증 반영)**: transcribe 콜백 응답 보호(자동 204 금지) / `OPENAI_API_KEY` 미설정 시 summarize·workspace chat이 친절한 JSON 메시지(500 대신).
+- **검증(적대적 워크플로 verdict=ship, mustFix 0)**: node --check api+server 15/15 · `npm test` **31/31 PASS**(부팅 스모크 7 포함) · 라이브 부팅 curl(`/healthz`·`/`·`/api/*` JSON·정적) OK.
+- **알려진 한계(이번 범위 외·기존)**: 워크스페이스/잡 권한은 클라이언트 제공 `user`/`userId` 신뢰(전용 인증 백엔드 없음 — 로컬 프로필 모델). 백그라운드 잡(`/api/jobs·worker`)은 아직 라이브 UI 미연결. → 추후 인증 도입 시 서버측 소유권 검증·워커 워치독 권장.
+
+## FINAL (RALPH team / raw Node 서버 + 반복오류 차단)
+- `npm test` **31/31 PASS** · node --check api/*.js + server.js 15/15 · 라이브 부팅 검증 OK · 적대적 검증 verdict=ship.
+- 변경: server.js(신규)·test/server.test.js(신규)·api/{summarize,workspace}.js(OpenAI 키 가드)·package.json(start)·CLAUDE.md·TODO.md·TEST_RESULTS.md.
+- 한 줄: Vercel 없이 OCI에서 `npm start`로 구동되는 의존성 0 어댑터. 413·평문JSON·타임아웃 콜드컷 등 반복 오류를 인프라 레벨에서 구조적으로 차단.
+
 ## 2026-06-22 · 회의 제목 변경(✏️) + 기본 날짜·시각 제목 + 최신화 · pass 12/12
 - node --check api/_meeting·summarize·meetings OK · node --test 12/12(+2) · index.html new Function 파싱 OK · vercel.json JSON.parse OK · 시크릿 0 · sw v7→v8
 - T1 제목변경: api/meetings.js action=rename(id+title, CREATE_TABLE 가드, 금지문자 제거, rowsAffected 확인) + index.html renameMeeting()(prompt→POST→캐시 즉시 반영) + 파일카드/이력카드 ✏️ 버튼.

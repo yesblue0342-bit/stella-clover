@@ -19,6 +19,7 @@ async function retry(fn, times = 3, delay = 2000) {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
+  if (!process.env.OPENAI_API_KEY) return res.status(200).json({ ok: false, message: "OpenAI API 키 미설정 (OPENAI_API_KEY 확인)" });
 
   const { transcript: rawTranscript, audioFileName, sessionId, lang, userInstruction, fileDate } = req.body || {};
   // 전사 전체 사용(잘림 없음). 합본 원본을 회의록·요약 입력으로 그대로 전달.

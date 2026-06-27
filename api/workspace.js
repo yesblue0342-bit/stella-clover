@@ -118,6 +118,7 @@ export default async function handler(req, res) {
         const { session_id, user } = body;
         const message = String(body.message || '').slice(0, 8000); // 비용/저장 폭증 방지
         if (!session_id || !user || !message) return err(res, 400, 'session_id, user, message required');
+        if (!process.env.OPENAI_API_KEY) return err(res, 200, 'OpenAI API 키 미설정 (OPENAI_API_KEY 확인)');
 
         const r = await pool.request().input('id', sql.NVarChar, session_id)
           .query('SELECT * FROM ws_sessions WHERE id=@id');
