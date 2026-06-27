@@ -5,7 +5,9 @@
 // 반환: { text: 변환된 SQL, values: 순서대로의 값 배열 }
 export function toPositional(text, params) {
   const values = [];
-  const idx = {};
+  // null 프로토타입 맵: `name in idx` 가 Object.prototype 멤버(toString/constructor 등)를
+  // 잘못 잡지 않게 한다 — @toString 같은 파라미터명도 안전.
+  const idx = Object.create(null);
   const out = String(text).replace(/@([A-Za-z_]\w*)/g, (_m, name) => {
     if (!(name in idx)) {
       values.push(params ? params[name] : undefined);

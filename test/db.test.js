@@ -49,6 +49,12 @@ test("toPositional: 파라미터 없는 DDL은 그대로 통과", () => {
   assert.deepEqual(r.values, []);
 });
 
+test("toPositional: Object.prototype 멤버명 파라미터도 안전(toString/constructor)", () => {
+  const r = toPositional("SELECT @toString, @constructor, @id", { toString: "a", constructor: "b", id: 1 });
+  assert.equal(r.text, "SELECT $1, $2, $3");
+  assert.deepEqual(r.values, ["a", "b", 1]);
+});
+
 test("sql 타입 토큰: NVarChar(MAX)/Int/BigInt 접근·호출이 안전(throw 없음)", () => {
   assert.doesNotThrow(() => sql.NVarChar(300));
   assert.doesNotThrow(() => sql.NVarChar(sql.MAX));
