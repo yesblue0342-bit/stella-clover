@@ -207,6 +207,19 @@
 - 변경: workspace.html(IME 조합 가드) · sw.js(v14) · TODO.md · TEST_RESULTS.md.
 - 한 줄: 한글 조합 중간값 검색 버그 제거 — 글자 확정 후에만 검색. (라이브 풀페이지 검색 UI는 레포에 없어 배포본 갈라짐 — 재배포로 통일 필요.)
 
+## (L) 2026-06-27 (RALPH team) · Docker 배포 일습 + DB 방향 확정(PostgreSQL) · pass 36/36
+> 라이브가 안 바뀐 근본원인 규명: OCI 서버 점검 결과 앱이 **Docker 컨테이너**(seoblue0342:8842, nginx-proxy-manager 라우팅) 안이고, 호스트에 git/파일·배포 파이프라인이 **없었음** → push가 컨테이너에 닿을 경로 없음. 또 DB가 **azure-sql-edge(SQL Server) 컨테이너**(stella-mssql)였고 Postgres는 없었음.
+- **DB 방향 확정**: 사용자 "PostgreSQL 전환 + azure-sql-edge 삭제 + OCI Ubuntu만 사용" → pg 마이그레이션이 정답으로 확정.
+- **배포 일습 추가**: `Dockerfile`(node:20-alpine, npm install, server.js, /healthz HEALTHCHECK) · `docker-compose.yml`(postgres:16 `db` + 앱 `app`, DATABASE_URL=db:5432, depends_on healthcheck, 8842 공개) · `.env.example` · `.dockerignore` · `.gitignore`(.env/node_modules 보호).
+- **배포 한 방**: `cp .env.example .env`(값 채움) → `docker compose up -d --build`. 갱신은 `git pull && docker compose up -d --build` → 정적+백엔드 동시 반영. 기존 stella-mssql 제거.
+- **검증**: docker-compose.yml YAML 파싱 OK(services db/app, volume stella_pgdata) · `npm test` **36/36 PASS** · node --check 15/15 · `.env`·`node_modules` git-ignore 확인.
+- **사용자 조치**: ① 레포를 OCI 서버에 clone/pull ② `.env` 작성 ③ `docker compose up -d --build` ④ nginx-proxy-manager의 gpt.<도메인> Proxy Host를 `<서버IP>:8842`로 + Advanced에 `client_max_body_size 30m;` ⑤ 기존 데이터 보존 필요 시 azure-sql-edge→Postgres 이관 후 stella-mssql 삭제.
+
+## FINAL (RALPH team / Docker 배포)
+- `npm test` **36/36 PASS** · YAML/Dockerfile 구조 검증 OK · node --check 15/15.
+- 변경(신규): Dockerfile · docker-compose.yml · .env.example · .dockerignore · .gitignore. 갱신: CLAUDE.md(OCI Docker 배포) · PROGRESS.md · TODO.md · TEST_RESULTS.md.
+- 한 줄: git→컨테이너 연결 부재가 라이브 미반영의 근본원인 → Dockerfile+compose(postgres+app)로 한 방 배포 확립. DB는 PostgreSQL 확정(azure-sql-edge 폐기).
+
 ## 2026-06-22 · 회의 제목 변경(✏️) + 기본 날짜·시각 제목 + 최신화 · pass 12/12
 - node --check api/_meeting·summarize·meetings OK · node --test 12/12(+2) · index.html new Function 파싱 OK · vercel.json JSON.parse OK · 시크릿 0 · sw v7→v8
 - T1 제목변경: api/meetings.js action=rename(id+title, CREATE_TABLE 가드, 금지문자 제거, rowsAffected 확인) + index.html renameMeeting()(prompt→POST→캐시 즉시 반영) + 파일카드/이력카드 ✏️ 버튼.

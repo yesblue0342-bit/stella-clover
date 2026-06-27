@@ -42,12 +42,15 @@
 - 크론 보호: `CRON_SECRET` · 워커 self-trigger 베이스: `PUBLIC_BASE_URL`(권장; 없으면 forwarded 헤더 폴백)
 - 서버: `PORT`(기본 8080) · `MAX_BODY_BYTES`(기본 25MB) · `REQUEST_TIMEOUT_MS`(기본 600000)
 
-## OCI 실행/배포
-1. `npm install` (pg·openai·googleapis·formidable) → `npm start`(=`node server.js`). 환경변수는 OCI env/Vault 또는 루트 `.env`(server.js가 자동 로드, 기존 env 미덮음).
-2. **앞단 리버스 프록시(nginx/OCI LB) 본문 한도 필수 상향** — `client_max_body_size 30m;` (안 하면 대용량 청크에서 **413 재발**). server.js 자체 한도는 `MAX_BODY_BYTES`.
-3. 크론(cleanup): OCI crontab — `0 18 * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://<도메인>/api/cleanup`.
-4. 헬스체크: `GET /healthz` → `{ok:true}`.
-5. 배포 갱신: GitHub pull → `npm install`(변경 시) → 프로세스 재시작(systemd/pm2 등). `vercel.json`은 OCI에서 무시(레거시 호환).
+## OCI 배포 (Docker — 실제 운영 방식)
+- 서버: Ubuntu + Docker. `nginx-proxy-manager`(80/443)가 `gpt.<도메인>` → 앱(`:8842`)으로 라우팅. DB는 **`postgres` 컨테이너**(과거 `stella-mssql`=azure-sql-edge 는 제거).
+- **`docker-compose.yml`**: `db`(postgres:16) + `app`(이 레포 빌드). `.env`로 시크릿 주입. 앱은 `DATABASE_URL=postgres://…@db:5432/…`로 내부 접속.
+1. 배포: `cp .env.example .env`(값 채우기) → `docker compose up -d --build`.
+2. 갱신: `git pull && docker compose up -d --build` (앱 재빌드·재기동). 정적/백엔드 모두 한 번에 반영.
+3. **nginx-proxy-manager 본문 한도 상향** — Proxy Host의 Advanced에 `client_max_body_size 30m;` (안 하면 대용량 청크 **413**). 앱 한도는 `MAX_BODY_BYTES`.
+4. 크론(cleanup+워치독): 호스트 crontab — `0 18 * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" http://localhost:8842/api/cleanup`.
+5. 헬스체크: `GET /healthz` → `{ok:true}` (Docker HEALTHCHECK도 사용).
+- 비-Docker 대안: `npm install && npm start`(=`node server.js`) + 외부 Postgres + `.env`. `vercel.json`은 레거시(무시).
 
 ## 알려진 오류 플레이북 (재발 시 여기부터)
 1. **"Failed to fetch" / 413 (대용량)**: 청크 3.84MB 유지 점검. 청크당 3회 재시도, **한 청크 실패해도 전체 중단 금지**(`[구간 N 변환 실패]` 표시 후 계속, 전부 실패 시만 throw). 413은 재시도 무의미.

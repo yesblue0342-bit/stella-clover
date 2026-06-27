@@ -27,3 +27,4 @@
 - [x] INF-9. Azure·Vercel 완전 독립 확인 — 코드/설정 런타임 결합 0 (pg only·process.env.VERCEL 0·mssql 0·CL_DB_ 0·실 T-SQL 0). server.js 단독 구동.
 - [x] INF-10. 검색 "결과 없음" 수정 — 하이브리드 검색: 로드된 데이터(action=all)로 프로젝트명·채팅제목·노트(제목+내용) 즉시 검색 + 서버 보강(채팅 메시지 내용). 프로젝트 누락 보완. 결과 클릭 시 채팅/노트/프로젝트로 점프(스크롤+하이라이트). 백엔드 배포 지연과 무관하게 결과 표시.
 - [x] INF-11. 한글 IME 조합 검색 버그 — 조합 중간값('민상ㅇㅓㄴ','잉')으로 검색되던 것 수정. compositionstart/end로 조합 중엔 검색 보류, 확정(compositionend)·Enter·🔍 클릭 시 최종값으로 검색. event.isComposing 가드 병행.
+- [x] INF-12. Docker 배포 일습 — 라이브가 안 바뀐 근본원인은 앱이 Docker 컨테이너 안이고 git→컨테이너 연결이 없었음. Dockerfile + docker-compose(postgres+app) + .env.example + .dockerignore + .gitignore 추가. `docker compose up -d --build` 한 방 배포. DB 방향 확정: PostgreSQL(azure-sql-edge 삭제).

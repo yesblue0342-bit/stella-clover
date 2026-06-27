@@ -2,6 +2,8 @@
 
 ## 가정 (autopilot, 질문 금지 → 합리적 가정 기록 후 진행)
 - **DB 타깃**: 사용자가 "Azure(azsure) 걷어내고 우분투로 교체, OCI에서 배포"라고 명시. 자체 호스팅 관계형 DB의 가장 일반적·합리적 선택인 **PostgreSQL**로 가정하고 마이그레이션. 드라이버는 `pg`(node-postgres).
+  - **[2026-06-27 확정]** 사용자 OCI 서버 점검 결과: 앱은 Docker 컨테이너(`seoblue0342:8842`, nginx-proxy-manager 라우팅), DB는 `stella-mssql`=azure-sql-edge 컨테이너였음. 사용자가 **"PostgreSQL로 전환, azure-sql-edge 삭제, OCI Ubuntu만 사용"** 확정 → pg 마이그레이션 방향 **정답**으로 확정. Docker 배포 일습(Dockerfile/docker-compose: postgres+app) 추가.
+  - **데이터 이관 주의**: 기존 메타데이터가 azure-sql-edge(SQL Server)에 있다면 삭제 전 Postgres로 이관 필요(SQL Server→PG 크로스 방언). 신규 시작이면 스키마는 `ensureSchema`가 자동 생성.
 - **연결 설정**: `DATABASE_URL` 우선, 없으면 표준 `PG*` 변수. SSL은 `PGSSL`로 제어(원격 OCI는 `require` 권장). 구 Azure 변수(`CL_DB_*`)는 완전히 제거.
 - **메타데이터 일원화**: "메타데이터만 azure에서 읽어옴" 증상의 원인은 `_db.js`가 여전히 `mssql`이었던 것. 모든 DB 소비자(`meetings/summarize/jobs/worker/workspace`)를 단일 PostgreSQL 풀로 통일 → 기기·엔드포인트 무관 단일 진실원천.
 - **소비자 호환**: 호출부 변경 최소화를 위해 `_db.js`에 mssql 스타일(`pool.request().input(@name).query()`) 호환 셰임 유지. 셰임이 `@name`→`$n` 변환. SQL **방언만** PostgreSQL로 재작성.
