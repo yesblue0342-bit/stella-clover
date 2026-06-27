@@ -14,3 +14,10 @@
 - [x] CL-A. 키워드/태그 클릭 필터 — 마이 탭 파일카드+상세의 🔑키워드·🏷태그를 클릭형 .kw-chip으로(escAttr 안전), filterByKeyword/filterByTag가 마이탭 전환+검색/태그 필터 적용. (jsdom 검증)
 - [x] CL-B. 원문 파일 오픈 — 상세(showDetail)에 "🎙 STT 원본"(showSTT)+"☁️ 원본 파일"(Drive) 버튼 추가, 키워드 칩 클릭 가능. 원문/요약/회의록 한 화면에서 접근.
 - [x] CL-C. 회의록 정확도 — 파일명 날짜(예 260612→2026-06-12) 추출(meetingDateFromName)해 회의 일시 미확인 대신 파일 날짜 사용. (유닛 2건)
+
+## 인프라 이관 (RALPH team, 2026-06-27)
+- [x] INF-1. Stella Workspace(채팅/노트/프로젝트) — 모바일 검색 클릭 불가 수정 + 기기 간 동기화(Azure SQL → 이후 PostgreSQL 일원화). workspace.html + api/workspace.js.
+- [x] INF-2. Azure SQL(mssql) 전면 제거 → PostgreSQL(OCI). _db.js 재작성 + mssql 호환 셰임(_sqlshim.js) + 방언 변환(meetings/summarize/jobs/worker/workspace). (셰임 단위테스트)
+- [x] INF-3. Vercel 의존 제거 → 배포 환경 중립. VERCEL_URL 제거(PUBLIC_BASE_URL), vercel dev 제거, npm test 추가, 문서 OCI화.
+- [x] INF-4. raw Node 독립 실행 진입점 server.js — 정적+/api 어댑터, 본문 한도 25MB(413 차단), /api 항상 JSON(평문 파싱오류 차단), 헬스체크. (부팅 스모크 테스트)
+- [x] INF-5. 반복 오류 구조적 차단 — 413(서버+nginx 한도), Unexpected token(항상 JSON), 함수 타임아웃(raw Node), 배포(OCI) 플레이북 갱신.

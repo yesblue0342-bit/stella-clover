@@ -21,6 +21,7 @@
   | `_sqlshim.js` | `@name`→`$n` 변환 + `sql` 타입 토큰 (pg 비의존, 단위 테스트 대상) | — |
   | `_drive.js` | Google Drive 헬퍼 (공유 모듈) | — |
 - **저장소**: Google Drive(`stellaclover/Meeting/YYYY/YYYYMM`, 원문 `AI_Report`, 메타 `Metadata`) + **PostgreSQL** `cl_meetings`(메타+전문 검색) · `transcribe_jobs`(전사 작업) · `ws_projects/ws_sessions/ws_notes`(워크스페이스, 기기 간 동기화 단일 진실원천).
+- **독립 실행 진입점**: `server.js` — 의존성 0 raw Node. 정적(`*.html`,`sw.js`,`manifest.json`) 서빙 + `/api/*`를 핸들러로 라우팅하며 `req.query`/`req.body`/`res.status().json()`를 채워준다(Vercel 어댑터). `npm start`로 OCI 구동.
 - **클라이언트 전용(localStorage/IndexedDB)**: 폴더·태그·프로필·내 AI 지침·세션·최근 녹음 캐시. (전용 백엔드 라우트 없음)
 
 ## ★ 절대 규칙 (어기면 장애 재발) ★
@@ -39,6 +40,14 @@
 - OpenAI: `OPENAI_API_KEY` (Whisper + gpt-4o-mini 공용)
 - Google Drive: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`
 - 크론 보호: `CRON_SECRET` · 워커 self-trigger 베이스: `PUBLIC_BASE_URL`(권장; 없으면 forwarded 헤더 폴백)
+- 서버: `PORT`(기본 8080) · `MAX_BODY_BYTES`(기본 25MB) · `REQUEST_TIMEOUT_MS`(기본 600000)
+
+## OCI 실행/배포
+1. `npm install` (pg·openai·googleapis·formidable) → `npm start`(=`node server.js`). 환경변수는 OCI env/Vault 또는 루트 `.env`(server.js가 자동 로드, 기존 env 미덮음).
+2. **앞단 리버스 프록시(nginx/OCI LB) 본문 한도 필수 상향** — `client_max_body_size 30m;` (안 하면 대용량 청크에서 **413 재발**). server.js 자체 한도는 `MAX_BODY_BYTES`.
+3. 크론(cleanup): OCI crontab — `0 18 * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://<도메인>/api/cleanup`.
+4. 헬스체크: `GET /healthz` → `{ok:true}`.
+5. 배포 갱신: GitHub pull → `npm install`(변경 시) → 프로세스 재시작(systemd/pm2 등). `vercel.json`은 OCI에서 무시(레거시 호환).
 
 ## 알려진 오류 플레이북 (재발 시 여기부터)
 1. **"Failed to fetch" / 413 (대용량)**: 청크 3.84MB 유지 점검. 청크당 3회 재시도, **한 청크 실패해도 전체 중단 금지**(`[구간 N 변환 실패]` 표시 후 계속, 전부 실패 시만 throw). 413은 재시도 무의미.
