@@ -300,7 +300,13 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
     </div>
     <div id="resultArea" style="display:none">
       <button class="new-btn" onclick="resetAll()">+ 새 변환</button>
+      <div id="structCard"></div>
       <div class="summary-box" id="summaryBox"></div>
+      <details id="segWrap" style="display:none;margin-top:10px">
+        <summary style="cursor:pointer;font-weight:700;font-size:.92rem;padding:6px 0">🕐 타임라인 (세그먼트·화자) — 펼치기</summary>
+        <audio id="segAudio" preload="none" controls style="display:none;width:100%;margin:8px 0"></audio>
+        <div id="segView"></div>
+      </details>
       <div class="result-btns">
         <button class="rbtn" onclick="copyAll()">📋 전체 복사</button>
         <button class="rbtn" onclick="downloadTxt()">📄 TXT 다운로드</button>
@@ -317,6 +323,15 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
   <div class="card" id="recentCard" style="display:none">
     <div class="card-head"><div class="card-title">🎧 최근 녹음 (이 기기에만 저장)</div></div>
     <div id="recentList"></div>
+  </div>
+
+  <!-- 진행 중인 변환 (백그라운드 잡) -->
+  <div class="card" id="myJobsCard" style="display:none">
+    <div class="card-head">
+      <div class="card-title">⏳ 진행 중인 변환</div>
+      <button class="status-badge" onclick="loadMyJobs()" style="cursor:pointer;margin-left:auto">↻ 새로고침</button>
+    </div>
+    <div id="myJobsList"></div>
   </div>
 
   <!-- 회의록 이력(요약) -->
@@ -684,6 +699,7 @@ async function generate(){
     setStep(2,'done'); setStep(3,'active');
     if(audio){ idbSaveRecording(audio,(currentAudioFile&&currentAudioFile.name)||((title||'recording')+'.webm')); }
     trackJob(jobId, meta); // 폴링 시작 → 완료 시 요약+렌더
+    loadMyJobs();          // 진행 중 목록에 즉시 표시
   }catch(e){
     showErr('오류: '+fmtErr(e));
     setStep(2,'wait'); setStep(3,'wait');
@@ -731,8 +747,9 @@ function trackJob(jobId, meta){
         delete _jobTimers[jobId];
         const transcript=(j.segments||[]).map(function(s){return s&&s.text||'';}).join(' ').replace(/\s+/g,' ').trim();
         removeActiveJob(jobId);                 // 낙관적 제거: finalize 전에 빼서 중복 finalize/INSERT(탭 재진입·멀티탭) 방지
-        const ok=await finalizeTranscript(transcript, meta);
+        const ok=await finalizeTranscript(transcript, meta, j);
         if(!ok){ addActiveJob(meta); }          // 요약 실패 → 다음 로드에서 재시도 가능하도록 복구
+        loadMyJobs();                           // 진행 중 목록 갱신(완료분 제거)
         return;
       }
       _jobTimers[jobId]=setTimeout(poll,3000);
@@ -746,7 +763,7 @@ function trackJob(jobId, meta){
 }
 
 // transcript → 기존 /api/summarize(회의록 마크다운 + Drive 저장 + cl_meetings 이력)로 마무리. 렌더는 기존 그대로.
-async function finalizeTranscript(fullText, meta){
+async function finalizeTranscript(fullText, meta, job){
   meta=meta||{};
   try{
     if(!fullText || !fullText.replace(/\[구간 \d+ 변환 실패[^\]]*\]/g,'').trim()){
@@ -761,7 +778,7 @@ async function finalizeTranscript(fullText, meta){
     aiProgress(100,'✅ AI 변환 완료','회의록이 생성되었습니다');
     setStep(3,'done'); setStep(4,'done');
     _summary=d2.summary||'';_title=d2.title||meta.title||defaultMeetingTitle();_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
-    showResult(); try{$('step4').scrollIntoView({behavior:'smooth'});}catch(e){}
+    showResult(); renderJobExtras(job); try{$('step4').scrollIntoView({behavior:'smooth'});}catch(e){}
     if(d2.warnings && (d2.warnings.driveError||d2.warnings.dbError)){
       let w='';
       if(d2.warnings.driveError)w+='Drive 저장 실패: '+d2.warnings.driveError+'. ';
@@ -787,6 +804,110 @@ function resumeActiveJobs(){
   $('genBtn').disabled=true; // 재개 중 새 변환 시작 차단(완료 시 finalize가 해제)
   jobs.forEach(function(m){ if(m&&m.jobId) trackJob(m.jobId, m); });
 }
+
+/* ═══════════ 세그먼트 뷰 / 구조화 요약 / 내 변환 목록 (백그라운드 잡 산출물) ═══════════ */
+function fmtTime(sec){ sec=Math.max(0,Math.floor(Number(sec)||0)); var m=Math.floor(sec/60),s=sec%60; return (m<10?'0':'')+m+':'+(s<10?'0':'')+s; }
+
+// 완료된 잡(job=GET /api/jobs?id= 결과)에서 구조화 요약 카드 + 타임라인 세그먼트를 렌더.
+function renderJobExtras(job){
+  try{ renderStructSummary(job && job.summary); renderSegments(job && job.segments, job && job.chunkRefs); }catch(e){}
+}
+function renderStructSummary(s){
+  var el=$('structCard'); if(!el) return;
+  if(!s || typeof s!=='object'){ el.innerHTML=''; return; }
+  var chip=function(t){return '<span style="display:inline-block;background:rgba(22,163,74,.12);color:#16a34a;border-radius:999px;padding:2px 10px;margin:2px 4px 2px 0;font-size:.78rem">'+esc(t)+'</span>';};
+  var li=function(t){return '<li style="margin:2px 0">'+esc(t)+'</li>';};
+  var h='<div style="border:1px solid var(--line,#e5e7eb);border-radius:14px;padding:12px 14px;margin-bottom:10px">';
+  h+='<div style="font-weight:800;font-size:.95rem;margin-bottom:6px">✨ AI 구조화 요약</div>';
+  if(s.oneLine) h+='<div style="font-size:.9rem;margin-bottom:8px">'+esc(s.oneLine)+'</div>';
+  if(Array.isArray(s.topics)&&s.topics.length) h+='<div style="font-size:.8rem;color:#6b7280">핵심 주제</div><ul style="margin:2px 0 6px 18px;font-size:.86rem">'+s.topics.map(li).join('')+'</ul>';
+  if(Array.isArray(s.decisions)&&s.decisions.length) h+='<div style="font-size:.8rem;color:#6b7280">결정 사항</div><ul style="margin:2px 0 6px 18px;font-size:.86rem">'+s.decisions.map(li).join('')+'</ul>';
+  if(Array.isArray(s.actionItems)&&s.actionItems.length) h+='<div style="font-size:.8rem;color:#6b7280">액션 아이템</div><ul style="margin:2px 0 6px 18px;font-size:.86rem">'+s.actionItems.map(function(a){a=a||{};return '<li style="margin:2px 0">'+esc((a.who||'미상')+': '+(a.what||'')+(a.due?(' ('+a.due+')'):''))+'</li>';}).join('')+'</ul>';
+  if(Array.isArray(s.keywords)&&s.keywords.length) h+='<div style="margin-top:4px">'+s.keywords.map(chip).join('')+'</div>';
+  h+='</div>';
+  el.innerHTML=h;
+}
+
+var _segChunkRefs=[], _playingChunkStart=0, _segAudioBound=false;
+function renderSegments(segments, chunkRefs){
+  _segChunkRefs = Array.isArray(chunkRefs)?chunkRefs:[];
+  var segs = Array.isArray(segments)?segments:[];
+  var wrap=$('segWrap'), view=$('segView'); if(!view) return;
+  if(!segs.length){ if(wrap)wrap.style.display='none'; view.innerHTML=''; return; }
+  var canPlay=_segChunkRefs.length>0;
+  view.innerHTML = segs.map(function(s){
+    s=s||{};
+    var sp=s.speaker?('<b style="color:#16a34a">'+esc(s.speaker)+'</b> '):'';
+    return '<div data-start="'+(Number(s.start)||0)+'" '+(canPlay?'onclick="playSegFromRow(this)" ':'')+
+      'style="display:flex;gap:8px;padding:6px 8px;border-radius:8px;font-size:.86rem;line-height:1.5;'+(canPlay?'cursor:pointer':'cursor:default')+'">'+
+      '<span style="color:#16a34a;font-variant-numeric:tabular-nums;min-width:46px">'+fmtTime(s.start)+'</span>'+
+      '<span>'+sp+esc(s.text||'')+'</span></div>';
+  }).join('');
+  if(wrap) wrap.style.display='block';
+}
+function _findChunk(refs, t){
+  if(!Array.isArray(refs)||!refs.length) return null;
+  var cum=0;
+  for(var i=0;i<refs.length;i++){
+    var d=Number(refs[i].durationSec)||120;
+    if(t<cum+d || i===refs.length-1) return {ref:refs[i], offset:Math.max(0,t-cum), chunkStart:cum};
+    cum+=d;
+  }
+  return {ref:refs[refs.length-1], offset:0, chunkStart:cum};
+}
+function playSegmentAt(refs, globalStart){
+  var a=$('segAudio'); if(!a) return;
+  var c=_findChunk(refs, globalStart);
+  if(!c||!c.ref||!c.ref.id){ showToast('재생할 오디오를 찾지 못했습니다'); return; }
+  _playingChunkStart=c.chunkStart||0;
+  a.style.display='block';
+  if(!_segAudioBound){ _segAudioBound=true; a.addEventListener('timeupdate', _syncSegHighlight); }
+  if(a.getAttribute('data-cid')!==String(c.ref.id)){
+    a.setAttribute('data-cid', String(c.ref.id));
+    a.src='/api/audio?id='+encodeURIComponent(c.ref.id);
+    var seekTo=c.offset||0;
+    a.onloadedmetadata=function(){ try{a.currentTime=seekTo;}catch(e){} a.play().catch(function(){}); };
+    a.load();
+  }else{ try{a.currentTime=c.offset||0;}catch(e){} a.play().catch(function(){}); }
+}
+function _hlSegRow(el){ document.querySelectorAll('#segView [data-start]').forEach(function(r){ r.style.background=''; r.style.fontWeight=''; }); if(el){ el.style.background='rgba(22,163,74,.12)'; el.style.fontWeight='600'; } }
+function playSegFromRow(el){ _hlSegRow(el); playSegmentAt(_segChunkRefs, Number(el.getAttribute('data-start'))||0); }
+function _syncSegHighlight(){
+  var a=$('segAudio'); if(!a) return;
+  var gt=_playingChunkStart + (a.currentTime||0);
+  var rows=document.querySelectorAll('#segView [data-start]'), best=null;
+  for(var i=0;i<rows.length;i++){ if((Number(rows[i].getAttribute('data-start'))||0) <= gt) best=rows[i]; else break; }
+  _hlSegRow(best);
+}
+
+// "내 변환" — 진행 중(processing/summarizing) 잡 목록. 재진입/멀티디바이스 가시화 + 수동 이어보기.
+async function loadMyJobs(){
+  var card=$('myJobsCard'), list=$('myJobsList'); if(!list) return;
+  try{
+    var r=await fetch('/api/jobs?action=list&userId='+encodeURIComponent(jobUserId()),{cache:'no-store'});
+    var d=await safeJson(r);
+    var jobs=(d&&d.ok&&Array.isArray(d.jobs))?d.jobs:[];
+    if(!jobs.length){ if(card)card.style.display='none'; list.innerHTML=''; return; }
+    if(card)card.style.display='block';
+    list.innerHTML=jobs.map(function(j){
+      var pc=j.chunks_total?Math.round((j.chunks_done/j.chunks_total)*100):0;
+      var st=j.status==='summarizing'?'요약 정리 중':'변환 중 '+pc+'% ('+(j.chunks_done||0)+'/'+(j.chunks_total||0)+')';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--line,#eee)">'+
+        '<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(j.title||('작업 '+j.job_id))+'</div>'+
+        '<div style="font-size:.78rem;color:#6b7280">'+esc(st)+' · '+esc(j.model||'')+'</div></div>'+
+        '<button class="status-badge" style="cursor:pointer" data-jobid="'+j.job_id+'" onclick="resumeOneJob(this)">이어보기</button></div>';
+    }).join('');
+  }catch(e){ if(card)card.style.display='none'; }
+}
+function resumeOneJob(el){
+  var jobId=el.getAttribute('data-jobid'); if(!jobId) return;
+  var meta=getActiveJobs().filter(function(x){return String(x.jobId)===String(jobId);})[0];
+  if(!meta){ meta={jobId:jobId, title:'작업 '+jobId, filename:'recording.webm', fileDate:'', lang:_selectedLang, sessionId:'', startedAt:Date.now()}; addActiveJob(meta); }
+  setStep(1,'done'); setStep(2,'done'); setStep(3,'active'); $('genBtn').disabled=true;
+  trackJob(jobId, meta);
+  try{$('step3').scrollIntoView({behavior:'smooth'});}catch(e){}
+}
+
 function showResult(){
   $('summaryBox').textContent=_summary;
   $('step4Idle').style.display='none'; $('resultArea').style.display='block'; setStep(4,'done');
@@ -820,6 +941,8 @@ function resetAll(){
   $('recBtn').className='rec-btn'; $('recIcon').textContent='🎤'; $('recText').textContent='터치하여 녹음 시작';
   $('fileArea').className='file-area'; $('fileAreaText').innerHTML='파일 첨부 (탭 또는 드래그)'; $('audioFile').value='';
   try{localStorage.removeItem(SESSION_KEY);}catch(e){}
+  try{ var sc=$('structCard'); if(sc)sc.innerHTML=''; var sv=$('segView'); if(sv)sv.innerHTML=''; var sw=$('segWrap'); if(sw)sw.style.display='none';
+       var sa=$('segAudio'); if(sa){ try{sa.pause();}catch(e2){} sa.removeAttribute('src'); sa.removeAttribute('data-cid'); sa.style.display='none'; } }catch(e){}
   resetSteps(); hideErr(); $('genBtn').disabled=false;
   window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -1160,6 +1283,8 @@ setInterval(autosaveTick,5*60*1000);
 applyTheme(); applyProfile(); resetSteps();
 loadMeetings(); renderRecent(); restoreSession();
 resumeActiveJobs(); // 진행 중이던 백그라운드 전사 잡을 자동 재개(탭 닫힘 복구)
+loadMyJobs();       // "진행 중인 변환" 목록 로드
+
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
 </body>

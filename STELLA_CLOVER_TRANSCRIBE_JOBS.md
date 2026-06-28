@@ -62,5 +62,14 @@
   3. **자동 재개**: `clover_active_jobs` localStorage + `resumeActiveJobs()`(로드 시) → 탭/서버 재시작 무관 이어서 완료.
   4. 모델 선택 UI(whisper-1/gpt-4o-mini-transcribe/gpt-4o-transcribe), 60초 정지 워치독 → `POST /api/worker?id=`.
   5. SW 캐시 v10→v11.
-- **세그먼트 뷰(A2/A3)·구조화 요약 카드(A5)·"내 변환" 리스트(B3)** 는 다음 증분(현재는 transcript→기존 회의록 렌더로
-  사용자 가치=탭 닫힘 복구를 우선 확보). 백엔드 계약은 이미 segments/summary/list 제공.
+## [2026-06-28 추가증분] 클라이언트 리치 UI 완료 (BG_CLIENT)
+> ⚠️ 가정: 지시 파일 `PROMPT_BG_CLIENT.md`가 환경에 실재하지 않아(=빈 프롬프트), 파일명·기존 "남은 증분"·
+> 원 PROMPT step3 사양에 근거해 **세그먼트 뷰 / 구조화 요약 카드 / "내 변환" 목록**을 구현함(질문 없이 진행).
+- **세그먼트 뷰(A2/A3)**: 결과 영역에 접이식 "🕐 타임라인" — `[mm:ss] 화자: 텍스트` 리스트. 행 클릭 → 해당
+  global time이 속한 청크를 `/api/audio?id=`로 재생 + 청크 내 offset seek, 재생 중 현재 세그먼트 하이라이트.
+  (`jobs.js` GET에 `chunkRefs` 추가 → 청크별 재생 가능.)
+- **구조화 요약 카드(A5)**: job.summary(oneLine/주제/결정/액션/키워드)를 요약 위 카드로 렌더.
+- **"내 변환" 목록(B3)**: `GET /api/jobs?action=list&userId=` → 진행 중(processing/summarizing) 잡 카드 + "이어보기"
+  (수동 재개). 로드 시/생성 시/완료 시 갱신.
+- 검증: 인라인 JS `new Function` 0 errors, **jsdom 렌더 테스트**(structCard·segView·_findChunk·재생 src·fmtTime) 통과,
+  node --check 20/20, npm test 34/34. SW v11→v12.

@@ -72,6 +72,7 @@ export default async function handler(req, res) {
           progress: j.chunks_total ? Math.round((j.chunks_done / j.chunks_total) * 100) : 0,
           segments: merged,
           summary: parseJson(j.summary_json, null),
+          chunkRefs: parseJson(j.chunk_refs, []), // 세그먼트 클릭 재생용(청크별 /api/audio)
           audioRef: parseJson(j.audio_ref, null),
           error: j.error_msg || null,
           updated_at: j.updated_at,
