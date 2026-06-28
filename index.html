@@ -230,6 +230,15 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
       </div>
     </div>
 
+    <div class="lang-section" style="margin-top:10px">
+      <div class="lang-label">🧠 변환 모델</div>
+      <div class="lang-grid" id="modelGrid">
+        <button class="lang-btn active" data-model="whisper-1" onclick="selectModel(this)">🎯 정확·타임스탬프</button>
+        <button class="lang-btn" data-model="gpt-4o-mini-transcribe" onclick="selectModel(this)">⚡ 빠름</button>
+        <button class="lang-btn" data-model="gpt-4o-transcribe" onclick="selectModel(this)">✨ 고품질</button>
+      </div>
+    </div>
+
     <button class="adv-toggle" id="advToggle" onclick="toggleAdv()">⚙️ 고급 옵션 ▾</button>
     <div class="adv-body" id="advBody">
       <div class="lang-label" style="margin-top:4px">🖼 이미지 → 텍스트 (OCR)</div>
@@ -405,6 +414,9 @@ const PROFILE_KEY='cl_profile';
 const INSTR_KEY='cl_ai_instructions';
 const FILEMETA_KEY='cl_file_meta';   // {id:{folder,tags:[]}}
 const FOLDERS_KEY='cl_folders';      // [name,...]
+const ACTIVE_JOBS_KEY='clover_active_jobs'; // 진행 중 백그라운드 전사 잡 [{jobId,title,filename,fileDate,lang,sessionId,startedAt}]
+let _selectedModel='whisper-1';      // 전사 모델(whisper-1=타임스탬프 / gpt-4o-*-transcribe)
+const _jobTimers={};                 // jobId -> setTimeout id (폴링 취소·중복방지)
 
 /* ═══════════ 공통 유틸 ═══════════ */
 function $(id){return document.getElementById(id);}
@@ -493,7 +505,8 @@ function installApp(){ if(!_deferredPrompt)return; _deferredPrompt.prompt(); _de
 window.addEventListener('appinstalled', function(){ $('installBtn').style.display='none'; });
 
 /* ═══════════ 언어 선택 ═══════════ */
-function selectLang(btn){ document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); _selectedLang=btn.getAttribute('data-lang'); }
+function selectLang(btn){ document.querySelectorAll('#langGrid .lang-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); _selectedLang=btn.getAttribute('data-lang'); }
+function selectModel(btn){ document.querySelectorAll('#modelGrid .lang-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); _selectedModel=btn.getAttribute('data-model'); }
 
 /* ═══════════ 녹음 ═══════════ */
 async function toggleRec(){
@@ -613,6 +626,13 @@ function encodeWavSlice(audioBuf, startSec, endSec, targetRate){
 }
 
 /* ═══════════ 메인 변환 ═══════════ */
+/* ═══════════ 백그라운드 전사 잡 — 탭 닫혀도 서버가 계속 변환(자동 재개) ═══════════ */
+function jobUserId(){ try{var p=JSON.parse(localStorage.getItem(PROFILE_KEY)||'{}');return (p.email||p.name||'anon');}catch(e){return 'anon';} }
+function getActiveJobs(){ try{return JSON.parse(localStorage.getItem(ACTIVE_JOBS_KEY)||'[]')||[];}catch(e){return [];} }
+function setActiveJobs(a){ try{localStorage.setItem(ACTIVE_JOBS_KEY,JSON.stringify(a||[]));}catch(e){} }
+function addActiveJob(j){ var a=getActiveJobs().filter(function(x){return String(x.jobId)!==String(j.jobId);}); a.push(j); setActiveJobs(a); }
+function removeActiveJob(jobId){ setActiveJobs(getActiveJobs().filter(function(x){return String(x.jobId)!==String(jobId);})); }
+
 async function generate(){
   const audio=currentAudioFile||recordedBlob;
   if(!audio){showErr('음성 파일을 선택하거나 녹음해주세요.');return;}
@@ -621,70 +641,117 @@ async function generate(){
 
   try{
     upProgress(5,'🔧 음성 분석 중...','오디오를 변환하고 있습니다');
-    const CHUNK_SEC = 120; // 120s × 16kHz × 2byte ≈ 3.84MB < 4.5MB (절대 5MB 금지)
-    const OVERLAP_SEC = 3; // 경계 오버랩(123s ≈ 3.94MB < 4.5MB). 병합 시 중복 토큰 디듀프.
+    const CHUNK_SEC = 120; // 120s × 16kHz × 2byte ≈ 3.84MB < 4.5MB
+    const OVERLAP_SEC = 3; // 경계 오버랩(123s ≈ 3.94MB)
     const sessionId = Date.now().toString(36) + Math.floor(Math.random()*1e6).toString(36);
     const { chunks, totalDuration } = await audioToChunks(audio, CHUNK_SEC, OVERLAP_SEC);
     const mins = Math.round(totalDuration/60);
-    upProgress(12,'📤 청크 분할 전송','총 '+mins+'분 · '+chunks.length+'개 구간');
+    upProgress(10,'📤 서버 업로드','총 '+mins+'분 · '+chunks.length+'개 구간 업로드 중');
 
-    // 각 청크 순차 STT — 한 청크가 실패해도 전체를 죽이지 않고 계속(끝에 경고)
-    let fullText=''; let failed=0;
+    // 1) 각 청크를 서버(→Drive)에 업로드 → chunkRefs (백그라운드 잡 입력). 청크당 3회 재시도.
+    const chunkRefs=[];
     for(let i=0;i<chunks.length;i++){
-      const pct = 12 + Math.round((i/chunks.length)*78);
-      upProgress(pct,'📤 청크 분할 전송','구간 '+(i+1)+'/'+chunks.length+' 전송·변환 중');
-      let d=null, lastErr='';
+      const durationSec = Math.min(CHUNK_SEC, Math.max(0, totalDuration - i*CHUNK_SEC)); // stride 기준(글로벌 offset 누적용)
+      let up=null, lastErr='';
       for(let attempt=0; attempt<3; attempt++){
         try{
           const fd=new FormData();
           fd.append('audio',chunks[i],'chunk_'+i+'.wav');
-          fd.append('prevText',fullText.slice(-200));
-          fd.append('sessionId',sessionId); fd.append('index',String(i)); fd.append('lang',_selectedLang);
-          const r=await fetch('/api/transcribe',{method:'POST',body:fd});
-          if(!r.ok){
-            const txt=await r.text();
-            lastErr='변환 실패('+r.status+'): '+txt.slice(0,80);
-            if(r.status===413){ throw new Error(lastErr); } // 크기 초과는 재시도 무의미
-            await new Promise(s=>setTimeout(s,1500*(attempt+1))); continue;
-          }
-          d=await safeJson(r);
-          if(!d.ok){ lastErr=d.message||'변환 실패'; await new Promise(s=>setTimeout(s,1500*(attempt+1))); continue; }
-          break;
-        }catch(err){
-          lastErr=fmtErr(err);
-          if(String(lastErr).includes('413')) throw err;
-          upProgress(pct,'📤 청크 분할 전송','구간 '+(i+1)+'/'+chunks.length+' 재시도 '+(attempt+1)+'/3...');
-          await new Promise(s=>setTimeout(s,1500*(attempt+1)));
-        }
+          fd.append('sessionId',sessionId); fd.append('index',String(i)); fd.append('durationSec',String(durationSec));
+          const r=await fetch('/api/chunk-upload',{method:'POST',body:fd});
+          const d=await safeJson(r);
+          if(!d.ok){ lastErr=d.message||'업로드 실패'; await new Promise(s=>setTimeout(s,1200*(attempt+1))); continue; }
+          up=d; break;
+        }catch(err){ lastErr=fmtErr(err); await new Promise(s=>setTimeout(s,1200*(attempt+1))); }
       }
-      if(!d||!d.ok){ // 이 구간만 실패 → 표시 후 계속
-        failed++; fullText += (fullText?' ':'') + '[구간 '+(i+1)+' 변환 실패]';
-      }else{
-        // 항목4: 오버랩 청크의 경계 중복 제거 후 누적(첫 청크는 원형).
-        const piece = i>0 ? dedupOverlapTokens(fullText, d.text) : d.text;
-        if(piece) fullText += (fullText?' ':'') + piece;
-      }
+      if(!up||!up.id) throw new Error('구간 '+(i+1)+'/'+chunks.length+' 업로드 실패: '+lastErr);
+      chunkRefs.push({id:up.id, index:i, durationSec:durationSec, ext:up.ext||'.wav'});
+      upProgress(10+Math.round(((i+1)/chunks.length)*78),'📤 서버 업로드','구간 '+(i+1)+'/'+chunks.length+' 업로드 완료');
     }
-    if(failed===chunks.length) throw new Error('모든 구간 변환 실패. 네트워크/서버 상태를 확인해주세요.');
-    if(!fullText.replace(/\[구간 \d+ 변환 실패\]/g,'').trim()) throw new Error('음성에서 텍스트를 추출하지 못했습니다 (무음 파일).');
-    upProgress(100,'✅ 업로드·전사 완료', failed?('일부 구간('+failed+') 실패 — 나머지로 진행'):'전 구간 전송 완료');
-    setStep(2,'done'); setStep(3,'active');
 
-    aiProgress(40,'🤖 Whisper API 처리 → 회의록 작성','AI가 회의록을 작성하고 있습니다');
-    const r2=await fetch('/api/summarize',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({transcript:fullText,audioFileName:(currentAudioFile&&currentAudioFile.name)||'recording.webm',fileDate:(currentAudioFile&&currentAudioFile.lastModified)?new Date(currentAudioFile.lastModified).toISOString().slice(0,10):'',sessionId,lang:_selectedLang,userInstruction:getInstructionText()})
-    });
+    // 2) 백그라운드 잡 생성 → jobId. 이후엔 탭을 닫아도 서버가 끝까지 변환한다.
+    const title=(currentAudioFile&&currentAudioFile.name)||defaultMeetingTitle();
+    const fileDate=(currentAudioFile&&currentAudioFile.lastModified)?new Date(currentAudioFile.lastModified).toISOString().slice(0,10):'';
+    const rj=await fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({userId:jobUserId(),language:_selectedLang,model:_selectedModel,chunkRefs:chunkRefs,title:title})});
+    const dj=await safeJson(rj);
+    if(!dj.ok||!dj.job_id) throw new Error(dj.message||'변환 작업 생성 실패');
+    const jobId=dj.job_id;
+    const meta={jobId:jobId, title:title, filename:(currentAudioFile&&currentAudioFile.name)||'recording.webm', fileDate:fileDate, lang:_selectedLang, sessionId:sessionId, startedAt:Date.now()};
+    addActiveJob(meta);
+    upProgress(100,'✅ 서버 업로드 완료','이제 탭을 닫아도 서버에서 계속 변환됩니다');
+    setStep(2,'done'); setStep(3,'active');
+    if(audio){ idbSaveRecording(audio,(currentAudioFile&&currentAudioFile.name)||((title||'recording')+'.webm')); }
+    trackJob(jobId, meta); // 폴링 시작 → 완료 시 요약+렌더
+  }catch(e){
+    showErr('오류: '+fmtErr(e));
+    setStep(2,'wait'); setStep(3,'wait');
+    upProgress(0,'실패','오류가 발생했습니다. 다시 시도해주세요.');
+    $('genBtn').disabled=false;
+  }
+}
+
+// 잡 상태 폴링(3초) → 진행률 표시 → done이면 transcript로 기존 요약/렌더, error면 표시.
+// 탭 재진입 자동재개에도 동일하게 사용. 60초 진행정지 시 워커 재트리거(워치독).
+function trackJob(jobId, meta){
+  if(_jobTimers[jobId]) return; // 중복 폴링 방지
+  setStep(1,'done'); setStep(2,'done'); setStep(3,'active');
+  let lastDone=-1, stuckSince=Date.now(), misses=0;
+  async function poll(){
+    try{
+      const r=await fetch('/api/jobs?id='+encodeURIComponent(jobId),{cache:'no-store'});
+      const d=await safeJson(r);
+      if(!d.ok||!d.job){ // 잡 조회 실패 — 영구 부재(DB 리셋 등)면 5회 후 포기
+        if(++misses>=5){ delete _jobTimers[jobId]; removeActiveJob(jobId); setStep(3,'wait'); $('genBtn').disabled=false; showErr('변환 작업(ID '+jobId+')을 찾을 수 없어 중단했습니다.'); return; }
+        _jobTimers[jobId]=setTimeout(poll,4000); return;
+      }
+      misses=0;
+      const j=d.job;
+      if(j.status==='processing'){
+        const pc=j.chunks_total?Math.round((j.chunks_done/j.chunks_total)*100):0;
+        aiProgress(Math.max(5,Math.min(95,pc)),'🤖 서버에서 음성 변환 중','구간 '+j.chunks_done+'/'+j.chunks_total+' 완료 · 탭 닫아도 계속됩니다');
+        if(j.chunks_done!==lastDone){ lastDone=j.chunks_done; stuckSince=Date.now(); }
+        else if(Date.now()-stuckSince>60000){ stuckSince=Date.now(); fetch('/api/worker?id='+encodeURIComponent(jobId),{method:'POST'}).catch(function(){}); }
+        _jobTimers[jobId]=setTimeout(poll,3000); return;
+      }
+      if(j.status==='summarizing'){
+        aiProgress(96,'🤖 화자·요약 정리 중','거의 완료되었습니다');
+        _jobTimers[jobId]=setTimeout(poll,3000); return;
+      }
+      if(j.status==='error'){
+        delete _jobTimers[jobId]; removeActiveJob(jobId);
+        setStep(3,'wait'); showErr('서버 변환 실패: '+(j.error||'알 수 없는 오류')); $('genBtn').disabled=false; return;
+      }
+      if(j.status==='done'){
+        delete _jobTimers[jobId];
+        const transcript=(j.segments||[]).map(function(s){return s&&s.text||'';}).join(' ').replace(/\s+/g,' ').trim();
+        await finalizeTranscript(transcript, meta);
+        removeActiveJob(jobId);
+        return;
+      }
+      _jobTimers[jobId]=setTimeout(poll,3000);
+    }catch(e){ _jobTimers[jobId]=setTimeout(poll,5000); }
+  }
+  poll();
+}
+
+// transcript → 기존 /api/summarize(회의록 마크다운 + Drive 저장 + cl_meetings 이력)로 마무리. 렌더는 기존 그대로.
+async function finalizeTranscript(fullText, meta){
+  meta=meta||{};
+  try{
+    if(!fullText || !fullText.replace(/\[구간 \d+ 변환 실패[^\]]*\]/g,'').trim()){
+      throw new Error('음성에서 텍스트를 추출하지 못했습니다 (무음/전 구간 실패).');
+    }
+    aiProgress(98,'🤖 회의록 작성 중','AI가 회의록을 작성하고 있습니다');
+    const r2=await fetch('/api/summarize',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({transcript:fullText,audioFileName:meta.filename||'recording.webm',fileDate:meta.fileDate||'',sessionId:meta.sessionId||'',lang:meta.lang||_selectedLang,userInstruction:getInstructionText()})});
     if(!r2.ok){const txt=await r2.text();throw new Error('회의록 생성 실패('+r2.status+'): '+txt.slice(0,100));}
     const d2=await safeJson(r2);
     if(!d2.ok)throw new Error(d2.message||'회의록 생성 실패');
     aiProgress(100,'✅ AI 변환 완료','회의록이 생성되었습니다');
     setStep(3,'done'); setStep(4,'done');
-
-    _summary=d2.summary||'';_title=d2.title||defaultMeetingTitle();_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
-    showResult(); $('step4').scrollIntoView({behavior:'smooth'});
-
-    if(failed) showErr('⚠️ '+failed+'개 구간 변환에 실패했지만 나머지로 회의록을 생성했습니다.');
+    _summary=d2.summary||'';_title=d2.title||meta.title||defaultMeetingTitle();_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
+    showResult(); try{$('step4').scrollIntoView({behavior:'smooth'});}catch(e){}
     if(d2.warnings && (d2.warnings.driveError||d2.warnings.dbError)){
       let w='';
       if(d2.warnings.driveError)w+='Drive 저장 실패: '+d2.warnings.driveError+'. ';
@@ -692,14 +759,20 @@ async function generate(){
       showErr('⚠️ 회의록은 생성됐으나 일부 저장 실패: '+w);
     }
     saveSession(); invalidateListCache(); loadMeetings();
-    idbSaveRecording(audio, (currentAudioFile&&currentAudioFile.name)||((d2.title||'recording')+'.webm'));
   }catch(e){
-    showErr('오류: '+fmtErr(e));
-    setStep(2,'wait'); setStep(3,'wait');
-    $('upStep') && (upProgress(0,'실패','오류가 발생했습니다. 다시 시도해주세요.'));
+    showErr('오류: '+fmtErr(e)); setStep(3,'wait');
   }finally{
     $('genBtn').disabled=false;
   }
+}
+
+// 페이지 로드 시: 진행 중이던 잡을 자동 재개(탭 닫았다 다시 열어도 이어서 완료된다).
+function resumeActiveJobs(){
+  const jobs=getActiveJobs();
+  if(!jobs.length) return;
+  jobs.sort(function(a,b){return (b.startedAt||0)-(a.startedAt||0);});
+  showToast('이전 변환을 이어서 진행합니다 ('+jobs.length+'건)');
+  jobs.forEach(function(m){ if(m&&m.jobId) trackJob(m.jobId, m); });
 }
 function showResult(){
   $('summaryBox').textContent=_summary;
@@ -1073,6 +1146,7 @@ setInterval(autosaveTick,5*60*1000);
 /* ═══════════ 초기화 ═══════════ */
 applyTheme(); applyProfile(); resetSteps();
 loadMeetings(); renderRecent(); restoreSession();
+resumeActiveJobs(); // 진행 중이던 백그라운드 전사 잡을 자동 재개(탭 닫힘 복구)
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
 </body>

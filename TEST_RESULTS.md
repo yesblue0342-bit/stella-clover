@@ -1,5 +1,33 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-06-28] Vercel 제거 → OCI 이관 + 백그라운드 전사 클라이언트 연동 (브랜치 `claude/stella-search-zero-results-21mqvz`)
+
+### 변경 요약
+- **Vercel 의존 전면 제거** → OCI 우분투 서버(Docker/Express). `server.mjs` 어댑터로 기존 `api/*.js(req,res)` 그대로 구동. `vercel.json` 삭제, `export const config` 제거, cron→서버 내부 스케줄러.
+- **백그라운드 워커 인프로세스화**(`lib/jobs-runtime.js`): worker HTTP 자기재호출 제거 → 동시상한+큐 + CAS 멱등 + **부팅 복구**(서버 재시작에도 미완료 잡 자동 재개).
+- **`_db.js` 호스트 자동판별 TLS**: OCI `stella-mssql`(자체서명) / Azure(검증) 동시 지원, `DB_*`(별칭 `CL_DB_*`).
+- **index.html 클라이언트 연동**: 분할→`/api/chunk-upload`(Drive)→`POST /api/jobs`→3초 폴링→완료 시 **기존 `/api/summarize`+렌더+이력 그대로**. **`clover_active_jobs` localStorage + `resumeActiveJobs()`로 탭 닫았다 다시 열어도 자동 재개**. 모델 선택 UI + 60초 정지 워치독 + `/api/worker` 재트리거.
+
+### 테스트 결과 (샌드박스, Node 22.22)
+| # | 항목 | 결과 |
+|---|------|------|
+| 1 | `node --check` server.mjs + api/*.js + lib/*.js (20개) | **20/20 OK** ✅ |
+| 2 | 핸들러 dynamic import(의존성 설치) — 잘못된 import 0 | **11/11 OK** ✅ |
+| 3 | `npm test`(node:test) — 기존 27 + 신규 7(db-config·jobs-runtime) | **34/34 PASS** ✅ |
+| 4 | `server.mjs` 부팅 → `GET /` index.html(모델 선택 UI 포함) 서빙 | **200** ✅ |
+| 5 | `/api/_db` 언더스코어 가드 → 404 JSON(공유모듈 비노출) | ✅ |
+| 6 | `/api/meetings·jobs·worker·chunk-upload·drive-search` 미설정 시 graceful JSON | ✅ |
+| 7 | index.html 인라인 JS `new Function` 파싱 | **0 errors** ✅ |
+| 8 | 순수함수: computeOffsetSec / TLS(stella-mssql=trust, azure=verify) / hasDbConfig | ✅ |
+| 9 | 시크릿 스캔 | 0 ✅ |
+
+### 한계 (정직)
+- DB/Drive/OpenAI 자격증명은 배포 환경에만 존재 → 실제 업로드→전사→요약 end-to-end는 샌드박스 실행 불가. 어댑터/라우팅/가드/부팅·인라인 JS·순수로직까지 정적+런타임 검증.
+- **수동 검증 절차**: 작은 음성 업로드 → 업로드 완료 토스트 후 **탭 종료** → 잠시 후 재접속 시 "이전 변환을 이어서 진행합니다" 토스트와 함께 진행률이 이어지고 회의록이 완성되는지 확인.
+- 배포 트리거는 **main push**. 본 작업은 개발 브랜치 푸시 → 실제 OCI 배포는 main 병합 시.
+
+---
+
 생성일: 2026-06-19 · 백업 브랜치: `backup-clover-20260619-045010`
 
 ## (A) 고친 오류 — 원인 · 조치

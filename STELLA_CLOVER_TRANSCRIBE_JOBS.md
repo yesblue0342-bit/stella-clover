@@ -50,3 +50,17 @@
 - **런타임 미검증**: Azure SQL/Drive/OpenAI 자격증명이 배포 환경에만 있어 실제 생성→처리→완료 플로우는 샌드박스 실행 불가. 구문(node --check)·구조·계약까지 정적 검증.
 - **클라이언트 미연동**이라 현재 사용자 화면엔 아직 안 보임 → 위 "남은 증분"이 다음 작업.
 - 화자 라벨은 voiceprint 없는 **LLM 근사치**(UI/주석에 명시 필요).
+
+## [2026-06-28 업데이트] Vercel 제거 → OCI 이관 + 클라이언트 연동 완료
+- **워커 모델 변경**: Vercel 함수모델의 "한 청크 처리 후 `/api/worker` HTTP 자기재호출"을 제거하고
+  **인프로세스 워커**(`lib/jobs-runtime.js`)로 전환. 동시상한(`JOBS_CONCURRENCY`)+큐, `chunks_done` CAS 멱등,
+  **부팅 복구(`recover`)**로 서버 재시작에도 미완료 잡 자동 재개. `worker.js`는 워치독 엔드포인트로 축소.
+- **구동/배포**: Vercel → OCI Docker/Express(`server.mjs`). 자세한 내용 `STELLA_CLOVER_OCI_MIGRATION.md`.
+- **클라이언트 연동(index.html) 완료**(위 "남은 증분"):
+  1. 분할 → `POST /api/chunk-upload`(Drive 업로드) → `POST /api/jobs(chunkRefs)` → 업로드 끝나면 탭 닫아도 됨.
+  2. 3초 폴링(`GET /api/jobs?id=`) 진행률 → 완료 시 transcript로 **기존 `/api/summarize`+렌더+`cl_meetings` 이력** 그대로.
+  3. **자동 재개**: `clover_active_jobs` localStorage + `resumeActiveJobs()`(로드 시) → 탭/서버 재시작 무관 이어서 완료.
+  4. 모델 선택 UI(whisper-1/gpt-4o-mini-transcribe/gpt-4o-transcribe), 60초 정지 워치독 → `POST /api/worker?id=`.
+  5. SW 캐시 v10→v11.
+- **세그먼트 뷰(A2/A3)·구조화 요약 카드(A5)·"내 변환" 리스트(B3)** 는 다음 증분(현재는 transcript→기존 회의록 렌더로
+  사용자 가치=탭 닫힘 복구를 우선 확보). 백엔드 계약은 이미 segments/summary/list 제공.
