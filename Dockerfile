@@ -6,9 +6,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 COPY . .
-ENV PORT=8970
-EXPOSE 8970
+ENV PORT=8971
+EXPOSE 8971
 # 컨테이너 alive 체크 (정적 루트는 시크릿 없이도 200)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-    CMD curl -fsS http://127.0.0.1:8970/ >/dev/null || exit 1
+    CMD curl -fsS http://127.0.0.1:8971/ >/dev/null || exit 1
 CMD ["node", "server.mjs"]

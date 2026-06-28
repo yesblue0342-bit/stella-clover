@@ -16,7 +16,7 @@
 | 파일 | 내용 |
 |------|------|
 | `server.mjs` (신규) | Express 어댑터: 정적 서빙 + `/`,`/talk`,`/db` rewrite + CSP + `/api/*`→`api/<name>.js` default(req,res) 호출. `_언더스코어`·경로탈출 404. 부팅 시 미완료 잡 복구 + 일일 오디오 정리 스케줄(전부 dynamic import+try/catch라 DB/Drive 미설정이어도 정적 서버는 동작) |
-| `Dockerfile` (신규) | node:22-slim + `npm install --omit=dev` + PORT 8970 + curl 헬스체크 |
+| `Dockerfile` (신규) | node:22-slim + `npm install --omit=dev` + PORT 8971 + curl 헬스체크 |
 | `.github/workflows/deploy-oci.yml` (신규) | main push → SSH로 OCI에서 `git reset --hard` + `deploy/run-stella-oci.sh`. 시크릿 미설정 시 green skip |
 | `deploy/run-stella-oci.sh` (신규) | docker build/run (`--network npm_default`, `--env-file .env`, `--restart unless-stopped`) + 헬스체크 |
 | `.env.example`/`.dockerignore`/`.gitignore` (신규) | 환경변수 템플릿(시크릿 값 없음) + 빌드/시크릿 제외 |

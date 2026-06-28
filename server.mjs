@@ -4,7 +4,7 @@
 // 정적 파일 + 깔끔한 URL rewrites + CSP + /api 라우팅 + 내부 스케줄러(크론 대체)를 여기서 처리.
 // (★ Vercel 미사용 — 전부 OCI 우분투 서버로 이관. 함수 시간 제한 없어 긴 전사/요약·인프로세스 워커 가능.)
 //
-// 실행: node server.mjs   (PORT 기본 8970)
+// 실행: node server.mjs   (PORT 기본 8971)
 // 환경변수(시크릿)는 .env 로 주입: docker run --env-file .env ...
 import express from "express";
 import { existsSync } from "fs";
@@ -14,7 +14,7 @@ import { dirname, join, resolve } from "path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = __dirname;
 const API_DIR = resolve(ROOT, "api");
-const PORT = Number(process.env.PORT || 8970);
+const PORT = Number(process.env.PORT || 8971);
 
 const app = express();
 app.disable("x-powered-by");

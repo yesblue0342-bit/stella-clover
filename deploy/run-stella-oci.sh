@@ -8,7 +8,7 @@ set -euo pipefail
 
 NAME=stella-clover
 NETWORK=npm_default
-PORT=8970
+PORT=8971
 
 cd "$(dirname "$0")/.."
 
