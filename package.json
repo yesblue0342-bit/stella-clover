@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "express": "^4.21.2",
-    "mssql": "^11.0.1",
-    "openai": "^4.47.1",
+    "formidable": "^3.5.1",
     "googleapis": "^144.0.0",
-    "formidable": "^3.5.1"
+    "openai": "^4.47.1",
+    "pg": "^8.22.0"
   }
 }

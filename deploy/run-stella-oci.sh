@@ -22,10 +22,20 @@ else
   echo "  ⚠️ docker 권한 확인 필요: 'sudo usermod -aG docker \$USER' 후 재로그인(권장) 또는 NOPASSWD sudo."
 fi
 
-echo "▶ 1/5 .env 확인"
+echo "▶ 1/5 .env 확인 (Postgres 기준)"
 if [ ! -f .env ]; then
   echo "  ❌ .env 가 없습니다. 먼저 작성하세요:  cp .env.example .env  &&  nano .env"
   exit 1
+fi
+# Postgres 연결: DATABASE_URL 단독, 또는 DB_SERVER+DB_NAME+DB_USER+DB_PASSWORD 4종 필요.
+has_val() { grep -Eq "^[[:space:]]*$1=[[:space:]]*[^[:space:]#].*$" .env; }
+if has_val DATABASE_URL; then
+  echo "  ✅ DATABASE_URL 설정됨"
+elif has_val DB_SERVER && has_val DB_NAME && has_val DB_USER && has_val DB_PASSWORD; then
+  echo "  ✅ DB_SERVER/DB_NAME/DB_USER/DB_PASSWORD 설정됨"
+else
+  echo "  ⚠️ Postgres 연결정보 미설정: DATABASE_URL 또는 DB_SERVER/DB_NAME/DB_USER/DB_PASSWORD 를 .env 에 채우세요."
+  echo "     (DB 미설정 시 서버는 뜨지만 /api 의 DB 기능은 '환경변수 미설정'으로 응답)"
 fi
 echo "  ✅ .env 존재 (docker 실행: $DOCKER)"
 

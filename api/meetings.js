@@ -1,5 +1,5 @@
 // api/meetings.js - 회의록 목록 + 키워드 검색 + 상세
-import { getPool, sql, CREATE_TABLE, hasDbConfig } from "./_db.js";
+import { getPool, sql, hasDbConfig } from "./_db.js";
 
 // (Vercel maxDuration 제거 — OCI 서버는 시간 제한 없음)
 
@@ -23,7 +23,7 @@ export default async function handler(req, res) {
       const id = parseInt(req.query.id, 10);
       if (!Number.isInteger(id)) return res.status(400).json({ ok: false, message: "잘못된 id" });
       const r = await pool.request().input("id", sql.Int, id)
-        .query(`${CREATE_TABLE} SELECT * FROM cl_meetings WHERE id=@id`);
+        .query(`SELECT * FROM cl_meetings WHERE id=@id`);
       return res.status(200).json({ ok: true, item: r.recordset[0] || null });
     }
 
@@ -35,7 +35,7 @@ export default async function handler(req, res) {
       if (!Number.isInteger(id)) return res.status(400).json({ ok: false, message: "잘못된 id" });
       if (!title) return res.status(400).json({ ok: false, message: "제목을 입력하세요" });
       const r = await pool.request().input("id", sql.Int, id).input("title", sql.NVarChar(300), title)
-        .query(`${CREATE_TABLE} UPDATE cl_meetings SET title=@title WHERE id=@id`);
+        .query(`UPDATE cl_meetings SET title=@title WHERE id=@id`);
       if (!r.rowsAffected || !r.rowsAffected[0]) return res.status(200).json({ ok: false, message: "대상 회의록을 찾을 수 없습니다" });
       return res.status(200).json({ ok: true, id, title });
     }
@@ -53,23 +53,23 @@ export default async function handler(req, res) {
     if (action === "search") {
       const q = (req.query.q || "").trim().slice(0, 100); // 길이 제한
       if (!q) { return res.status(200).json({ ok: true, items: [] }); }
-      // LIKE 와일드카드(%, _, [) 를 리터럴로 이스케이프해 의도치 않은 매칭 방지
-      const like = "%" + q.replace(/[%_\[]/g, m => "[" + m + "]") + "%";
+      // ILIKE 와일드카드(%, _) 와 이스케이프 문자(\)를 백슬래시로 이스케이프해 의도치 않은 매칭 방지
+      const like = "%" + q.replace(/[\\%_]/g, m => "\\" + m) + "%";
       const r = await pool.request().input("q", sql.NVarChar(200), like)
-        .query(`${CREATE_TABLE}
-          SELECT TOP 50 id, title, keywords, transcript_chars, summary_chars,
+        .query(`
+          SELECT id, title, keywords, transcript_chars, summary_chars,
                  drive_file_id, drive_link, audio_file, created_at
           FROM cl_meetings
-          WHERE title LIKE @q OR keywords LIKE @q OR summary LIKE @q OR transcript LIKE @q
-          ORDER BY id DESC`);
+          WHERE title ILIKE @q OR keywords ILIKE @q OR summary ILIKE @q OR transcript ILIKE @q
+          ORDER BY id DESC LIMIT 50`);
       return res.status(200).json({ ok: true, items: r.recordset || [] });
     }
 
     // 기본: 목록
-    const r = await pool.request().query(`${CREATE_TABLE}
-      SELECT TOP 50 id, title, keywords, transcript_chars, summary_chars,
+    const r = await pool.request().query(`
+      SELECT id, title, keywords, transcript_chars, summary_chars,
              drive_file_id, drive_link, audio_file, created_at
-      FROM cl_meetings ORDER BY id DESC`);
+      FROM cl_meetings ORDER BY id DESC LIMIT 50`);
     return res.status(200).json({ ok: true, items: r.recordset || [] });
 
   } catch (e) {

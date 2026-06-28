@@ -25,12 +25,15 @@ test("공개 호스트는 검증 유지(보수적)", () => {
   assert.equal(resolveTlsOptions("db.example.com").trustServerCertificate, false);
 });
 
-test("hasDbConfig: DB_* 또는 CL_DB_* 가 다 있으면 true, 없으면 false", () => {
-  const keys = ["DB_SERVER","DB_NAME","DB_USER","DB_PASSWORD","DB_DATABASE","SQL_SERVER","SQL_DATABASE","SQL_USER","SQL_PASSWORD","CL_DB_SV","CL_DB_NM","CL_DB_USR","CL_DB_PW"];
+test("hasDbConfig: DATABASE_URL 단독 / DB_* / CL_DB_* 가 다 있으면 true, 없으면 false", () => {
+  const keys = ["DATABASE_URL","POSTGRES_URL","PG_URL","DB_SERVER","DB_HOST","PGHOST","DB_NAME","DB_USER","DB_PASSWORD","DB_DATABASE","PGDATABASE","PGUSER","PGPASSWORD","SQL_SERVER","SQL_DATABASE","SQL_USER","SQL_PASSWORD","CL_DB_SV","CL_DB_NM","CL_DB_USR","CL_DB_PW"];
   const saved = {}; keys.forEach(k => { saved[k] = process.env[k]; delete process.env[k]; });
   try {
     assert.equal(hasDbConfig(), false, "env 없으면 false");
-    process.env.DB_SERVER = "stella-mssql"; process.env.DB_NAME = "clover"; process.env.DB_USER = "sa"; process.env.DB_PASSWORD = "x";
+    process.env.DATABASE_URL = "postgresql://u:p@stella-postgres:5432/stella_clover";
+    assert.equal(hasDbConfig(), true, "DATABASE_URL 단독으로 true");
+    delete process.env.DATABASE_URL;
+    process.env.DB_SERVER = "stella-postgres"; process.env.DB_NAME = "clover"; process.env.DB_USER = "stella"; process.env.DB_PASSWORD = "x";
     assert.equal(hasDbConfig(), true, "DB_* 다 있으면 true");
     delete process.env.DB_SERVER; delete process.env.DB_NAME; delete process.env.DB_USER; delete process.env.DB_PASSWORD;
     process.env.CL_DB_SV = "x.database.windows.net"; process.env.CL_DB_NM = "clover"; process.env.CL_DB_USR = "u"; process.env.CL_DB_PW = "p";

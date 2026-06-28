@@ -1,35 +1,78 @@
-# STT 정확도 개선 진행 (ralph)
+# Stella Clover — 메타데이터 OCI Postgres 이관 (진행)
 
-## 0단계: 대상 코드 식별 (완료)
-전사 코드가 이 저장소에 존재함. NO_CLOVER_CODE_HERE 아님.
+> 직전 PROGRESS.md(STT 정확도)는 별개 작업 → 본 이관 작업 기록으로 대체
+> (STT 작업물은 git 이력 + lib/sttTerms·sttMerge·test 에 그대로 존재).
 
-| 파일 | 역할 |
-|------|------|
-| `api/_stt.js` | **STT 핵심 호출부.** `transcribeBuffer()` — OpenAI `audio.transcriptions.create`. 모델 `whisper-1`(기본), `verbose_json` 세그먼트, 글로벌 offset 보정, `temperature:0`, SAP 프롬프트, prevText 연속성. |
-| `api/transcribe.js` | 레거시 직접 호출 엔드포인트(청크 1개 업로드 → `_stt.js`). |
-| `api/worker.js` | 백그라운드 전사 워커(Drive 청크 → `_stt.js`, resume/idempotent). |
-| `api/_meeting.js` | 전처리 순수 함수: `collapseRepeats`, `isHallucinatedSegment`, prompt 빌더. 단위 테스트 대상. |
-| `index.html` | 클라이언트 청크 분할: `audioToChunks`(120s/16kHz mono WAV) + `encodeWavSlice`. 순차 STT 호출·재시도. |
-| `test/meeting.test.js` | 단위 테스트(16개). 실행: `node --test test/meeting.test.js`. |
+## 1단계: 현황 (완료)
+MSSQL/Azure SQL 의존은 **DB 계층에 국한**. 파이프라인(잡 큐·워커·재시작 복구·Drive 청크)은 DB 호출만 사용.
 
-**사용 모델: `whisper-1`** (verbose_json/timestamps 지원). temperature=0 이미 적용.
+| 파일 | DB 사용 | 포팅 내용 |
+|------|---------|-----------|
+| `api/_db.js` | **핵심**: `import sql from "mssql"` + ConnectionPool + T-SQL DDL | → `pg.Pool` + Postgres DDL + **mssql 호환 셰임**(`request().input().query()`) |
+| `lib/jobs-runtime.js` | transcribe_jobs CAS 루프(resume/idempotent) | `@p`→`$n`(셰임), `SYSUTCDATETIME()`→`now()`, `${CREATE_JOBS}` 프리픽스 제거 |
+| `api/jobs.js` | transcribe_jobs INSERT(OUTPUT)/list(TOP)/detail | `OUTPUT INSERTED.job_id`→`RETURNING job_id`, `TOP n`→`LIMIT n` |
+| `api/worker.js` | transcribe_jobs 상태 SELECT | 프리픽스 제거 |
+| `api/meetings.js` | cl_meetings list/search/detail/rename/delete | `TOP`→`LIMIT`, `LIKE`(T-SQL `[]`이스케이프)→`ILIKE`(백슬래시 이스케이프) |
+| `api/summarize.js` | cl_meetings 멱등 INSERT(T-SQL IF NOT EXISTS) | `INSERT…SELECT…WHERE NOT EXISTS` (Postgres) |
 
-## 가정 (모호 → 합리적 결정)
-- `package.json`에 test 스크립트 없음 → `node --test test/meeting.test.js`로 검증.
-- 기존 진행 문서는 `STELLA_CLOVER_*`, `TEST_RESULTS.md`. ralph 지침대로 `PROGRESS.md` + `TEST_REPORT.md` 신규 사용.
-- 7항목 중 **이미 구현된 것**: 1(language 고정, lang!=="auto"일 때 명시), 5 일부(temperature=0, verbose_json), 7(청크 3회 재시도+부분성공 표시). → 미비점만 보강.
-- 청크 오버랩(항목4)은 offset/dedup 로직 위험 → 순수함수+테스트로 보수적 구현.
+비-DB: cleanup/chunk-upload/transcribe/audio/autosave → DB 미사용(변경 없음).
+
+## 재사용 Postgres 조사
+- `guac-postgres`(postgres:16-alpine) 존재하나 **`guacamole_internal` 네트워크**(npm_default 아님), 5432 비공개.
+  → stella-clover(--network npm_default)에서 직접 도달 불가. 사용자가 택1:
+  1) 전용 Postgres 컨테이너를 npm_default 에 기동(권장), 또는
+  2) guac-postgres 를 npm_default 에도 연결 + `stella_clover` DB 생성.
+  어느 쪽이든 **DATABASE_URL** 만 .env 에 채우면 됨(코드는 연결문자열만 봄). 코드에 호스트 하드코딩 없음.
+
+## 설계 결정 (가정)
+- **mssql 호환 셰임 유지**: 규칙 "DB 호출부만 교체, 시그니처 유지" 충족.
+  `getPool().request().input(name,type,val).query(tsql)` / `r.recordset` / `r.rowsAffected[0]` 그대로.
+  내부에서 `@name`→`$n`(중복 이름은 동일 `$n` 재사용) 변환 후 `pg.Pool.query` 실행.
+  타입 인자(`sql.Int` 등)는 무시(Proxy 마커). → 호출부 diff 최소, 회귀 위험 최소.
+- **스키마 자동생성은 기동/최초 getPool 시 1회**(`ensureSchema`). 기존엔 매 쿼리에 `${CREATE_*}` 프리픽스로
+  self-heal 했지만 **pg 확장 프로토콜은 멀티스테이트먼트+파라미터 불가** → 프리픽스 제거하고 getPool 보장으로 대체
+  (getPool 은 모든 쿼리 직전 await 되므로 등가).
+- **jobs 테이블 = 기존 `transcribe_jobs` 유지**(컬럼 그대로). PROMPT 3항의 `jobs(id UUID, file_name…)` 스키마는
+  파이프라인이 실제로 쓰는 컬럼(chunk_refs/segments_json/speakers_json/summary_json/chunks_done CAS…)과 불일치.
+  규칙 "파이프라인 재작성 금지/시그니처 유지/파이프라인 깨지 말 것" 우선 → **이름·컬럼 보존**, 요청된
+  `status`·`created_at` 인덱스만 추가. (BIGSERIAL id, 멱등 CREATE IF NOT EXISTS.)
+- BIGINT(int8) 타입파서 → Number(mssql BigInt 동작 유지: `job_id` 숫자 비교/`Number(x.job_id)` 무회귀).
+- SSL 기본 off(도커 내부망). `sslmode=require`/`DB_SSL` 시 on(자체서명 허용, `DB_SSL_VERIFY=true`로 검증 강제).
 
 ## 작업 항목 상태
-- [x] 0. 코드 식별
-- [x] 2. 도메인 프롬프트 `lib/sttTerms.js` 분리 + 교정 사전
-- [x] 6. 후처리 교정 사전 일괄 치환 (`applyCorrections` in `_stt.js`)
-- [x] 5. avg_logprob 낮은 구간 로깅 (`logLowConfidence`)
-- [x] 3. 오디오 전처리(피크 정규화). **무음 트리밍은 보류** — 직접 경로에선 텍스트만 쓰지만
-       샘플 수 변경이 향후 worker offset 정렬과 혼동될 위험 → 정규화(타이밍 불변)만 적용.
-- [x] 4. 청크 경계 오버랩(3s) + 병합 디듀프 (`lib/sttMerge.js` + index.html 인라인 복제)
-- [x] 1. language="ko" 고정 (기존 구현 확인 — lang!=="auto"일 때 `params.language` 명시)
-- [x] 7. 청크 실패 재시도/부분성공 (기존 구현 확인 — client 3회 + `_stt.js` retry 3회)
+- [x] 1. 현황 식별 + 재사용 PG 조사
+- [x] 2. `_db.js` mssql→pg 교체 + 셰임 + DATABASE_URL 우선
+- [x] 3. 스키마 자동생성(cl_meetings + transcribe_jobs, status/created_at 인덱스)
+- [x] 4. 소비자 쿼리 포팅(jobs/worker/meetings/summarize/jobs-runtime)
+- [x] 5. .env.example Postgres 기준(PORT=8971, MSSQL 제거, DATABASE_URL) + deploy .env 검증
+- [x] 6. 테스트(셰임 단위 + jobs CRUD/상태전이/복구 통합[DATABASE_URL 가드]) + node --check + SW bump
+- [ ] 7. 배포(OCI Docker 재빌드 8971) — **사용자 작업**: Postgres 컨테이너를 npm_default 에 기동 +
+      `stella_clover` DB 생성 → .env 에 DATABASE_URL 채우고 `bash deploy/run-stella-oci.sh`
 
-## 청크 크기 안전성 (절대 규칙 점검)
-- 오버랩 3s → 최대 청크 123s × 16kHz × 2B ≈ **3.94MB < 4.5MB**. 413 위험 없음. 청크 수 불변(stride=120s).
+## 변경 요약 (이번 이관)
+- `api/_db.js`: `import sql from "mssql"` → `import pg`. `pg.Pool` + mssql 호환 셰임(`ShimRequest`:
+  `.input(name,[type],value)` → `@name`을 첫 등장 순서대로 `$n`으로 변환, 중복 이름은 동일 `$n` 재사용,
+  타입 인자 무시). `recordset`(=rows)/`rowsAffected[0]`(=rowCount) 매핑. BIGINT(OID 20)→Number 파서.
+  `getPool`이 `ensureSchema`(CREATE IF NOT EXISTS + status/created_at 인덱스)를 1회 보장. `connectWithRetry`
+  Postgres 코드(28xxx 인증=즉시중단, ECONNREFUSED/57P03 등=재시도). DATABASE_URL 우선, 없으면 DB_*/CL_DB_*.
+  SSL 기본 off(내부망), `DB_SSL`/`sslmode=require`로 on, `DB_SSL_VERIFY`/`verify-full`로 검증 강제.
+  `resolveTlsOptions`/`hasDbConfig`는 호환 위해 유지(+DATABASE_URL 인식). `sql`은 no-op 타입 마커 Proxy.
+- `api/jobs.js`: `OUTPUT INSERTED.job_id`→`RETURNING job_id`, `TOP 20`→`LIMIT 20`, `${CREATE_JOBS}` 프리픽스 제거.
+- `api/worker.js` / `lib/jobs-runtime.js`: `${CREATE_JOBS}` 제거, `SYSUTCDATETIME()`→`now()`. CAS/복구 로직 불변.
+- `api/meetings.js`: `TOP 50`→`LIMIT 50`, `LIKE`(T-SQL `[]`)→`ILIKE`(백슬래시 이스케이프), 프리픽스 제거.
+- `api/summarize.js`: T-SQL `IF NOT EXISTS … INSERT` → Postgres `INSERT … SELECT … WHERE (@asession='' OR NOT EXISTS…)`.
+- `.env.example`/`.env`: PORT 8971, MSSQL 키 제거, `DATABASE_URL`(+개별 DB_* 대안) 기준. deploy 스크립트 .env 검증 Postgres화.
+- `sw.js`: 캐시 v12→v13. `package.json`: 이미 `pg` 의존(`mssql` 제거됨).
+
+## 테스트 결과
+- 단위/회귀(DATABASE_URL 없음): `node --test test/*.test.js` → **39 pass / 2 skip(통합)** , 0 fail.
+  - 신규 `test/db-shim.test.js`(6): `@name→$n`(중복 재사용·첫등장 순서), 2-인자 input, recordset/rowsAffected,
+    parseJson, sql 마커 안전성.
+  - 기존 `db-config.test.js`: DATABASE_URL 단독 true 케이스 추가(나머지 회귀 유지). `jobs-runtime`/`meeting`/`stt*` 무회귀.
+- 통합(실 Postgres 16, `postgresql://…/stella_clover`): `test/jobs-db.test.js` **2 pass**.
+  - transcribe_jobs: INSERT…RETURNING / READ / chunks_done CAS(성공 1행·중복 0행) / 복구 선택(summarizing 포함·done 제외) / DELETE.
+  - cl_meetings: 같은 audio_session 멱등 INSERT(첫 1행, 재삽입 0행, COUNT=1).
+- 핸들러 스모크(실 Postgres): POST/GET/list jobs, worker kick, meetings list/search 모두 200·정상 JSON.
+- `node --check api/*.js lib/*.js server.mjs test/*.test.js` 전체 통과. `bash -n deploy/run-stella-oci.sh` 통과.
+
+RALPH_DONE

@@ -3,7 +3,7 @@
 //
 // ※ Vercel 함수모델의 "한 청크 처리 후 HTTP 자기재호출" 패턴 제거. 실제 처리는 lib/jobs-runtime.js가
 //   OCI 장수 프로세스 안에서 끝까지 수행한다. 이 엔드포인트는 멈춘 잡을 강제로 다시 펌프하는 용도.
-import { getPool, sql, CREATE_JOBS, parseJson, hasDbConfig } from "./_db.js";
+import { getPool, sql, hasDbConfig } from "./_db.js";
 import { kick, runtimeStats } from "../lib/jobs-runtime.js";
 
 export default async function handler(req, res) {
@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   try {
     const pool = await getPool();
     const r = await pool.request().input("id", sql.BigInt, id)
-      .query(`${CREATE_JOBS} SELECT job_id,status,chunks_total,chunks_done FROM transcribe_jobs WHERE job_id=@id`);
+      .query(`SELECT job_id,status,chunks_total,chunks_done FROM transcribe_jobs WHERE job_id=@id`);
     const j = r.recordset[0];
     if (!j) return res.status(200).json({ ok: false, message: "작업 없음" });
     if (j.status === "done" || j.status === "error") {

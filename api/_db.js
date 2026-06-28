@@ -1,10 +1,22 @@
-// api/_db.js - SQL Server 공유 연결 풀 + 테이블 정의 (ESM)
+// api/_db.js - OCI Postgres 공유 연결 풀 + 스키마 자동생성 (ESM)
 //
-// ※ Vercel/Azure 서버리스 의존 제거 — OCI 우분투 서버(Docker)에서 구동.
-//   DB는 OCI 동거 MSSQL 컨테이너(stella-mssql, 자체서명 TLS) 또는 기존 Azure SQL 모두 지원.
-//   TLS는 호스트로 자동 판별: 컨테이너/사설망=자체서명 허용, Azure(*.database.windows.net)=검증 유지.
-//   환경변수: DB_SERVER/DB_NAME/DB_USER/DB_PASSWORD (별칭으로 기존 CL_DB_* 도 그대로 인식).
-import sql from "mssql";
+// ※ Azure SQL / MSSQL 의존 제거 — OCI 우분투 서버(Docker)의 Postgres로 이관.
+//   연결은 DATABASE_URL 우선(없으면 DB_SERVER/DB_NAME/DB_USER/DB_PASSWORD 조합으로 구성).
+//   기존 호출부(워커/상태조회/watchdog)의 시그니처를 보존하기 위해 mssql 호환 셰임을 둔다:
+//     getPool().request().input(name, type, value).query(tsql)  →  pg.Pool.query
+//     r.recordset / r.rowsAffected[0] 그대로. 타입 인자(sql.Int 등)는 무시(마커).
+//   쿼리 텍스트는 Postgres로 포팅됨(@name→$n 변환만 셰임이 담당; LIMIT/RETURNING/now() 등은 호출부에서 포팅).
+import pg from "pg";
+
+const { Pool, types } = pg;
+
+// BIGINT(int8, OID 20) → Number 로 파싱(기존 mssql BigInt 동작 보존: Number(job_id) 비교/직렬화 무회귀).
+//  안전 정수 범위를 넘으면 문자열 유지(데이터 손실 방지).
+types.setTypeParser(20, v => {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isSafeInteger(n) ? n : v;
+});
 
 let poolPromise;
 
@@ -25,13 +37,17 @@ function envBool(...names) {
   return undefined;
 }
 
+function getUrl() {
+  return firstEnv("DATABASE_URL", "POSTGRES_URL", "PG_URL");
+}
+
 // Azure SQL 호스트(*.database.windows.net)인가
 function isAzureServer(server) {
   return /\.database\.windows\.net$/i.test(String(server || "").trim());
 }
 
-// 로컬/사설/컨테이너 호스트인가 — OCI 동거 MSSQL(자체서명)은 여기로 분류.
-//  localhost·127.0.0.1·점 없는 컨테이너명(stella-mssql 등)·사설/CGNAT IPv4 대역.
+// 로컬/사설/컨테이너 호스트인가 — OCI 동거 Postgres(자체서명/평문 내부망)는 여기로 분류.
+//  localhost·127.0.0.1·점 없는 컨테이너명(stella-postgres 등)·사설/CGNAT IPv4 대역.
 function isLocalOrPrivateServer(server) {
   const s = String(server || "").trim().toLowerCase();
   if (!s) return false;
@@ -44,7 +60,8 @@ function isLocalOrPrivateServer(server) {
   return false;
 }
 
-// TLS 옵션 — 호스트 자동 판별, 환경변수(DB_ENCRYPT / DB_TRUST_SERVER_CERT)로 오버라이드 가능.
+// TLS 옵션 — 호스트 자동 판별. (mssql 시절 호환 시그니처 유지; db-config 테스트가 이 함수를 검증.)
+//  공개 호스트=검증 유지, 로컬/사설/컨테이너=자체서명 허용. 환경변수로 오버라이드 가능.
 export function resolveTlsOptions(server) {
   const azure = isAzureServer(server);
   const local = isLocalOrPrivateServer(server);
@@ -61,59 +78,124 @@ export function resolveTlsOptions(server) {
 }
 
 function getServer() {
-  return firstEnv("DB_SERVER", "SQL_SERVER", "CL_DB_SV").replace(/^tcp:/i, "").split(",")[0];
+  return firstEnv("DB_SERVER", "DB_HOST", "PGHOST", "SQL_SERVER", "CL_DB_SV").replace(/^tcp:/i, "").split(",")[0];
 }
 
-function getConfig() {
-  const server = getServer();
-  const database = firstEnv("DB_NAME", "DB_DATABASE", "SQL_DATABASE", "CL_DB_NM");
-  const user = firstEnv("DB_USER", "SQL_USER", "CL_DB_USR");
-  const password = firstEnv("DB_PASSWORD", "SQL_PASSWORD", "CL_DB_PW");
-  const port = Number(firstEnv("DB_PORT", "SQL_PORT") || 1433);
+// pg SSL 옵션 결정. 기본 off(도커 내부망 평문). DATABASE_URL 에 sslmode=require 또는 DB_SSL 설정 시 on.
+//  자체서명 허용이 기본(rejectUnauthorized:false); DB_SSL_VERIFY=true 면 검증 강제.
+function resolveSsl(url, host) {
+  const urlWantsSsl = /[?&]sslmode=(require|verify-ca|verify-full)/i.test(url || "");
+  const explicit = envBool("DB_SSL", "PGSSL", "SQL_ENCRYPT");
+  let on;
+  if (explicit !== undefined) on = explicit;
+  else if (urlWantsSsl) on = true;
+  else on = false; // 내부망 기본 평문
+  if (!on) return false;
+  const verify = envBool("DB_SSL_VERIFY") === true
+    || /[?&]sslmode=verify-(ca|full)/i.test(url || "");
+  return { rejectUnauthorized: verify };
+}
+
+// pg.Pool 설정 구성. DATABASE_URL 우선, 없으면 개별 변수.
+function getPoolConfig() {
+  const url = getUrl();
+  const base = {
+    // 콜드 스타트/컨테이너 기동 대기 흡수.
+    connectionTimeoutMillis: 30000,
+    idleTimeoutMillis: 30000,
+    query_timeout: 30000,
+    statement_timeout: 30000,
+    max: 5,
+  };
+  if (url) {
+    const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
+    return { ...base, connectionString: url, ssl: resolveSsl(url, host) };
+  }
+  const host = getServer();
+  const database = firstEnv("DB_NAME", "DB_DATABASE", "PGDATABASE", "SQL_DATABASE", "CL_DB_NM");
+  const user = firstEnv("DB_USER", "PGUSER", "SQL_USER", "CL_DB_USR");
+  const password = firstEnv("DB_PASSWORD", "PGPASSWORD", "SQL_PASSWORD", "CL_DB_PW");
+  const port = Number(firstEnv("DB_PORT", "PGPORT", "SQL_PORT") || 5432);
 
   const missing = [];
-  if (!server) missing.push("DB_SERVER(CL_DB_SV)");
-  if (!database) missing.push("DB_NAME(CL_DB_NM)");
-  if (!user) missing.push("DB_USER(CL_DB_USR)");
-  if (!password) missing.push("DB_PASSWORD(CL_DB_PW)");
-  if (missing.length) throw new Error("DB 환경변수 누락: " + missing.join(", "));
+  if (!host) missing.push("DB_SERVER(또는 DATABASE_URL)");
+  if (!database) missing.push("DB_NAME");
+  if (!user) missing.push("DB_USER");
+  if (!password) missing.push("DB_PASSWORD");
+  if (missing.length) throw new Error("DB 환경변수 누락: " + missing.join(", ") + " (또는 DATABASE_URL 설정)");
 
-  return {
-    server, database, user, password, port,
-    options: resolveTlsOptions(server),
-    // 콜드 스타트/컨테이너 기동 대기 흡수: 30초.
-    connectionTimeout: 30000,
-    requestTimeout: 30000,
-    pool: { max: 5, min: 0, idleTimeoutMillis: 30000 }
-  };
+  return { ...base, host, database, user, password, port, ssl: resolveSsl("", host) };
 }
 
 // DB 환경변수가 충분히 설정됐는지(라우트 가드용). 시크릿 값은 노출하지 않음.
+//  DATABASE_URL 단독, 또는 DB_*/CL_DB_* 4종이 모두 있으면 true.
 export function hasDbConfig() {
-  return !!(getServer() && firstEnv("DB_NAME", "DB_DATABASE", "SQL_DATABASE", "CL_DB_NM") &&
-            firstEnv("DB_USER", "SQL_USER", "CL_DB_USR") && firstEnv("DB_PASSWORD", "SQL_PASSWORD", "CL_DB_PW"));
+  if (getUrl()) return true;
+  return !!(getServer() &&
+    firstEnv("DB_NAME", "DB_DATABASE", "PGDATABASE", "SQL_DATABASE", "CL_DB_NM") &&
+    firstEnv("DB_USER", "PGUSER", "SQL_USER", "CL_DB_USR") &&
+    firstEnv("DB_PASSWORD", "PGPASSWORD", "SQL_PASSWORD", "CL_DB_PW"));
 }
 
 // 인증 오류(로그인 실패)는 재시도해도 소용없으므로 즉시 중단.
 // 타임아웃/연결 오류(컨테이너 기동·콜드스타트 대기)만 재시도 대상.
 function isRetryable(err) {
-  const code = (err && (err.code || (err.originalError && err.originalError.code))) || "";
-  const num = (err && (err.number || (err.originalError && err.originalError.number))) || 0;
-  if (code === "ELOGIN" || num === 18456) return false; // 로그인 실패 재시도 금지
-  const retryCodes = ["ETIMEOUT", "ETIMEDOUT", "ESOCKET", "ECONNCLOSED", "ECONNREFUSED", "EHOSTUNREACH", "ENOTOPEN", "ENOTFOUND"];
+  const code = String((err && err.code) || "");
+  // Postgres 인증/권한 실패(28xxx, 3D000 등)는 재시도 무의미.
+  if (/^28/.test(code) || code === "3D000" || code === "ELOGIN") return false;
+  const retryCodes = ["ETIMEDOUT", "ETIMEOUT", "ESOCKET", "ECONNRESET", "ECONNREFUSED", "EHOSTUNREACH", "ENOTFOUND", "EPIPE", "57P03"];
   if (retryCodes.includes(code)) return true;
   const msg = String((err && err.message) || "");
-  return /timeout|failed to connect|socket hang up|getaddrinfo|connection is closed/i.test(msg);
+  return /timeout|failed to connect|connection terminated|socket hang up|getaddrinfo|the database system is starting up|econn/i.test(msg);
 }
 
-// 기동 대기 확보: 최대 3회, 시도 간 3초. 인증 오류는 즉시, 마지막 실패도 throw.
+// ── mssql 호환 셰임 ──────────────────────────────────────────────
+// request().input(name,[type],value).query(tsql) → @name 을 $n 으로 변환 후 pg 실행.
+//  타입 인자(sql.Int 등)는 마커이므로 무시. 동일 이름 반복은 동일 $n 재사용.
+class ShimRequest {
+  constructor(pgPool) { this._pg = pgPool; this._params = Object.create(null); }
+  // .input(name, type, value)  또는  .input(name, value)
+  input(name, typeOrValue, maybeValue) {
+    const value = (arguments.length >= 3) ? maybeValue : typeOrValue;
+    this._params[name] = value;
+    return this;
+  }
+  async query(text) {
+    const map = new Map();   // name → $n
+    const values = [];
+    const converted = String(text).replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (m, name) => {
+      if (!map.has(name)) map.set(name, values.push(this._params[name]));
+      return "$" + map.get(name);
+    });
+    const res = await this._pg.query(converted, values);
+    // mssql 호환: recordset(=rows), rowsAffected[0](=rowCount).
+    return { recordset: res.rows || [], rowsAffected: [res.rowCount || 0], rowCount: res.rowCount || 0 };
+  }
+}
+
+// (export: 단위 테스트에서 가짜 pg 풀을 주입해 @name→$n 변환을 검증.)
+export function makeShimPool(pgPool) {
+  return {
+    _pg: pgPool,
+    request() { return new ShimRequest(pgPool); },
+    // 풀 수준 직접 쿼리(파라미터 없이 멀티스테이트먼트 DDL 등).
+    query(text, params) { return pgPool.query(text, params); },
+    on(...a) { pgPool.on(...a); return this; },
+    end() { return pgPool.end(); },
+  };
+}
+
+// 기동 대기 확보: 스키마 보장 쿼리로 실제 커넥션을 강제. 최대 3회, 시도 간 3초.
 async function connectWithRetry(retries = 3, delay = 3000) {
   let lastErr;
   for (let i = 0; i < retries; i++) {
+    const pgPool = new Pool(getPoolConfig());
     try {
-      return await new sql.ConnectionPool(getConfig()).connect();
+      await ensureSchema(pgPool);
+      return makeShimPool(pgPool);
     } catch (err) {
       lastErr = err;
+      try { await pgPool.end(); } catch { /* ignore */ }
       if (!isRetryable(err) || i === retries - 1) throw err;
       await new Promise(r => setTimeout(r, delay));
     }
@@ -121,15 +203,12 @@ async function connectWithRetry(retries = 3, delay = 3000) {
   throw lastErr;
 }
 
-// 프로세스당 단일 풀 재사용. 풀이 죽으면(error/close) 캐시를 비워 자가 치유.
+// 프로세스당 단일 풀 재사용. 풀이 죽으면(error) 캐시를 비워 자가 치유.
 export function getPool() {
   if (!poolPromise) {
     poolPromise = connectWithRetry()
       .then(pool => {
-        if (pool && typeof pool.on === "function") {
-          pool.on("error", () => { poolPromise = undefined; });
-          pool.on("close", () => { poolPromise = undefined; });
-        }
+        pool.on("error", () => { poolPromise = undefined; });
         return pool;
       })
       .catch(err => { poolPromise = undefined; throw err; });
@@ -137,59 +216,67 @@ export function getPool() {
   return poolPromise;
 }
 
-// cl_meetings 테이블 보장 (멱등). ALTER ADD 가드로 스키마 드리프트에도 SELECT가 깨지지 않게 한다.
+// ── 스키마 자동생성 (Postgres, 멱등) ─────────────────────────────
+//  pg 단순 쿼리(파라미터 없음)는 멀티스테이트먼트 허용 → CREATE/INDEX를 한 번에.
+//  (mssql 시절 매 쿼리에 ${CREATE_*} 프리픽스로 self-heal 하던 것을, getPool 보장으로 대체.)
+
+// 회의록 메타+전문 검색 테이블.
 export const CREATE_TABLE = `
-  IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='cl_meetings')
-  CREATE TABLE cl_meetings (
-    id INT IDENTITY PRIMARY KEY,
-    title NVARCHAR(300), keywords NVARCHAR(500),
-    summary NVARCHAR(MAX), transcript NVARCHAR(MAX),
-    transcript_chars INT, summary_chars INT,
-    drive_file_id NVARCHAR(200), drive_link NVARCHAR(500),
-    audio_file NVARCHAR(300), audio_session NVARCHAR(100),
-    created_at DATETIME2 DEFAULT SYSUTCDATETIME()
+  CREATE TABLE IF NOT EXISTS cl_meetings (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT,
+    keywords TEXT,
+    summary TEXT,
+    transcript TEXT,
+    transcript_chars INTEGER,
+    summary_chars INTEGER,
+    drive_file_id TEXT,
+    drive_link TEXT,
+    audio_file TEXT,
+    audio_session TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
   );
-  IF COL_LENGTH('cl_meetings','keywords') IS NULL ALTER TABLE cl_meetings ADD keywords NVARCHAR(500);
-  IF COL_LENGTH('cl_meetings','summary') IS NULL ALTER TABLE cl_meetings ADD summary NVARCHAR(MAX);
-  IF COL_LENGTH('cl_meetings','transcript') IS NULL ALTER TABLE cl_meetings ADD transcript NVARCHAR(MAX);
-  IF COL_LENGTH('cl_meetings','transcript_chars') IS NULL ALTER TABLE cl_meetings ADD transcript_chars INT;
-  IF COL_LENGTH('cl_meetings','summary_chars') IS NULL ALTER TABLE cl_meetings ADD summary_chars INT;
-  IF COL_LENGTH('cl_meetings','drive_file_id') IS NULL ALTER TABLE cl_meetings ADD drive_file_id NVARCHAR(200);
-  IF COL_LENGTH('cl_meetings','drive_link') IS NULL ALTER TABLE cl_meetings ADD drive_link NVARCHAR(500);
-  IF COL_LENGTH('cl_meetings','audio_file') IS NULL ALTER TABLE cl_meetings ADD audio_file NVARCHAR(300);
-  IF COL_LENGTH('cl_meetings','audio_session') IS NULL ALTER TABLE cl_meetings ADD audio_session NVARCHAR(100);`;
+  CREATE INDEX IF NOT EXISTS idx_cl_meetings_created_at ON cl_meetings (created_at);`;
 
-// 백그라운드 전사 작업 테이블 (B1). JSON 컬럼은 항상 JSON.stringify로 쓰고 read 시 try/catch 파싱.
+// 백그라운드 전사 작업 테이블. JSON 컬럼은 항상 JSON.stringify로 쓰고 read 시 parseJson.
 export const CREATE_JOBS = `
-  IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='transcribe_jobs')
-  CREATE TABLE transcribe_jobs (
-    job_id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    user_id NVARCHAR(128),
-    language NVARCHAR(16),
-    model NVARCHAR(64),
-    status NVARCHAR(32) NOT NULL DEFAULT 'processing',
-    chunks_total INT NOT NULL DEFAULT 0,
-    chunks_done INT NOT NULL DEFAULT 0,
-    chunk_refs NVARCHAR(MAX),
-    segments_json NVARCHAR(MAX),
-    speakers_json NVARCHAR(MAX),
-    summary_json NVARCHAR(MAX),
-    audio_ref NVARCHAR(MAX),
-    title NVARCHAR(300),
-    error_msg NVARCHAR(MAX),
-    created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
-    updated_at DATETIME2 DEFAULT SYSUTCDATETIME()
+  CREATE TABLE IF NOT EXISTS transcribe_jobs (
+    job_id BIGSERIAL PRIMARY KEY,
+    user_id TEXT,
+    language TEXT,
+    model TEXT,
+    status TEXT NOT NULL DEFAULT 'processing',
+    chunks_total INTEGER NOT NULL DEFAULT 0,
+    chunks_done INTEGER NOT NULL DEFAULT 0,
+    chunk_refs TEXT,
+    segments_json TEXT,
+    speakers_json TEXT,
+    summary_json TEXT,
+    audio_ref TEXT,
+    title TEXT,
+    error_msg TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
   );
-  IF COL_LENGTH('transcribe_jobs','segments_json') IS NULL ALTER TABLE transcribe_jobs ADD segments_json NVARCHAR(MAX);
-  IF COL_LENGTH('transcribe_jobs','speakers_json') IS NULL ALTER TABLE transcribe_jobs ADD speakers_json NVARCHAR(MAX);
-  IF COL_LENGTH('transcribe_jobs','summary_json') IS NULL ALTER TABLE transcribe_jobs ADD summary_json NVARCHAR(MAX);
-  IF COL_LENGTH('transcribe_jobs','audio_ref') IS NULL ALTER TABLE transcribe_jobs ADD audio_ref NVARCHAR(MAX);
-  IF COL_LENGTH('transcribe_jobs','title') IS NULL ALTER TABLE transcribe_jobs ADD title NVARCHAR(300);`;
+  CREATE INDEX IF NOT EXISTS idx_transcribe_jobs_status ON transcribe_jobs (status);
+  CREATE INDEX IF NOT EXISTS idx_transcribe_jobs_created_at ON transcribe_jobs (created_at);`;
 
-// JSON 컬럼 안전 파싱 (B1: 파싱 버그 방지)
+let schemaReady = false;
+async function ensureSchema(pgPool) {
+  if (schemaReady) return;
+  await pgPool.query(CREATE_TABLE);
+  await pgPool.query(CREATE_JOBS);
+  schemaReady = true;
+}
+
+// JSON 컬럼 안전 파싱
 export function parseJson(v, fallback) {
   if (v == null) return fallback;
+  if (typeof v === "object") return v; // 이미 파싱됨(방어)
   try { const o = JSON.parse(v); return o == null ? fallback : o; } catch (e) { return fallback; }
 }
 
-export { sql };
+// mssql 호환 타입 마커. 모든 속성 접근은 호출 가능한 no-op 마커를 반환(값으로도, 함수로도 사용 가능).
+//  예: sql.Int / sql.BigInt(값), sql.NVarChar(128) / sql.NVarChar(sql.MAX)(호출).
+const _typeMarker = function typeMarker() { return _typeMarker; };
+export const sql = new Proxy({}, { get() { return _typeMarker; } });
