@@ -1,7 +1,7 @@
 // api/drive-search.js - Google Drive 내 회의록/전사 텍스트 파일 검색
 import { getDrive, searchText } from "./_drive.js";
 
-export const config = { maxDuration: 15 };
+// (Vercel maxDuration 제거 — OCI 서버는 시간 제한 없음)
 
 export default async function handler(req, res) {
   if (!process.env.GOOGLE_REFRESH_TOKEN) {

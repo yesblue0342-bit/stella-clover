@@ -1,7 +1,7 @@
 // api/audio.js - Drive에 저장된 음원(청크/원본)을 스트리밍 (A3 재진입 재생). 기존 Drive 인증 재사용.
 import { getDrive, downloadFileById } from "./_drive.js";
 
-export const config = { maxDuration: 30 };
+// (Vercel maxDuration 제거 — OCI 서버는 시간 제한 없음)
 
 export default async function handler(req, res) {
   const id = String(req.query.id || "").trim();

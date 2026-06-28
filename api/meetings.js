@@ -1,8 +1,7 @@
 // api/meetings.js - 회의록 목록 + 키워드 검색 + 상세
-import { getPool, sql, CREATE_TABLE } from "./_db.js";
+import { getPool, sql, CREATE_TABLE, hasDbConfig } from "./_db.js";
 
-// connectionTimeout 30s + auto-pause 재개 재시도를 함수 한도 안에 수용하려면 여유 필요.
-export const config = { maxDuration: 60 };
+// (Vercel maxDuration 제거 — OCI 서버는 시간 제한 없음)
 
 export default async function handler(req, res) {
   // 어떤 경로로 응답하든 JSON 헤더를 명시 (프런트 방어 파싱과 함께 평문 노출 방지)
@@ -10,8 +9,8 @@ export default async function handler(req, res) {
   // 목록/상세가 브라우저·CDN 캐시로 오래된 채 보이는 것(최신화 안 됨) 방지.
   res.setHeader("Cache-Control", "no-store, max-age=0");
 
-  if (!process.env.CL_DB_SV || !process.env.CL_DB_USR || !process.env.CL_DB_PW) {
-    return res.status(200).json({ ok: false, items: [], message: "DB 환경변수 미설정 (CL_DB_USR/CL_DB_PW 확인)" });
+  if (!hasDbConfig()) {
+    return res.status(200).json({ ok: false, items: [], message: "DB 환경변수 미설정 (DB_SERVER/DB_NAME/DB_USER/DB_PASSWORD 또는 CL_DB_* 확인)" });
   }
 
   const action = req.query.action || "list";

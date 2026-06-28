@@ -1,7 +1,7 @@
 // api/autosave.js - 작성 중 회의록을 Google Drive(Drafts)에 자동 저장
 import { getDrive, ensurePath, uploadText } from "./_drive.js";
 
-export const config = { maxDuration: 30 };
+// (Vercel maxDuration 제거 — OCI 서버는 시간 제한 없음)
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });

@@ -6,7 +6,8 @@ import path from "path";
 import { getDrive, ensurePath, uploadBuffer } from "./_drive.js";
 import { transcribeBuffer } from "./_stt.js";
 
-export const config = { api: { bodyParser: false }, maxDuration: 300 };
+// (Vercel config 제거 — OCI 서버에선 시간 제한 없음. multipart는 server.mjs가 body 파싱을 건너뛰어
+//  formidable이 원시 스트림을 직접 읽는다.)
 
 // SAP 프롬프트·재시도·교정은 _stt.js(→ lib/sttTerms.js)로 단일화. 여기선 transcribeBuffer만 호출.
 

@@ -1,0 +1,12 @@
+# 시크릿/로컬
+.env
+.env.local
+*.log
+
+# 의존성/빌드
+node_modules/
+package-lock.json
+
+# OS/에디터
+.DS_Store
+*.swp

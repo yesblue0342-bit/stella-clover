@@ -1,0 +1,59 @@
+name: Deploy to OCI
+
+# main에 push되면 OCI 우분투 서버(Docker)로 자동 재배포 — Vercel 대체.
+# 필요 시크릿(Settings → Secrets and variables → Actions):
+#   OCI_SSH_HOST   : OCI 서버 IP/호스트
+#   OCI_SSH_USER   : SSH 사용자 (예: ubuntu)
+#   OCI_SSH_KEY    : SSH 개인키(전체, -----BEGIN ... END-----)
+#   OCI_SSH_PORT   : (선택) SSH 포트, 기본 22
+#   OCI_APP_DIR    : (선택) 앱 경로, 기본 /opt/stella-clover
+# 시크릿 미설정 시 배포 단계는 건너뛰고 워크플로는 성공(green)으로 종료.
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-oci-clover
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check OCI secrets configured
+        id: chk
+        env:
+          H: ${{ secrets.OCI_SSH_HOST }}
+          K: ${{ secrets.OCI_SSH_KEY }}
+        run: |
+          if [ -n "$H" ] && [ -n "$K" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OCI 배포 시크릿(OCI_SSH_HOST/OCI_SSH_KEY) 미설정 — 배포 건너뜀. 등록 시 push마다 자동 배포됩니다."
+          fi
+
+      - name: SSH deploy (git pull + 도커 재빌드/재실행)
+        if: steps.chk.outputs.ready == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.OCI_SSH_HOST }}
+          username: ${{ secrets.OCI_SSH_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          port: ${{ secrets.OCI_SSH_PORT || '22' }}
+          command_timeout: 20m
+          script: |
+            set -e
+            APP_DIR="${{ secrets.OCI_APP_DIR }}"
+            APP_DIR="${APP_DIR:-/opt/stella-clover}"
+            echo "▶ deploy to $APP_DIR"
+            cd "$APP_DIR"
+            # repo가 root 소유로 clone된 경우 보정 (OCI ubuntu는 무비번 sudo)
+            sudo -n chown -R "$(id -un):$(id -gn)" "$APP_DIR" 2>/dev/null || true
+            git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+            git fetch --all --prune
+            git reset --hard origin/main
+            bash deploy/run-stella-oci.sh
+            echo "✅ OCI 재배포 완료"

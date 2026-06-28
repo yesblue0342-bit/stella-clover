@@ -1,53 +1,112 @@
-// api/_db.js - Azure SQL 공유 연결 풀 + 테이블 정의 (ESM)
+// api/_db.js - SQL Server 공유 연결 풀 + 테이블 정의 (ESM)
+//
+// ※ Vercel/Azure 서버리스 의존 제거 — OCI 우분투 서버(Docker)에서 구동.
+//   DB는 OCI 동거 MSSQL 컨테이너(stella-mssql, 자체서명 TLS) 또는 기존 Azure SQL 모두 지원.
+//   TLS는 호스트로 자동 판별: 컨테이너/사설망=자체서명 허용, Azure(*.database.windows.net)=검증 유지.
+//   환경변수: DB_SERVER/DB_NAME/DB_USER/DB_PASSWORD (별칭으로 기존 CL_DB_* 도 그대로 인식).
 import sql from "mssql";
 
 let poolPromise;
 
-function required(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing environment variable: ${name}`);
-  return value;
+function firstEnv(...names) {
+  for (const name of names) {
+    const v = process.env[name];
+    if (v && String(v).trim()) return String(v).trim();
+  }
+  return "";
+}
+
+// env 불리언: 미설정이면 undefined, 설정되면 true/false.
+function envBool(...names) {
+  for (const name of names) {
+    const v = process.env[name];
+    if (v != null && String(v).trim() !== "") return /^(1|true|yes|on)$/i.test(String(v).trim());
+  }
+  return undefined;
+}
+
+// Azure SQL 호스트(*.database.windows.net)인가
+function isAzureServer(server) {
+  return /\.database\.windows\.net$/i.test(String(server || "").trim());
+}
+
+// 로컬/사설/컨테이너 호스트인가 — OCI 동거 MSSQL(자체서명)은 여기로 분류.
+//  localhost·127.0.0.1·점 없는 컨테이너명(stella-mssql 등)·사설/CGNAT IPv4 대역.
+function isLocalOrPrivateServer(server) {
+  const s = String(server || "").trim().toLowerCase();
+  if (!s) return false;
+  if (s === "localhost" || s === "127.0.0.1" || s === "::1") return true;
+  if (!s.includes(".")) return true;                         // 컨테이너/내부 호스트명
+  if (/^10\./.test(s)) return true;
+  if (/^192\.168\./.test(s)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(s)) return true;
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(s)) return true; // Tailscale/CGNAT
+  return false;
+}
+
+// TLS 옵션 — 호스트 자동 판별, 환경변수(DB_ENCRYPT / DB_TRUST_SERVER_CERT)로 오버라이드 가능.
+export function resolveTlsOptions(server) {
+  const azure = isAzureServer(server);
+  const local = isLocalOrPrivateServer(server);
+
+  let encrypt = true;
+  let trustServerCertificate = azure ? false : local ? true : false;
+
+  const encOverride = envBool("DB_ENCRYPT", "SQL_ENCRYPT");
+  if (encOverride !== undefined) encrypt = encOverride;
+  const trustOverride = envBool("DB_TRUST_SERVER_CERT", "DB_TRUST_CERT", "SQL_TRUST_SERVER_CERTIFICATE");
+  if (trustOverride !== undefined) trustServerCertificate = trustOverride;
+
+  return { encrypt, trustServerCertificate, enableArithAbort: true };
+}
+
+function getServer() {
+  return firstEnv("DB_SERVER", "SQL_SERVER", "CL_DB_SV").replace(/^tcp:/i, "").split(",")[0];
 }
 
 function getConfig() {
+  const server = getServer();
+  const database = firstEnv("DB_NAME", "DB_DATABASE", "SQL_DATABASE", "CL_DB_NM");
+  const user = firstEnv("DB_USER", "SQL_USER", "CL_DB_USR");
+  const password = firstEnv("DB_PASSWORD", "SQL_PASSWORD", "CL_DB_PW");
+  const port = Number(firstEnv("DB_PORT", "SQL_PORT") || 1433);
+
+  const missing = [];
+  if (!server) missing.push("DB_SERVER(CL_DB_SV)");
+  if (!database) missing.push("DB_NAME(CL_DB_NM)");
+  if (!user) missing.push("DB_USER(CL_DB_USR)");
+  if (!password) missing.push("DB_PASSWORD(CL_DB_PW)");
+  if (missing.length) throw new Error("DB 환경변수 누락: " + missing.join(", "));
+
   return {
-    server: required("CL_DB_SV"),
-    database: required("CL_DB_NM"),
-    user: required("CL_DB_USR"),
-    password: required("CL_DB_PW"),
-    options: {
-      encrypt: true,
-      trustServerCertificate: false,
-      enableArithAbort: true
-    },
-    // Azure SQL 서버리스(auto-pause) 티어는 비활성 후 첫 연결 시 DB 재개(resume)에
-    // 수십 초가 걸린다. 짧은 타임아웃이면 재개 전에 끊겨 실패하므로 30초로 상향.
+    server, database, user, password, port,
+    options: resolveTlsOptions(server),
+    // 콜드 스타트/컨테이너 기동 대기 흡수: 30초.
     connectionTimeout: 30000,
     requestTimeout: 30000,
-    pool: {
-      max: 3,
-      min: 0,
-      idleTimeoutMillis: 30000
-    }
+    pool: { max: 5, min: 0, idleTimeoutMillis: 30000 }
   };
 }
 
+// DB 환경변수가 충분히 설정됐는지(라우트 가드용). 시크릿 값은 노출하지 않음.
+export function hasDbConfig() {
+  return !!(getServer() && firstEnv("DB_NAME", "DB_DATABASE", "SQL_DATABASE", "CL_DB_NM") &&
+            firstEnv("DB_USER", "SQL_USER", "CL_DB_USR") && firstEnv("DB_PASSWORD", "SQL_PASSWORD", "CL_DB_PW"));
+}
+
 // 인증 오류(로그인 실패)는 재시도해도 소용없으므로 즉시 중단.
-// 타임아웃/연결 오류(특히 auto-pause DB 재개 대기)만 재시도 대상.
+// 타임아웃/연결 오류(컨테이너 기동·콜드스타트 대기)만 재시도 대상.
 function isRetryable(err) {
   const code = (err && (err.code || (err.originalError && err.originalError.code))) || "";
   const num = (err && (err.number || (err.originalError && err.originalError.number))) || 0;
-  // 로그인 실패(ELOGIN / SQL error 18456)는 재시도 금지
-  if (code === "ELOGIN" || num === 18456) return false;
-  const retryCodes = ["ETIMEOUT", "ETIMEDOUT", "ESOCKET", "ECONNCLOSED", "ECONNREFUSED", "EHOSTUNREACH", "ENOTOPEN"];
+  if (code === "ELOGIN" || num === 18456) return false; // 로그인 실패 재시도 금지
+  const retryCodes = ["ETIMEOUT", "ETIMEDOUT", "ESOCKET", "ECONNCLOSED", "ECONNREFUSED", "EHOSTUNREACH", "ENOTOPEN", "ENOTFOUND"];
   if (retryCodes.includes(code)) return true;
-  // 메시지 기반 폴백 (예: "Failed to connect ... in 30000ms")
   const msg = String((err && err.message) || "");
   return /timeout|failed to connect|socket hang up|getaddrinfo|connection is closed/i.test(msg);
 }
 
-// 일시정지된 DB가 깨어날 시간을 확보: 최대 3회, 시도 간 3초 대기.
-// 재시도 불가(인증) 오류는 즉시, 마지막 시도 실패도 throw.
+// 기동 대기 확보: 최대 3회, 시도 간 3초. 인증 오류는 즉시, 마지막 실패도 throw.
 async function connectWithRetry(retries = 3, delay = 3000) {
   let lastErr;
   for (let i = 0; i < retries; i++) {
@@ -62,21 +121,23 @@ async function connectWithRetry(retries = 3, delay = 3000) {
   throw lastErr;
 }
 
-// 서버리스 인스턴스당 단일 풀을 재사용한다.
-// (요청마다 connect/close 하면 동시 요청 시 풀이 닫혀 오류가 난다.)
+// 프로세스당 단일 풀 재사용. 풀이 죽으면(error/close) 캐시를 비워 자가 치유.
 export function getPool() {
   if (!poolPromise) {
     poolPromise = connectWithRetry()
-      .catch(err => {
-        poolPromise = undefined; // 실패 시 다음 요청에서 재시도
-        throw err;
-      });
+      .then(pool => {
+        if (pool && typeof pool.on === "function") {
+          pool.on("error", () => { poolPromise = undefined; });
+          pool.on("close", () => { poolPromise = undefined; });
+        }
+        return pool;
+      })
+      .catch(err => { poolPromise = undefined; throw err; });
   }
   return poolPromise;
 }
 
-// cl_meetings 테이블 보장 (멱등). 실제 사용 스키마와 일치.
-// ALTER ADD 가드로 스키마 드리프트(컬럼 누락)에도 SELECT가 깨지지 않게 한다.
+// cl_meetings 테이블 보장 (멱등). ALTER ADD 가드로 스키마 드리프트에도 SELECT가 깨지지 않게 한다.
 export const CREATE_TABLE = `
   IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='cl_meetings')
   CREATE TABLE cl_meetings (

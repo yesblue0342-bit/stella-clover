@@ -3,24 +3,14 @@
 //   GET  /api/jobs?id=N      : 상태/진행률/segments/speakers/summary
 //   GET  /api/jobs?action=list&userId= : 사용자의 비종료(processing/summarizing) 작업 목록
 // 모든 경로 항상 JSON 반환(프런트 safeJson과 짝). Azure cold-start는 _db.js 재시도로 흡수.
-import { getPool, sql, CREATE_JOBS, parseJson } from "./_db.js";
+import { getPool, sql, CREATE_JOBS, parseJson, hasDbConfig } from "./_db.js";
+import { kick } from "../lib/jobs-runtime.js";
 
-export const config = { maxDuration: 30 };
-
-function baseUrl(req) {
-  const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
-  return `${proto}://${host}`;
-}
-// worker를 비차단으로 트리거 (응답 기다리지 않음)
-function triggerWorker(req, jobId) {
-  try { fetch(`${baseUrl(req)}/api/worker?id=${encodeURIComponent(jobId)}`, { method: "POST" }).catch(() => {}); }
-  catch (e) { /* best-effort */ }
-}
+// ※ Vercel 함수모델 제거 — worker를 HTTP로 자기재호출하지 않고 OCI 인프로세스 런타임(kick)에 위임.
 
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  if (!process.env.CL_DB_SV || !process.env.CL_DB_USR || !process.env.CL_DB_PW) {
+  if (!hasDbConfig()) {
     return res.status(200).json({ ok: false, message: "DB 환경변수 미설정" });
   }
   try {
@@ -49,7 +39,7 @@ export default async function handler(req, res) {
           OUTPUT INSERTED.job_id
           VALUES (@uid,@lang,@model,'processing',@ct,0,@refs,'[]',@aref,@title)`);
       const jobId = r.recordset[0].job_id;
-      triggerWorker(req, jobId);
+      kick(jobId); // 인프로세스 백그라운드 처리 시작(비차단). 즉시 job_id 반환.
       return res.status(200).json({ ok: true, job_id: jobId });
     }
 

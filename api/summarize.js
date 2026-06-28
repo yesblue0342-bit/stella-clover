@@ -4,7 +4,7 @@ import { getPool, sql } from "./_db.js";
 import { getDrive, ensurePath, uploadText, dateParts } from "./_drive.js";
 import { prepareTranscript, needsMapReduce, splitTranscript, buildMinutesSystemPrompt, buildPartialSystemPrompt, meetingDateFromName, resolveMeetingTitle } from "./_meeting.js";
 
-export const config = { maxDuration: 120 };
+// (Vercel maxDuration 제거 — OCI 서버는 시간 제한 없음. map-reduce 요약도 끝까지 수행.)
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
