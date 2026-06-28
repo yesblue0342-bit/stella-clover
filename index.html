@@ -664,7 +664,8 @@ async function generate(){
     const mins = Math.round(totalDuration/60);
     upProgress(10,'📤 서버 업로드','총 '+mins+'분 · '+chunks.length+'개 구간 업로드 중');
 
-    // 1) 각 청크를 서버(→Drive)에 업로드 → chunkRefs (백그라운드 잡 입력). 청크당 3회 재시도.
+    // 1) 각 청크를 서버(로컬 디스크)에 업로드 → chunkRefs (백그라운드 잡 입력). 청크당 3회 재시도.
+    //    ※ Drive 왕복 제거: Drive OAuth(invalid_client) 와 무관하게 전사가 동작한다.
     const chunkRefs=[];
     for(let i=0;i<chunks.length;i++){
       const durationSec = Math.min(CHUNK_SEC, Math.max(0, totalDuration - i*CHUNK_SEC)); // stride 기준(글로벌 offset 누적용)

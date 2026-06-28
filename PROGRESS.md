@@ -1,4 +1,16 @@
-# Stella Clover — 메타데이터 OCI Postgres 이관 (진행)
+# Stella Clover — 진행 기록
+
+## [2026-06-28] STT `invalid_client` 근본 수정 + Stella Flow 신규 앱 (완료, 브랜치 `claude/lucid-ptolemy-xx3viy`)
+- **STT 수정**: 청크를 Google Drive 왕복 → **로컬 디스크 저장**(`lib/chunkStore.js`). Drive OAuth(`invalid_client`) 와 무관하게 전사 동작.
+  - 변경: `chunk-upload.js`·`jobs-runtime.js`·`audio.js`·`cleanup.js`·`deploy/run-stella-oci.sh`(볼륨)·`.env.example`·`.gitignore`.
+- **Stella Flow**(`/flow`): 표/엑셀→편집형 Mermaid 플로우차트 + 이미지 Figure Lab. Drive `stellagpt/flow` 저장 + OCI `cl_flows` 메타.
+  - 신규: `flow/index.html`·`api/flow.js`·`lib/flowBuild.js`. 추가: `_drive.ensurePathRooted/folderLink`·`_db.cl_flows`·`server.mjs(/flow)`·`sw v14`.
+- **검증**: 단위 56 PASS/2 skip, 서버 스모크(청크 로컬 왕복·flow structure/save·audio 화이트리스트) OK, 적대적 리뷰 4차원 → 핵심 수정 반영.
+- 상세: `TEST_RESULTS.md` 최상단 참조.
+
+---
+
+# (이전) 메타데이터 OCI Postgres 이관
 
 > 직전 PROGRESS.md(STT 정확도)는 별개 작업 → 본 이관 작업 기록으로 대체
 > (STT 작업물은 git 이력 + lib/sttTerms·sttMerge·test 에 그대로 존재).

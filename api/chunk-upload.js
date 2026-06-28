@@ -1,19 +1,19 @@
-// api/chunk-upload.js - 오디오 청크 1개를 Google Drive에 업로드하고 file id를 돌려준다.
-//   POST multipart: audio(청크 파일) + sessionId, index, durationSec, ext
+// api/chunk-upload.js - 오디오 청크 1개를 서버 로컬 디스크에 저장하고 ref id 를 돌려준다.
+//   POST multipart: audio(청크 파일) + sessionId, index, durationSec
 //   → { ok, id, index, durationSec, ext }
 //
-// 클라이언트는 청크를 분할(Web Audio)해 이 엔드포인트로 업로드 → 받은 id로 chunkRefs를 만들어
-// POST /api/jobs 에 넘긴다. worker(jobs-runtime)는 downloadFileById(id)로 청크를 다시 받아 전사한다.
-// 업로드만 하고 전사는 안 함(=백그라운드 잡으로 위임). 청크는 cleanup 크론이 10일 후 정리(Audio 폴더 공용).
+// ★ 변경(invalid_client 회귀 해소): 과거에는 청크를 Google Drive 에 업로드했으나, Drive OAuth 가 어긋나면
+//   `invalid_client` 로 전사가 통째로 막혔다. OCI 는 장수 프로세스 + 동일 파일시스템이므로 Drive 왕복이 불필요.
+//   → lib/chunkStore 로 로컬 저장(=Drive 인증과 무관하게 동작). 워커(jobs-runtime)가 같은 디스크에서 읽는다.
+//   청크는 cleanup 크론이 보존기간 후 정리. (최종 회의록 텍스트만 Drive 백업; 그 단계는 실패해도 graceful.)
 import formidable from "formidable";
 import fs from "fs";
 import path from "path";
-import { getDrive, ensurePath, uploadBuffer } from "./_drive.js";
+import { saveChunk } from "../lib/chunkStore.js";
 
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   if (req.method !== "POST") return res.status(405).json({ ok: false, message: "POST only" });
-  if (!process.env.GOOGLE_REFRESH_TOKEN) return res.status(200).json({ ok: false, message: "Google Drive 미설정" });
 
   const form = formidable({ maxFileSize: 30 * 1024 * 1024, keepExtensions: true });
   form.parse(req, async (err, fields, files) => {
@@ -33,15 +33,12 @@ export default async function handler(req, res) {
 
     try {
       const buffer = fs.readFileSync(filePath);
-      const drive = getDrive();
-      const folderId = await ensurePath(drive, ["Audio"]); // cleanup 크론과 동일 폴더(10일 후 정리)
-      const up = await uploadBuffer(drive, folderId, `${sessionId}_${String(index).padStart(3, "0")}${ext}`, "audio/wav", buffer);
+      const id = await saveChunk({ sessionId, index, ext, buffer });
       fs.unlink(filePath, () => {});
-      if (!up || !up.id) return res.status(200).json({ ok: false, message: "Drive 업로드 응답에 id가 없습니다." });
-      return res.status(200).json({ ok: true, id: up.id, index, durationSec, ext });
+      return res.status(200).json({ ok: true, id, index, durationSec, ext });
     } catch (e) {
       fs.unlink(filePath, () => {});
-      return res.status(200).json({ ok: false, message: "청크 업로드 실패: " + e.message });
+      return res.status(200).json({ ok: false, message: "청크 저장 실패: " + e.message });
     }
   });
 }

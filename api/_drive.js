@@ -24,19 +24,31 @@ async function ensureFolder(drive, name, parentId) {
   return c.data.id;
 }
 
-async function getRoot(drive) {
-  const q = `name='${esc(CLOVER_FOLDER)}' and mimeType='${FOLDER_MIME}' and trashed=false`;
+// 임의 이름의 Drive 최상위 폴더 보장(없으면 생성). rootName 기본 stellaclover.
+async function getRoot(drive, rootName = CLOVER_FOLDER) {
+  const q = `name='${esc(rootName)}' and mimeType='${FOLDER_MIME}' and trashed=false`;
   const r = await drive.files.list({ q, fields: "files(id)", pageSize: 1 });
   if (r.data.files?.[0]) return r.data.files[0].id;
-  const c = await drive.files.create({ requestBody: { name: CLOVER_FOLDER, mimeType: FOLDER_MIME }, fields: "id" });
+  const c = await drive.files.create({ requestBody: { name: rootName, mimeType: FOLDER_MIME }, fields: "id" });
   return c.data.id;
 }
 
 // 경로 기반 폴더 보장: stellaclover/Meeting/2026/202606 → 최종 폴더 ID 반환
 export async function ensurePath(drive, parts) {
-  let p = await getRoot(drive);
+  return ensurePathRooted(drive, CLOVER_FOLDER, parts);
+}
+
+// 임의 최상위 폴더를 루트로 경로 보장. 예) ensurePathRooted(drive,"stellagpt",["flow","20260628_1030_제목"])
+//  → stellagpt/flow/20260628_1030_제목 폴더 ID. (Flow 결과를 stellaclover 가 아닌 stellagpt 하위에 저장)
+export async function ensurePathRooted(drive, rootName, parts) {
+  let p = await getRoot(drive, rootName);
   for (const part of parts.filter(Boolean)) p = await ensureFolder(drive, part, p);
   return p;
+}
+
+// Drive 폴더 웹 링크(공유/열람용). API 호출 없이 표준 폴더 URL 구성.
+export function folderLink(folderId) {
+  return folderId ? `https://drive.google.com/drive/folders/${folderId}` : null;
 }
 
 export async function uploadText(drive, folderId, fileName, content) {

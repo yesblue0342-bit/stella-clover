@@ -261,11 +261,30 @@ export const CREATE_JOBS = `
   CREATE INDEX IF NOT EXISTS idx_transcribe_jobs_status ON transcribe_jobs (status);
   CREATE INDEX IF NOT EXISTS idx_transcribe_jobs_created_at ON transcribe_jobs (created_at);`;
 
+// Stella Flow 메타데이터 테이블 (플로우차트/피규어). 실데이터는 Drive(stellagpt/flow), 여기는 메타+검색.
+export const CREATE_FLOWS = `
+  CREATE TABLE IF NOT EXISTS cl_flows (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT,
+    source_type TEXT,
+    mermaid TEXT,
+    node_count INTEGER DEFAULT 0,
+    edge_count INTEGER DEFAULT 0,
+    drive_folder_id TEXT,
+    drive_folder_link TEXT,
+    drive_file_id TEXT,
+    drive_link TEXT,
+    user_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_cl_flows_created_at ON cl_flows (created_at);`;
+
 let schemaReady = false;
 async function ensureSchema(pgPool) {
   if (schemaReady) return;
   await pgPool.query(CREATE_TABLE);
   await pgPool.query(CREATE_JOBS);
+  await pgPool.query(CREATE_FLOWS);
   schemaReady = true;
 }
 

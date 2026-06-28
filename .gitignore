@@ -7,6 +7,9 @@
 node_modules/
 package-lock.json
 
+# 런타임 로컬 데이터(오디오 청크 등) — 커밋 금지
+data/
+
 # OS/에디터
 .DS_Store
 *.swp

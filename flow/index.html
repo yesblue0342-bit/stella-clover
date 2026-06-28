@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stella Flow — 플로우차트 & 피규어 랩</title>
+<meta name="theme-color" content="#1a4731">
+<meta name="description" content="엑셀/표를 깔끔한 플로우차트로, 이미지를 깔끔한 피규어로 — Stella Flow">
+<style>
+:root{
+  --bg:#eef3ee; --surface:#ffffff; --surface2:#f9fafb; --border:#e5e7eb;
+  --text:#111827; --text2:#6b7280; --text3:#9ca3af;
+  --brand:#1a4731; --brand2:#2d6a4f; --accent:#34d399; --accentbg:#ecfdf5;
+  --danger:#dc2626; --dangerbg:#fff5f5; --shadow:0 2px 12px rgba(0,0,0,.07);
+  --chip:#f0fff4;
+}
+[data-theme=dark]{
+  --bg:#0f1713; --surface:#16211b; --surface2:#1c2a22; --border:#2a3a30;
+  --text:#e6efe9; --text2:#9fb3a7; --text3:#7d8f84;
+  --brand:#34d399; --brand2:#5eead4; --accent:#34d399; --accentbg:#10241b;
+  --danger:#f87171; --dangerbg:#2a1414; --shadow:0 2px 14px rgba(0,0,0,.4);
+  --chip:#15281e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+img{max-width:100%}
+button{font-family:inherit;cursor:pointer}
+.appbar{position:sticky;top:0;z-index:30;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}
+.appbar-in{max-width:1040px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:7px;font-weight:900;font-size:1.08rem;letter-spacing:-.3px;white-space:nowrap}
+.logo .leaf{font-size:1.25rem}
+.tabs{display:flex;gap:4px;margin-left:6px}
+.tab{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;padding:7px 14px;font-size:.86rem;font-weight:700;min-height:38px}
+.tab.active{background:#fff;color:var(--brand)}
+.spacer{flex:1}
+.iconbtn{border:none;background:rgba(255,255,255,.16);color:#fff;border-radius:10px;width:40px;height:38px;font-size:1.05rem}
+.linkbtn{border:none;background:rgba(255,255,255,.16);color:#fff;border-radius:10px;padding:7px 12px;font-size:.82rem;font-weight:700;text-decoration:none;min-height:38px;display:flex;align-items:center}
+.wrap{max-width:1040px;margin:0 auto;padding:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
+.card h2{font-size:1rem;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.muted{color:var(--text2);font-size:.85rem}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{border:none;border-radius:11px;padding:11px 16px;font-weight:800;font-size:.9rem;background:var(--brand);color:#fff;min-height:44px}
+.btn.sec{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn.accent{background:linear-gradient(135deg,var(--brand),var(--brand2))}
+.btn:disabled{opacity:.5}
+.drop{border:2px dashed var(--border);border-radius:14px;padding:26px 16px;text-align:center;color:var(--text2);background:var(--surface2);transition:.15s}
+.drop.over{border-color:var(--accent);background:var(--accentbg);color:var(--text)}
+textarea,input[type=text]{width:100%;border:1px solid var(--border);border-radius:11px;padding:10px;background:var(--surface2);color:var(--text);font-size:.9rem}
+textarea{min-height:150px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.45;resize:vertical}
+.flowview{background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px;overflow:auto;min-height:160px;display:flex;justify-content:center;align-items:center}
+[data-theme=dark] .flowview{background:#0c130f}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:780px){.grid2{grid-template-columns:1fr}}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--border);background:var(--chip);border-radius:999px;padding:6px 12px;font-size:.82rem;font-weight:700;color:var(--brand)}
+.errbox{display:none;background:var(--dangerbg);border:1px solid var(--danger);color:var(--danger);border-radius:11px;padding:11px 13px;font-size:.86rem;margin-top:10px;white-space:pre-wrap}
+.okbox{display:none;background:var(--accentbg);border:1px solid var(--accent);color:var(--brand);border-radius:11px;padding:11px 13px;font-size:.86rem;margin-top:10px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#111827;color:#fff;padding:11px 18px;border-radius:12px;font-size:.88rem;opacity:0;pointer-events:none;transition:.25s;z-index:60}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+label.fld{display:block;font-size:.82rem;font-weight:700;color:var(--text2);margin:10px 0 5px}
+canvas{max-width:100%;border:1px solid var(--border);border-radius:12px;background:#fff}
+.slider{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--text2)}
+.slider input{flex:1}
+select{border:1px solid var(--border);border-radius:10px;padding:8px;background:var(--surface2);color:var(--text);font-size:.85rem}
+.tablewrap{max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:10px}
+table.prev{border-collapse:collapse;width:100%;font-size:.8rem}
+table.prev td{border:1px solid var(--border);padding:4px 8px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+table.prev tr:first-child td{background:var(--surface2);font-weight:700}
+.hide{display:none}
+.flowlist .it{display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid var(--border);border-radius:11px;padding:9px 12px;margin-top:8px;font-size:.85rem}
+.flowlist a{color:var(--brand2);font-weight:700;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="appbar"><div class="appbar-in">
+  <div class="logo"><span class="leaf">🔀</span> Stella Flow</div>
+  <div class="tabs">
+    <button class="tab active" id="tabFlowBtn" onclick="switchTab('flow')">표→플로우</button>
+    <button class="tab" id="tabFigBtn" onclick="switchTab('fig')">이미지 다듬기</button>
+  </div>
+  <div class="spacer"></div>
+  <a class="linkbtn" href="/" title="Stella Clover 로">🍀 Clover</a>
+  <button class="iconbtn" id="themeBtn" onclick="toggleTheme()" title="다크 모드">🌙</button>
+</div></div>
+
+<div class="wrap">
+
+<!-- ══════════ 표 → 플로우차트 ══════════ -->
+<div id="tabFlow">
+  <div class="card">
+    <h2>📥 표/엑셀 불러오기</h2>
+    <p class="muted" style="margin-bottom:10px">엑셀(.xlsx/.xls)·CSV 파일을 첨부하거나 표를 붙여넣으세요. <b>단계 한 줄씩</b>(세로 목록) 또는 <b>from · to · 라벨</b> 3열 형식을 권장합니다.</p>
+    <div class="drop" id="drop">
+      파일을 여기로 드래그하거나 클릭해서 선택<br><span class="muted">(.xlsx, .xls, .csv)</span>
+      <input type="file" id="file" accept=".xlsx,.xls,.csv,text/csv" class="hide">
+    </div>
+    <label class="fld">또는 표 붙여넣기 (엑셀에서 복사 → 붙여넣기 / CSV)</label>
+    <textarea id="pasteBox" placeholder="요구사항 분석&#10;설계&#10;개발&#10;테스트&#10;배포&#10;&#10;또는&#10;from,to,label&#10;시작,검토,&#10;검토,배포,승인&#10;검토,반려,거절"></textarea>
+    <div class="tablewrap hide" id="prevWrap" style="margin-top:10px"></div>
+    <div class="row" style="margin-top:12px">
+      <select id="dir" title="방향">
+        <option value="TD">↓ 세로(TD)</option>
+        <option value="LR">→ 가로(LR)</option>
+      </select>
+      <label class="slider" style="gap:5px"><input type="checkbox" id="useAi" checked style="flex:0"> ✨ AI로 정리</label>
+      <button class="btn accent" id="buildBtn" onclick="buildFlow()">플로우차트 생성</button>
+    </div>
+    <div class="errbox" id="errFlow"></div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none">
+    <h2>🧩 플로우차트 <span class="muted" id="flowMeta"></span></h2>
+    <div class="grid2">
+      <div>
+        <label class="fld">Mermaid 정의 (직접 편집 가능 — 입력 시 자동 반영)</label>
+        <textarea id="mmText" oninput="scheduleRender()"></textarea>
+      </div>
+      <div>
+        <label class="fld">미리보기</label>
+        <div class="flowview" id="flowView">생성하면 여기 표시됩니다.</div>
+      </div>
+    </div>
+    <label class="fld">제목</label>
+    <input type="text" id="flowTitle" placeholder="플로우 제목 (Drive 폴더명에 사용)">
+    <div class="row" style="margin-top:12px">
+      <button class="btn sec" onclick="copyMermaid()">📋 정의 복사</button>
+      <button class="btn sec" onclick="exportSvg()">⬇ SVG</button>
+      <button class="btn sec" onclick="exportPng('flow')">⬇ PNG</button>
+      <button class="btn" id="saveFlowBtn" onclick="saveFlow()">☁️ Drive 저장</button>
+    </div>
+    <div class="okbox" id="okFlow"></div>
+  </div>
+</div>
+
+<!-- ══════════ 이미지 다듬기 (Figure Lab) ══════════ -->
+<div id="tabFig" class="hide">
+  <div class="card">
+    <h2>🖼️ 이미지 다듬기 (Figure Lab)</h2>
+    <p class="muted" style="margin-bottom:10px">캡처 이미지를 <b>붙여넣기(Ctrl+V)</b> 하거나 파일을 첨부하면, 여백을 다듬고 깔끔한 프레임/배경으로 정리해 줍니다.</p>
+    <div class="drop" id="dropImg">
+      이미지를 드래그·붙여넣기(Ctrl+V) 하거나 클릭해서 선택
+      <input type="file" id="fileImg" accept="image/*" class="hide">
+    </div>
+    <div id="figControls" class="hide" style="margin-top:12px">
+      <div class="grid2">
+        <div>
+          <label class="slider"><input type="checkbox" id="trim" checked onchange="renderFig()"> 자동 여백 트림</label>
+          <div class="slider">여백 <input type="range" id="pad" min="0" max="120" value="32" oninput="renderFig()"></div>
+          <div class="slider">밝기 <input type="range" id="bright" min="50" max="150" value="100" oninput="renderFig()"></div>
+          <div class="slider">대비 <input type="range" id="contrast" min="50" max="150" value="100" oninput="renderFig()"></div>
+          <div class="slider">둥근모서리 <input type="range" id="radius" min="0" max="48" value="14" oninput="renderFig()"></div>
+        </div>
+        <div>
+          <label class="fld">배경</label>
+          <select id="bgsel" onchange="renderFig()">
+            <option value="#ffffff">흰색</option>
+            <option value="transparent">투명</option>
+            <option value="#f8fafc">연회색</option>
+            <option value="#0f1713">다크</option>
+          </select>
+          <label class="slider" style="margin-top:8px"><input type="checkbox" id="shadow" checked onchange="renderFig()"> 그림자 프레임</label>
+          <label class="fld">캡션 (선택)</label>
+          <input type="text" id="caption" placeholder="그림 설명" oninput="renderFig()">
+        </div>
+      </div>
+    </div>
+    <div class="errbox" id="errFig"></div>
+  </div>
+
+  <div class="card" id="figResult" style="display:none">
+    <h2>✨ 결과</h2>
+    <div style="text-align:center"><canvas id="figCanvas"></canvas></div>
+    <label class="fld">제목</label>
+    <input type="text" id="figTitle" placeholder="피규어 제목 (Drive 폴더명에 사용)">
+    <div class="row" style="margin-top:12px">
+      <button class="btn sec" onclick="exportPng('fig')">⬇ PNG</button>
+      <button class="btn" id="saveFigBtn" onclick="saveFig()">☁️ Drive 저장</button>
+    </div>
+    <div class="okbox" id="okFig"></div>
+  </div>
+</div>
+
+<!-- 최근 저장 -->
+<div class="card">
+  <h2>🗂️ 최근 저장 <button class="btn sec" style="padding:5px 10px;min-height:0;font-size:.78rem" onclick="loadFlows()">새로고침</button></h2>
+  <div class="flowlist" id="flowList"><div class="muted">불러오는 중…</div></div>
+</div>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+/* ═══════════ 공통 ═══════════ */
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fmtErr(e){ if(!e)return '알 수 없는 오류'; const m=String(e.message||e);
+  if(e.name==='TypeError'&&/failed to fetch|networkerror|load failed/i.test(m)) return '네트워크 연결 실패(서버 도달 불가).';
+  return (e.name&&e.name!=='Error')?(e.name+': '+m):m; }
+async function safeJson(r){ const t=await r.text(); try{return JSON.parse(t);}catch(e){
+  throw new Error(r.ok?'서버 응답 형식 오류':'서버 오류('+r.status+')'+(t?': '+t.slice(0,80):'')); } }
+let _tt=null; function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('show'),1900);}
+function showErr(id,m){const e=$(id);e.textContent=m;e.style.display='block';}
+function hideErr(id){$(id).style.display='none';}
+function showOk(id,html){const e=$(id);e.innerHTML=html;e.style.display='block';}
+function userId(){ try{var p=JSON.parse(localStorage.getItem('cl_profile')||'{}');return p.email||p.name||'anon';}catch(e){return 'anon';} }
+
+/* 테마 (Clover와 공유: localStorage cl_theme) */
+function applyTheme(){const t=localStorage.getItem('cl_theme')|| (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+  document.documentElement.setAttribute('data-theme',t);$('themeBtn').textContent=t==='dark'?'☀️':'🌙';}
+function toggleTheme(){const cur=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';localStorage.setItem('cl_theme',cur);applyTheme();
+  try{ mermaid.initialize({ startOnLoad:false, securityLevel:'strict', theme:(cur==='dark'?'dark':'default'), flowchart:{ htmlLabels:false, useMaxWidth:true } }); if($('mmText')&&$('mmText').value.trim()) doRender(); }catch(e){}}
+applyTheme();
+
+/* 탭 */
+function switchTab(t){
+  $('tabFlow').classList.toggle('hide',t!=='flow'); $('tabFig').classList.toggle('hide',t!=='fig');
+  $('tabFlowBtn').classList.toggle('active',t==='flow'); $('tabFigBtn').classList.toggle('active',t==='fig');
+}
+
+/* Mermaid init */
+try{ mermaid.initialize({ startOnLoad:false, securityLevel:'strict', theme: (document.documentElement.getAttribute('data-theme')==='dark'?'dark':'default'), flowchart:{ htmlLabels:false, useMaxWidth:true } }); }catch(e){}
+
+/* ═══════════ 표 → 플로우차트 ═══════════ */
+let _rows=null, _renderTimer=null, _lastSvg='';
+
+function setupDrop(dropId, fileId, onFiles){
+  const d=$(dropId), f=$(fileId);
+  d.addEventListener('click',()=>f.click());
+  f.addEventListener('change',e=>{ if(e.target.files&&e.target.files[0]) onFiles(e.target.files[0]); });
+  ['dragenter','dragover'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.remove('over');}));
+  d.addEventListener('drop',e=>{ const file=e.dataTransfer.files&&e.dataTransfer.files[0]; if(file) onFiles(file); });
+}
+
+async function onTableFile(file){
+  hideErr('errFlow');
+  try{
+    const name=(file.name||'').toLowerCase();
+    if(name.endsWith('.csv')||file.type==='text/csv'){
+      const text=await file.text(); _rows=parseDelimitedClient(text);
+    } else {
+      const buf=await file.arrayBuffer();
+      const wb=XLSX.read(buf,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      _rows=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false,defval:''}).map(r=>r.map(c=>String(c==null?'':c)));
+    }
+    if(!_rows||!_rows.length){ showErr('errFlow','표에서 데이터를 찾지 못했습니다.'); return; }
+    if(!$('flowTitle').value) $('flowTitle').value=(file.name||'flow').replace(/\.[^.]+$/,'');
+    renderPreview(); toast('표 '+_rows.length+'행 불러옴');
+  }catch(e){ showErr('errFlow','파일 읽기 실패: '+fmtErr(e)); }
+}
+
+// 클라이언트용 간단 CSV/TSV 파서(서버 lib/flowBuild.parseDelimited와 동일 규칙)
+function parseDelimitedClient(text){
+  const src=String(text||'').replace(/\r\n?/g,'\n'); if(!src.trim())return [];
+  const delim=src.includes('\t')?'\t':',';
+  const rows=[]; let row=[],field='',inQ=false;
+  for(let i=0;i<src.length;i++){const ch=src[i];
+    if(inQ){ if(ch==='"'){ if(src[i+1]==='"'){field+='"';i++;} else inQ=false; } else field+=ch; }
+    else if(ch==='"') inQ=true;
+    else if(ch===delim){ row.push(field);field=''; }
+    else if(ch==='\n'){ row.push(field);rows.push(row);row=[];field=''; }
+    else field+=ch;
+  }
+  row.push(field);rows.push(row);
+  return rows.filter(r=>r.some(c=>String(c).trim()!==''));
+}
+
+function renderPreview(){
+  const w=$('prevWrap'); if(!_rows||!_rows.length){w.classList.add('hide');return;}
+  const rows=_rows.slice(0,8);
+  w.innerHTML='<table class="prev"><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+esc(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+  w.classList.remove('hide');
+}
+
+let _nodeCount=0, _edgeCount=0;
+async function buildFlow(){
+  hideErr('errFlow');
+  const paste=$('pasteBox').value.trim();
+  if(paste && (!_rows||!_rows.length)) _rows=parseDelimitedClient(paste);
+  if(!_rows||!_rows.length){ showErr('errFlow','먼저 엑셀/CSV 파일을 첨부하거나 표를 붙여넣으세요.'); return; }
+  const useAi=$('useAi').checked;
+  $('buildBtn').disabled=true; $('buildBtn').textContent='생성 중…';
+  try{
+    // useAi=false 면 서버가 OpenAI 호출을 건너뛰고 로컬 변환만 반환(불필요한 유료 호출 방지, 규칙#2).
+    const body={ rows:_rows, direction:$('dir').value, useAi };
+    const r=await fetch('/api/flow?action=structure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await safeJson(r);
+    if(!d.ok) throw new Error(d.message||'생성 실패');
+    let mm=(!useAi && d.local)?d.local.mermaid:d.mermaid, meta='';
+    _nodeCount=d.local?d.local.nodeCount:0; _edgeCount=d.local?d.local.edgeCount:0;
+    if(d.usedAi && useAi){ meta='✨ AI 정리됨'; if(d.title&&!$('flowTitle').value)$('flowTitle').value=d.title; }
+    else if(d.local){ meta='노드 '+d.local.nodeCount+' · 간선 '+d.local.edgeCount; }
+    if(d.warnings&&d.warnings.aiError) meta+=' · AI 건너뜀(로컬 변환)';
+    $('mmText').value=mm; $('flowMeta').textContent=meta;
+    $('resultCard').style.display='block';
+    await doRender();
+    $('resultCard').scrollIntoView({behavior:'smooth'});
+  }catch(e){ showErr('errFlow','생성 실패: '+fmtErr(e)); }
+  finally{ $('buildBtn').disabled=false; $('buildBtn').textContent='플로우차트 생성'; }
+}
+
+function scheduleRender(){ clearTimeout(_renderTimer); _renderTimer=setTimeout(doRender,450); }
+let _mid=0;
+async function doRender(){
+  const def=$('mmText').value.trim(); const view=$('flowView');
+  if(!def){ view.textContent='정의가 비어 있습니다.'; return; }
+  try{
+    const { svg }=await mermaid.render('m'+(++_mid), def);
+    view.innerHTML=svg; _lastSvg=svg;
+  }catch(e){ view.innerHTML='<div style="color:var(--danger);font-size:.85rem">렌더 오류: '+esc(e.message||e)+'</div>'; _lastSvg=''; }
+}
+
+function copyMermaid(){ navigator.clipboard.writeText($('mmText').value).then(()=>toast('정의 복사됨'),()=>toast('복사 실패')); }
+
+function svgEl(){ return $('flowView').querySelector('svg'); }
+function exportSvg(){
+  if(!_lastSvg){ toast('먼저 생성하세요'); return; }
+  const blob=new Blob([_lastSvg],{type:'image/svg+xml'}); dl(URL.createObjectURL(blob),(figName('flow'))+'.svg',true);
+}
+
+// SVG → PNG (캔버스). foreignObject 미사용(htmlLabels:false)이라 canvas 비오염 → toDataURL 가능.
+async function svgToPng(svgStr, scale){
+  scale=scale||2;
+  return new Promise((resolve,reject)=>{
+    const el=new DOMParser().parseFromString(svgStr,'image/svg+xml').documentElement;
+    // useMaxWidth:true 면 width="100%" 라 parseFloat 가 100 이 되어 100px 로 찌그러짐 → viewBox 를 먼저 읽는다.
+    const vb=el.viewBox&&el.viewBox.baseVal;
+    const attrW=parseFloat(el.getAttribute('width')), attrH=parseFloat(el.getAttribute('height'));
+    let w=(vb&&vb.width)|| (Number.isFinite(attrW)?attrW:0) ||800;
+    let h=(vb&&vb.height)|| (Number.isFinite(attrH)?attrH:0) ||600;
+    // 과대 차트 다운스케일(저장 페이로드 보호: 25mb 본문 한도 대비 최대변 ~2000px)
+    const cap=2000; const eff=Math.min(scale, cap/Math.max(w,h)); scale=eff>0?eff:scale;
+    // SVG 에 명시 픽셀 크기를 박아 Image 가 올바른 해상도로 래스터화되게 한다(width="100%" 0px 래스터 방지).
+    el.setAttribute('width', String(Math.round(w))); el.setAttribute('height', String(Math.round(h)));
+    const fixed=new XMLSerializer().serializeToString(el);
+    const img=new Image();
+    const blob=new Blob([fixed],{type:'image/svg+xml;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    img.onload=()=>{
+      const c=document.createElement('canvas'); c.width=Math.round(w*scale); c.height=Math.round(h*scale);
+      const ctx=c.getContext('2d'); ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,c.width,c.height);
+      ctx.drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/png'));
+    };
+    img.onerror=(e)=>{ URL.revokeObjectURL(url); reject(new Error('PNG 변환 실패')); };
+    img.src=url;
+  });
+}
+
+async function exportPng(kind){
+  try{
+    let data;
+    if(kind==='flow'){ if(!_lastSvg){toast('먼저 생성하세요');return;} data=await svgToPng(_lastSvg,2); }
+    else { data=$('figCanvas').toDataURL('image/png'); }
+    dl(data, figName(kind)+'.png');
+  }catch(e){ toast('PNG 내보내기 실패: '+fmtErr(e)); }
+}
+
+function figName(kind){ const t=(kind==='fig'?$('figTitle').value:$('flowTitle').value)||kind; return t.replace(/[\\/:*?"<>|]/g,'').slice(0,40)||kind; }
+function dl(href,name,revoke){ const a=document.createElement('a');a.href=href;a.download=name;document.body.appendChild(a);a.click();a.remove(); if(revoke)setTimeout(()=>URL.revokeObjectURL(href),1500); }
+
+async function saveFlow(){
+  const mm=$('mmText').value.trim(); if(!mm){ showErr('errFlow','저장할 정의가 없습니다.'); return; }
+  $('saveFlowBtn').disabled=true; $('saveFlowBtn').textContent='저장 중…'; $('okFlow').style.display='none';
+  try{
+    let png=''; try{ if(_lastSvg) png=await svgToPng(_lastSvg,2); }catch(e){}
+    const body={ title:$('flowTitle').value||'flow', mermaid:mm, svg:_lastSvg||'', pngBase64:png,
+                 sourceType:'flowchart', nodeCount:_nodeCount, edgeCount:_edgeCount, userId:userId() };
+    const r=await fetch('/api/flow?action=save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await safeJson(r);
+    if(!d.ok) throw new Error(d.message||'저장 실패');
+    reportSave('okFlow', d);
+    loadFlows();
+  }catch(e){ showErr('errFlow','저장 실패: '+fmtErr(e)); }
+  finally{ $('saveFlowBtn').disabled=false; $('saveFlowBtn').textContent='☁️ Drive 저장'; }
+}
+
+function reportSave(okId, d){
+  let html='✅ 저장 완료.';
+  if(d.driveFolderLink) html+=' <a href="'+esc(d.driveFolderLink)+'" target="_blank" rel="noopener">📁 Drive 폴더 열기</a>';
+  if(d.warnings){
+    const w=[]; if(d.warnings.driveError)w.push('Drive: '+d.warnings.driveError); if(d.warnings.dbError)w.push('DB: '+d.warnings.dbError);
+    if(w.length) html+='<br><span class="muted">⚠️ 일부 저장 경고 — '+esc(w.join(' / '))+'</span>';
+  }
+  showOk(okId, html); toast('저장 완료');
+}
+
+/* ═══════════ 이미지 다듬기 ═══════════ */
+let _img=null;
+function onImgFile(file){
+  hideErr('errFig');
+  if(!file||!/^image\//.test(file.type)){ showErr('errFig','이미지 파일이 아닙니다.'); return; }
+  const url=URL.createObjectURL(file); const im=new Image();
+  im.onload=()=>{ _img=im; $('figControls').classList.remove('hide'); $('figResult').style.display='block';
+    if(!$('figTitle').value) $('figTitle').value=(file.name||'figure').replace(/\.[^.]+$/,'');
+    renderFig(); URL.revokeObjectURL(url); $('figResult').scrollIntoView({behavior:'smooth'}); };
+  im.onerror=()=>{ showErr('errFig','이미지를 불러오지 못했습니다.'); URL.revokeObjectURL(url); };
+  im.src=url;
+}
+
+// 자동 여백 트림: 가장자리 단색(흰/투명) 영역 잘라내기
+function trimBox(ctx,w,h){
+  let data; try{ data=ctx.getImageData(0,0,w,h).data; }catch(e){ return {x:0,y:0,w,h}; }
+  const at=(x,y)=>{const i=(y*w+x)*4;return [data[i],data[i+1],data[i+2],data[i+3]];};
+  const bg=at(0,0);
+  const same=(p)=>{ if(p[3]<8&&bg[3]<8)return true; return Math.abs(p[0]-bg[0])<12&&Math.abs(p[1]-bg[1])<12&&Math.abs(p[2]-bg[2])<12&&Math.abs(p[3]-bg[3])<12; };
+  let top=0,bottom=h-1,left=0,right=w-1,f;
+  f=true; for(top=0;top<h&&f;top++){for(let x=0;x<w;x++){if(!same(at(x,top))){f=false;break;}}} top=Math.max(0,top-1);
+  f=true; for(bottom=h-1;bottom>top&&f;bottom--){for(let x=0;x<w;x++){if(!same(at(x,bottom))){f=false;break;}}} bottom=Math.min(h-1,bottom+1);
+  f=true; for(left=0;left<w&&f;left++){for(let y=0;y<h;y++){if(!same(at(left,y))){f=false;break;}}} left=Math.max(0,left-1);
+  f=true; for(right=w-1;right>left&&f;right--){for(let y=0;y<h;y++){if(!same(at(right,y))){f=false;break;}}} right=Math.min(w-1,right+1);
+  if(right<=left||bottom<=top) return {x:0,y:0,w,h};
+  return {x:left,y:top,w:right-left+1,h:bottom-top+1};
+}
+
+function roundRect(ctx,x,y,w,h,r){ r=Math.min(r,w/2,h/2); ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+function renderFig(){
+  if(!_img) return;
+  // 1) 원본을 임시 캔버스에 → 트림 박스 계산
+  const tmp=document.createElement('canvas'); tmp.width=_img.naturalWidth; tmp.height=_img.naturalHeight;
+  const tctx=tmp.getContext('2d',{willReadFrequently:true}); tctx.drawImage(_img,0,0);
+  let box={x:0,y:0,w:tmp.width,h:tmp.height};
+  if($('trim').checked) box=trimBox(tctx,tmp.width,tmp.height);
+  const pad=+$('pad').value, radius=+$('radius').value, bg=$('bgsel').value;
+  const cap=$('caption').value.trim(); const capH=cap?34:0;
+  const scale=Math.min(1, 1400/Math.max(box.w,box.h)); // 과대 이미지 다운스케일(저장 페이로드 보호)
+  const iw=Math.round(box.w*scale), ih=Math.round(box.h*scale);
+  const W=iw+pad*2, H=ih+pad*2+capH;
+  const c=$('figCanvas'); c.width=W; c.height=H; const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  if(bg!=='transparent'){ ctx.fillStyle=bg; ctx.fillRect(0,0,W,H); }
+  // 그림자 프레임
+  if($('shadow').checked){ ctx.save(); ctx.shadowColor='rgba(0,0,0,.22)'; ctx.shadowBlur=22; ctx.shadowOffsetY=8;
+    ctx.fillStyle=bg==='transparent'?'#ffffff':bg; roundRect(ctx,pad-1,pad-1,iw+2,ih+2,radius); ctx.fill(); ctx.restore(); }
+  // 밝기/대비 필터로 이미지 그리기(라운드 클립)
+  ctx.save(); roundRect(ctx,pad,pad,iw,ih,radius); ctx.clip();
+  ctx.filter='brightness('+$('bright').value+'%) contrast('+$('contrast').value+'%)';
+  ctx.drawImage(tmp, box.x,box.y,box.w,box.h, pad,pad,iw,ih);
+  ctx.restore(); ctx.filter='none';
+  if(cap){ ctx.fillStyle=(bg==='#0f1713')?'#cfe8db':'#374151'; ctx.font='600 15px system-ui,sans-serif'; ctx.textAlign='center';
+    ctx.fillText(cap, W/2, H-12); }
+}
+
+async function saveFig(){
+  if(!_img){ showErr('errFig','저장할 이미지가 없습니다.'); return; }
+  $('saveFigBtn').disabled=true; $('saveFigBtn').textContent='저장 중…'; $('okFig').style.display='none';
+  try{
+    const png=$('figCanvas').toDataURL('image/png');
+    const body={ title:$('figTitle').value||'figure', mermaid:'', pngBase64:png, sourceType:'figure', userId:userId() };
+    const r=await fetch('/api/flow?action=save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await safeJson(r);
+    if(!d.ok) throw new Error(d.message||'저장 실패');
+    reportSave('okFig', d); loadFlows();
+  }catch(e){ showErr('errFig','저장 실패: '+fmtErr(e)); }
+  finally{ $('saveFigBtn').disabled=false; $('saveFigBtn').textContent='☁️ Drive 저장'; }
+}
+
+/* 붙여넣기(Ctrl+V)로 이미지 받기 */
+window.addEventListener('paste',e=>{
+  const items=(e.clipboardData||{}).items||[];
+  for(const it of items){ if(it.type&&it.type.indexOf('image')===0){ const f=it.getAsFile(); if(f){ switchTab('fig'); onImgFile(f); e.preventDefault(); return; } } }
+});
+
+/* 최근 저장 목록 */
+async function loadFlows(){
+  const list=$('flowList');
+  try{
+    const r=await fetch('/api/flow?action=list&userId='+encodeURIComponent(userId()),{cache:'no-store'}); const d=await safeJson(r);
+    const items=d.items||[];
+    if(!d.ok){ list.innerHTML='<div class="muted">'+esc(d.message||'목록을 불러오지 못했습니다.')+'</div>'; return; }
+    if(!items.length){ list.innerHTML='<div class="muted">아직 저장된 플로우가 없습니다.</div>'; return; }
+    list.innerHTML=items.map(it=>{
+      const link=it.drive_folder_link||it.drive_link||'';
+      const when=(it.created_at||'').toString().slice(0,16).replace('T',' ');
+      return '<div class="it"><div><b>'+esc(it.title||'(제목 없음)')+'</b> <span class="muted">· '+esc(it.source_type||'')+' · 노드 '+(it.node_count||0)+' · '+esc(when)+'</span></div>'+
+             (link?'<a href="'+esc(link)+'" target="_blank" rel="noopener">열기 ↗</a>':'')+'</div>';
+    }).join('');
+  }catch(e){ list.innerHTML='<div class="muted">목록 로드 실패: '+esc(fmtErr(e))+'</div>'; }
+}
+
+/* 초기화 */
+setupDrop('drop','file',onTableFile);
+setupDrop('dropImg','fileImg',onImgFile);
+$('pasteBox').addEventListener('input',()=>{ _rows=null; }); // 붙여넣기 수정 시 파일 캐시 무효화
+loadFlows();
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
+</script>
+</body>
+</html>

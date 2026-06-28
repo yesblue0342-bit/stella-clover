@@ -1,5 +1,47 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-06-28] STT `invalid_client` 근본 수정 + Stella Flow 신규 앱 (브랜치 `claude/lucid-ptolemy-xx3viy`)
+
+### A. 음성 변환 "청크 업로드 실패: invalid_client" 근본 수정
+- **근본 원인**: 오디오 청크를 Google Drive 에 업로드(`chunk-upload`)하고 워커가 다시 내려받아(`jobs-runtime`) 전사하는 구조였다. Drive OAuth(client_id/secret/refresh_token) 가 어긋나면 토큰 교환이 `invalid_client` 로 거절 → **전사가 시작도 못 하고 전부 실패**.
+- **수정**: OCI 는 장수 프로세스 + 동일 파일시스템이므로 Drive 왕복이 불필요. 청크를 **서버 로컬 디스크**에 저장(`lib/chunkStore.js`)하고 워커가 직접 읽도록 변경. **Drive 인증 상태와 무관하게 전사 동작**.
+  - `chunk-upload.js`: Drive 업로드 → 로컬 저장(ref `local:<sess>/<NNN>.wav`). `jobs-runtime.js`/`audio.js`: 로컬 ref 는 디스크, 레거시 Drive ref 는 Drive(무중단 호환).
+  - `deploy/run-stella-oci.sh`: 도커 명명 볼륨 `stella-clover-data:/app/data` 마운트(재배포에도 청크 유지, `recover()` 와 짝). `CHUNK_DIR` 기본 `/app/data/chunks`.
+  - `cleanup.js`: 로컬 정리(주) + 레거시 Drive 정리(베스트에포트). 최종 회의록 Drive 백업은 기존대로 실패해도 graceful(warnings).
+
+### B. Stella Flow 신규 앱 (`/flow`)
+- **표→플로우차트**: 엑셀(.xlsx, SheetJS)·CSV·붙여넣기 → `lib/flowBuild.js`(순수 변환) / `api/flow.js?action=structure`(AI gpt-4o-mini 정리, 실패·옵트아웃 시 로컬 폴백) → 편집 가능한 Mermaid + 라이브 렌더 → PNG/SVG/복사.
+- **이미지 다듬기(Figure Lab)**: 붙여넣기/드래그 → 캔버스(여백 트림·패딩·밝기/대비·라운드·그림자·캡션, 1400px 다운스케일) → PNG.
+- **저장**: `?action=save` → Drive `stellagpt/flow/<생성시각_제목>`(생성마다 새 폴더) + OCI `cl_flows` 메타. Drive·DB 어느 쪽이 실패해도 나머지 저장(둘 다 실패 시에만 `ok:false`).
+- 인프라 재사용(신규 키 0): OpenAI/Drive/Postgres 공용. `api/_drive.js`(`ensurePathRooted`/`folderLink`), `api/_db.js`(`cl_flows`), `server.mjs`(`/flow` rewrite), `sw.js` v14.
+
+### 테스트 결과 (샌드박스, Node 22)
+| # | 항목 | 결과 |
+|---|------|------|
+| 1 | `node --check` 변경 api/lib/server + 인라인 JS `new Function` | **전부 OK** ✅ |
+| 2 | `node --test test/*.test.js`(기존 + 신규 chunkStore 6 + flowBuild 11) | **56 PASS / 2 skip(라이브 DB) / 0 fail** ✅ |
+| 3 | 서버 부팅 → `GET /flow` 200(text/html), `/api/flow?action=structure` 유효 Mermaid JSON | ✅ |
+| 4 | **chunk-upload → 로컬 저장 → /api/audio 재생** 바이트 일치(왕복) | ✅ |
+| 5 | chunk-upload 무파일 → graceful JSON("음성 청크가 없습니다") — **invalid_client 경로 없음** | ✅ |
+| 6 | flow save(Drive·DB 미설정) → `ok:false` + message(거짓 "저장 완료" 없음) | ✅ |
+| 7 | structure `useAi:false` → OpenAI 미호출(usedAi:false) | ✅ |
+| 8 | /api/audio 임의 Drive id(미소유) → 404 JSON(confused-deputy 차단) | ✅ |
+| 9 | flow save 8MB 초과 png → 400 JSON | ✅ |
+| 10 | 시크릿 스캔 | 0 ✅ |
+| 11 | **적대적 코드리뷰**(4 에이전트: STT 정확성·보안·flow 백엔드·flow 프런트) | 13건 발견 → **핵심 전부 반영** ✅ |
+
+### 적대적 리뷰에서 수정한 항목
+- **[high] PNG 깨짐**: `useMaxWidth:true` 로 SVG `width="100%"` → `parseFloat`=100px 로 찌그러짐. → **viewBox 우선** + 명시 픽셀 크기 직렬화 + 최대변 2000px 클램프.
+- **[high→정책] flow delete/detail IDOR**: `id`만으로 삭제/조회. → `user_id` 스코핑(클라이언트 식별자, best-effort) + 목록도 userId 스코핑. ※ 앱 전역 인증부재 모델(meetings.js 동일)은 사설 단일사용자 전제 — 한계로 명시.
+- **[med] flow save 거짓 성공**: Drive·DB 둘 다 실패해도 `ok:true`. → 실제 영속 여부로 `ok` 판정.
+- **[med] 메타 누락**: 저장 시 nodeCount/edgeCount 미전송 → 목록 항상 0. → 카운트 캡처·전송.
+- **[med] 규칙#2(청구)**: `AI 미사용` 체크해도 OpenAI 호출됨. → `useAi` 플래그 전송, 서버가 false 면 호출 생략.
+- **[med] audio confused-deputy**: 임의 Drive id 스트리밍. → 레거시 ref 는 `transcribe_jobs.chunk_refs` 화이트리스트 검증 후에만 Drive 접근(+ MIME 확장자 기반).
+- **[low] cleanup**: mtime 단위 삭제로 진행 중 잡 청크 삭제 위험 → **세션 최신 mtime** 기준으로 세션 단위 보존/삭제.
+- **[low] pngBase64 디코드 전 상한** 8MB, **다크 토글 시 Mermaid 재테마**, 중복 `_rows` 정리.
+- **[low/보류] CSP `unsafe-inline`+`https:`**: 앱 전역과 동일(인덱스 포함) — 기능 영향 없음, SRI/origin 핀은 후속 하드닝으로 보류.
+
+
 ## [2026-06-28] Vercel 제거 → OCI 이관 + 백그라운드 전사 클라이언트 연동 (브랜치 `claude/stella-search-zero-results-21mqvz`)
 
 ### 변경 요약
