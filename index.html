@@ -902,7 +902,7 @@ async function loadMyJobs(){
 function resumeOneJob(el){
   var jobId=el.getAttribute('data-jobid'); if(!jobId) return;
   var meta=getActiveJobs().filter(function(x){return String(x.jobId)===String(jobId);})[0];
-  if(!meta){ meta={jobId:jobId, title:'작업 '+jobId, filename:'recording.webm', fileDate:'', lang:_selectedLang, sessionId:'', startedAt:Date.now()}; addActiveJob(meta); }
+  if(!meta){ meta={jobId:jobId, title:'작업 '+jobId, filename:'recording.webm', fileDate:'', lang:_selectedLang, sessionId:'resume_'+jobId, startedAt:Date.now()}; addActiveJob(meta); } // 결정적 sessionId → cl_meetings 멱등 가드 유효
   setStep(1,'done'); setStep(2,'done'); setStep(3,'active'); $('genBtn').disabled=true;
   trackJob(jobId, meta);
   try{$('step3').scrollIntoView({behavior:'smooth'});}catch(e){}
