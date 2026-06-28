@@ -20,6 +20,13 @@
 | 7 | index.html 인라인 JS `new Function` 파싱 | **0 errors** ✅ |
 | 8 | 순수함수: computeOffsetSec / TLS(stella-mssql=trust, azure=verify) / hasDbConfig | ✅ |
 | 9 | 시크릿 스캔 | 0 ✅ |
+| 10 | **적대적 코드리뷰**(18 에이전트, 4 차원 + 검증 패스) | 14건 발견 / **10건 확정**(high 2·med 7·low 1) → **전부 수정** ✅ |
+| 11 | 수정 후 재검증: node --check / 키없이 import 9·9 / 인라인 JS / JSON 에러핸들러·graceful 요약 | ✅ |
+
+### 적대적 리뷰에서 수정한 핵심 버그
+- **[high] cl_meetings 중복**(탭 재진입/멀티탭에서 finalize 2회) → summarize INSERT `audio_session` 멱등 가드 + 클라이언트 낙관적 제거.
+- **[high] gpt-4o-*-transcribe 빈 전사**(워커가 segments만 저장, text 폐기) → text를 세그먼트로 합성.
+- [med] server.mjs JSON 에러 핸들러(잘못된 본문도 JSON), OpenAI 지연 생성(키 없을 때 graceful), 워커 finalize try/catch(에러 마킹), 폴링 무한루프/동시실행/not-found 오인 가드. [low] OVERLAP_SEC=0(경계 중복 전사 제거).
 
 ### 한계 (정직)
 - DB/Drive/OpenAI 자격증명은 배포 환경에만 존재 → 실제 업로드→전사→요약 end-to-end는 샌드박스 실행 불가. 어댑터/라우팅/가드/부팅·인라인 JS·순수로직까지 정적+런타임 검증.
