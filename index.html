@@ -636,13 +636,14 @@ function removeActiveJob(jobId){ setActiveJobs(getActiveJobs().filter(function(x
 async function generate(){
   const audio=currentAudioFile||recordedBlob;
   if(!audio){showErr('음성 파일을 선택하거나 녹음해주세요.');return;}
+  if(Object.keys(_jobTimers).length){ showErr('진행 중인 변환이 있습니다. 완료 후 다시 시도해주세요.'); return; } // 동시 실행 → 공유 렌더 상태 충돌 방지
   hideErr(); $('genBtn').disabled=true;
   resetSteps(); setStep(1,'done'); setStep(2,'active');
 
   try{
     upProgress(5,'🔧 음성 분석 중...','오디오를 변환하고 있습니다');
     const CHUNK_SEC = 120; // 120s × 16kHz × 2byte ≈ 3.84MB < 4.5MB
-    const OVERLAP_SEC = 3; // 경계 오버랩(123s ≈ 3.94MB)
+    const OVERLAP_SEC = 0; // 백그라운드 잡은 청크별 prevText로 경계 연속성 확보 → 오디오 오버랩 불필요(경계 중복 전사 방지)
     const sessionId = Date.now().toString(36) + Math.floor(Math.random()*1e6).toString(36);
     const { chunks, totalDuration } = await audioToChunks(audio, CHUNK_SEC, OVERLAP_SEC);
     const mins = Math.round(totalDuration/60);
@@ -696,16 +697,20 @@ async function generate(){
 function trackJob(jobId, meta){
   if(_jobTimers[jobId]) return; // 중복 폴링 방지
   setStep(1,'done'); setStep(2,'done'); setStep(3,'active');
-  let lastDone=-1, stuckSince=Date.now(), misses=0;
+  let lastDone=-1, stuckSince=Date.now(), notFound=0, errs=0;
   async function poll(){
     try{
       const r=await fetch('/api/jobs?id='+encodeURIComponent(jobId),{cache:'no-store'});
       const d=await safeJson(r);
-      if(!d.ok||!d.job){ // 잡 조회 실패 — 영구 부재(DB 리셋 등)면 5회 후 포기
-        if(++misses>=5){ delete _jobTimers[jobId]; removeActiveJob(jobId); setStep(3,'wait'); $('genBtn').disabled=false; showErr('변환 작업(ID '+jobId+')을 찾을 수 없어 중단했습니다.'); return; }
+      errs=0; // 응답 파싱 성공 → 연속 예외 카운터 리셋
+      if(!d.ok||!d.job){
+        // 진짜 부재(DB 리셋 등, "찾을 수 없")만 5회 후 포기. 일시 DB 오류는 부재로 오인하지 않고 계속 재시도.
+        if(/찾을 수 없/.test(d.message||'')){
+          if(++notFound>=5){ delete _jobTimers[jobId]; removeActiveJob(jobId); setStep(3,'wait'); $('genBtn').disabled=false; showErr('변환 작업(ID '+jobId+')을 찾을 수 없어 중단했습니다.'); return; }
+        }
         _jobTimers[jobId]=setTimeout(poll,4000); return;
       }
-      misses=0;
+      notFound=0;
       const j=d.job;
       if(j.status==='processing'){
         const pc=j.chunks_total?Math.round((j.chunks_done/j.chunks_total)*100):0;
@@ -725,12 +730,17 @@ function trackJob(jobId, meta){
       if(j.status==='done'){
         delete _jobTimers[jobId];
         const transcript=(j.segments||[]).map(function(s){return s&&s.text||'';}).join(' ').replace(/\s+/g,' ').trim();
-        await finalizeTranscript(transcript, meta);
-        removeActiveJob(jobId);
+        removeActiveJob(jobId);                 // 낙관적 제거: finalize 전에 빼서 중복 finalize/INSERT(탭 재진입·멀티탭) 방지
+        const ok=await finalizeTranscript(transcript, meta);
+        if(!ok){ addActiveJob(meta); }          // 요약 실패 → 다음 로드에서 재시도 가능하도록 복구
         return;
       }
       _jobTimers[jobId]=setTimeout(poll,3000);
-    }catch(e){ _jobTimers[jobId]=setTimeout(poll,5000); }
+    }catch(e){
+      // 네트워크/비JSON 응답(safeJson throw) → 연속 8회(~40s) 후 포기(genBtn 잠김 방지). active_jobs는 유지 → 재접속 시 자동 재개.
+      if(++errs>=8){ delete _jobTimers[jobId]; setStep(3,'wait'); $('genBtn').disabled=false; showErr('서버 응답 오류로 상태 확인을 중단했습니다. 새로고침하면 자동 재개됩니다.'); return; }
+      _jobTimers[jobId]=setTimeout(poll,5000);
+    }
   }
   poll();
 }
@@ -759,8 +769,10 @@ async function finalizeTranscript(fullText, meta){
       showErr('⚠️ 회의록은 생성됐으나 일부 저장 실패: '+w);
     }
     saveSession(); invalidateListCache(); loadMeetings();
+    return true;
   }catch(e){
     showErr('오류: '+fmtErr(e)); setStep(3,'wait');
+    return false;
   }finally{
     $('genBtn').disabled=false;
   }
@@ -772,6 +784,7 @@ function resumeActiveJobs(){
   if(!jobs.length) return;
   jobs.sort(function(a,b){return (b.startedAt||0)-(a.startedAt||0);});
   showToast('이전 변환을 이어서 진행합니다 ('+jobs.length+'건)');
+  $('genBtn').disabled=true; // 재개 중 새 변환 시작 차단(완료 시 finalize가 해제)
   jobs.forEach(function(m){ if(m&&m.jobId) trackJob(m.jobId, m); });
 }
 function showResult(){

@@ -4,7 +4,9 @@ import OpenAI, { toFile } from "openai";
 import { collapseRepeats, isHallucinatedSegment } from "./_meeting.js";
 import { SAP_PROMPT, applyCorrections } from "../lib/sttTerms.js";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// 지연 생성: 모듈 import 시점에 OPENAI_API_KEY가 없어도 throw하지 않게(핸들러의 graceful 가드가 동작).
+let _openai;
+export function getOpenAI() { if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); return _openai; }
 
 // SAP/ERP 전문용어 프롬프트 + 후처리 교정 사전은 lib/sttTerms.js로 단일화(중복 출처 제거).
 export { SAP_PROMPT };
@@ -52,7 +54,7 @@ export async function transcribeBuffer({ buffer, ext = ".wav", lang = "ko", mode
     const params = { file, model, prompt: SAP_PROMPT + (cleanPrev ? " " + cleanPrev : ""), temperature: 0 }; // 정확도: 결정적(greedy) 디코딩
     if (lang && lang !== "auto") params.language = lang;
     params.response_format = useTs ? "verbose_json" : "text";
-    const resp = await openai.audio.transcriptions.create(params);
+    const resp = await getOpenAI().audio.transcriptions.create(params);
 
     // 모델이 verbose_json을 안 줬거나 text만 온 경우(데이터 기반 판정) — 반복 환각 축소 + 교정.
     if (typeof resp === "string") return { text: applyCorrections(collapseRepeats(resp)), segments: [], duration: 0, hasTimestamps: false };
@@ -74,4 +76,4 @@ export async function transcribeBuffer({ buffer, ext = ".wav", lang = "ko", mode
   });
 }
 
-export { openai };
+// getOpenAI는 위에서 export됨(_analyze.js가 사용).

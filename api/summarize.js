@@ -6,7 +6,9 @@ import { prepareTranscript, needsMapReduce, splitTranscript, buildMinutesSystemP
 
 // (Vercel maxDuration 제거 — OCI 서버는 시간 제한 없음. map-reduce 요약도 끝까지 수행.)
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// 지연 생성: import 시점에 OPENAI_API_KEY 없어도 throw하지 않게.
+let _openai;
+function getOpenAI() { if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); return _openai; }
 
 async function retry(fn, times = 3, delay = 2000) {
   let lastErr;
@@ -41,7 +43,7 @@ export default async function handler(req, res) {
 
   // 1. AI 회의록 — 전사 전체를 입력으로 사용(잘림 없음). 너무 길면 map-reduce(부분요약→통합)로 누락 0.
   async function llmText(system, user, max_tokens) {
-    const resp = await openai.chat.completions.create({
+    const resp = await getOpenAI().chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       temperature: 0.2,
@@ -145,6 +147,9 @@ export default async function handler(req, res) {
         IF COL_LENGTH('cl_meetings','summary') IS NULL ALTER TABLE cl_meetings ADD summary NVARCHAR(MAX);
         IF COL_LENGTH('cl_meetings','transcript') IS NULL ALTER TABLE cl_meetings ADD transcript NVARCHAR(MAX);
         IF COL_LENGTH('cl_meetings','audio_session') IS NULL ALTER TABLE cl_meetings ADD audio_session NVARCHAR(100);
+        -- 멱등: 같은 audio_session(=백그라운드 잡 sessionId)이 이미 있으면 INSERT 생략(탭 재진입/멀티탭 중복 방지).
+        --        audio_session이 비면(@asession='') 가드가 거짓 → 항상 INSERT(기존 동작 보존).
+        IF NOT EXISTS (SELECT 1 FROM cl_meetings WHERE audio_session=@asession AND @asession<>'')
         INSERT INTO cl_meetings (title,keywords,summary,transcript,transcript_chars,summary_chars,drive_file_id,drive_link,audio_file,audio_session)
         VALUES (@title,@keywords,@summary,@transcript,@tc,@sc,@fid,@link,@audio,@asession)
       `);

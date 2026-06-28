@@ -1,5 +1,5 @@
 // api/_analyze.js - 화자 라벨(A4) + 구조화 요약(A5). gpt-4.1-mini, JSON 출력 + 파싱 방어.
-import { openai } from "./_stt.js";
+import { getOpenAI } from "./_stt.js";
 
 const MODEL = "gpt-4.1-mini";
 
@@ -11,7 +11,7 @@ function safeParse(s, fallback) {
 // A5: 구조화 요약(JSON) — 한 줄 요약 / 핵심 주제 / 결정사항 / 액션 아이템 / 키워드
 export async function structuredSummary(transcript, lang = "ko") {
   const outLang = lang === "en" ? "English" : (lang === "ja" ? "日本語" : "한국어");
-  const resp = await openai.chat.completions.create({
+  const resp = await getOpenAI().chat.completions.create({
     model: MODEL,
     response_format: { type: "json_object" },
     temperature: 0.2,
@@ -47,7 +47,7 @@ export async function labelSpeakers(segments) {
   const compact = segs.map((s, i) => `${i}: ${String(s.text || "").slice(0, 200)}`).join("\n").slice(0, 20000);
   let map = {};
   try {
-    const resp = await openai.chat.completions.create({
+    const resp = await getOpenAI().chat.completions.create({
       model: MODEL,
       response_format: { type: "json_object" },
       temperature: 0,

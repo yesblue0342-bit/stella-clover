@@ -98,6 +98,14 @@ app.use(express.static(ROOT, { extensions: ["html"], index: "index.html" }));
 // ── 404 ──────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).send("Not Found"));
 
+// ── 에러 핸들러(4-arg): 잘못된/과대 JSON 본문 등을 평문 대신 항상 JSON으로 (always-JSON 규칙) ──
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err && (err.status || err.statusCode) || 400;
+  res.status(status).json({ ok: false, error: String((err && err.message) || err) });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Stella Clover (OCI) listening on :${PORT}`);
   bootTasks();
