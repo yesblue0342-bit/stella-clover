@@ -304,6 +304,14 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
       <button class="new-btn" onclick="resetAll()">+ 새 변환</button>
       <div id="structCard"></div>
       <div class="summary-box" id="summaryBox"></div>
+      <details id="sttWrap" style="display:none;margin-top:10px">
+        <summary style="cursor:pointer;font-weight:700;font-size:.92rem;padding:6px 0">🎙 STT 원본 텍스트 (전체 원문) — 펼치기</summary>
+        <div style="display:flex;gap:8px;margin:6px 0">
+          <button class="rbtn" style="height:38px;flex:1" onclick="copyTranscript()">📋 원문 복사</button>
+          <button class="rbtn" style="height:38px;flex:1" onclick="downloadTranscript()">📄 원문 TXT</button>
+        </div>
+        <div class="summary-box" id="sttBox" style="max-height:340px"></div>
+      </details>
       <details id="segWrap" style="display:none;margin-top:10px">
         <summary style="cursor:pointer;font-weight:700;font-size:.92rem;padding:6px 0">🕐 타임라인 (세그먼트·화자) — 펼치기</summary>
         <audio id="segAudio" preload="none" controls style="display:none;width:100%;margin:8px 0"></audio>
@@ -421,7 +429,7 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
 /* ═══════════ 상태 ═══════════ */
 let recorder=null, chunks=[], recordedBlob=null, currentAudioFile=null;
 let _selectedLang='ko';
-let _driveLink='', _summary='', _title='', _keywords='', _deferredPrompt=null, _detailSummary='';
+let _driveLink='', _summary='', _title='', _keywords='', _deferredPrompt=null, _detailSummary='', _transcript='';
 let _meetingsCache=[];            // 마이페이지 파일 목록 원천
 let _curType='all', _curFolder='';
 const LIST_CACHE_KEY='cl_meetings_list_cache';
@@ -555,7 +563,7 @@ function onFileSelect(input){ if(input.files[0]) applyFile(input.files[0]); try{
 function applyFile(f){
   currentAudioFile=f;recordedBlob=null;
   // 재업로드: 이전 결과/단계 초기화(다시 올려도 새 회의록이 생성되도록)
-  _summary='';_title='';_driveLink='';_keywords='';_detailSummary='';
+  _summary='';_title='';_driveLink='';_keywords='';_detailSummary='';_transcript='';
   resetSteps(); hideErr(); $('genBtn').disabled=false;
   const area=$('fileArea'); area.className='file-area has-file';
   const mb=(f.size/1024/1024).toFixed(1);
@@ -817,6 +825,7 @@ async function finalizeTranscript(fullText, meta, job){
     aiProgress(100,'✅ AI 변환 완료','회의록이 생성되었습니다');
     setStep(3,'done'); setStep(4,'done');
     _summary=d2.summary||'';_title=d2.title||meta.title||defaultMeetingTitle();_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
+    _transcript=(fullText||'').trim(); // STT 원본 전체 원문 보관(요약 외 원문 파악용)
     showResult(); renderJobExtras(job); try{$('step4').scrollIntoView({behavior:'smooth'});}catch(e){}
     if(d2.warnings && (d2.warnings.driveError||d2.warnings.dbError)){
       let w='';
@@ -949,6 +958,8 @@ function resumeOneJob(el){
 
 function showResult(){
   $('summaryBox').textContent=_summary;
+  var tr=(_transcript||'').trim();
+  if($('sttWrap')){ if(tr){ $('sttBox').textContent=tr; $('sttWrap').style.display='block'; } else { $('sttWrap').style.display='none'; } }
   $('step4Idle').style.display='none'; $('resultArea').style.display='block'; setStep(4,'done');
   $('copyKwBtn').style.display=_keywords?'flex':'none';
   $('copyTableBtn').style.display=extractTable(_summary)?'flex':'none';
@@ -969,6 +980,8 @@ function extractTable(md){ const lines=(md||'').split('\n');const tbl=[];let inT
   return tbl.length>=2?tbl.join('\n'):''; }
 function extractUrls(md){ const m=(md||'').match(/https?:\/\/[^\s)]+/g)||[]; return [...new Set(m)]; }
 function copyAll(){copyToClipboard(_summary);}
+function copyTranscript(){copyToClipboard(_transcript||'');}
+function downloadTranscript(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([_transcript||''],{type:'text/plain;charset=utf-8'}));a.download=(_title||'회의록')+'_원문.txt';a.click();}
 function copyKeywords(){copyToClipboard(_keywords);}
 function copyTable(){const t=extractTable(_summary);copyToClipboard(t||_summary);}
 function copyLinks(){copyToClipboard(extractUrls(_summary).join('\n'));}
@@ -976,7 +989,7 @@ function downloadTxt(){const a=document.createElement('a');a.href=URL.createObje
 function openDrive(){if(_driveLink)window.open(_driveLink,'_blank');}
 function resetAll(){
   recorder=null;chunks=[];recordedBlob=null;currentAudioFile=null;
-  _summary='';_title='';_driveLink='';_keywords='';
+  _summary='';_title='';_driveLink='';_keywords='';_transcript='';
   $('recBtn').className='rec-btn'; $('recIcon').textContent='🎤'; $('recText').textContent='터치하여 녹음 시작';
   $('fileArea').className='file-area'; $('fileAreaText').innerHTML='파일 첨부 (탭 또는 드래그)'; $('audioFile').value='';
   try{localStorage.removeItem(SESSION_KEY);}catch(e){}
@@ -1294,7 +1307,7 @@ async function ocrToMinutes(){
     const r=await fetch('/api/summarize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:text,audioFileName:'ocr_image',lang:_selectedLang,userInstruction:getInstructionText()})});
     const d2=await safeJson(r);
     if(!d2.ok)throw new Error(d2.message||'생성 실패');
-    _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
+    _summary=d2.summary||'';_title=d2.title||'회의록';_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';_transcript=text;
     setStep(4,'done'); showResult(); saveSession(); loadMeetings();
     $('step4').scrollIntoView({behavior:'smooth'});
   }catch(e){showToast('회의록 생성 실패: '+fmtErr(e));}
@@ -1302,11 +1315,11 @@ async function ocrToMinutes(){
 }
 
 /* ═══════════ 세션 유지 ═══════════ */
-function saveSession(){ try{localStorage.setItem(SESSION_KEY,JSON.stringify({summary:_summary,title:_title,keywords:_keywords,driveLink:_driveLink,ts:Date.now()}));}catch(e){} }
+function saveSession(){ try{localStorage.setItem(SESSION_KEY,JSON.stringify({summary:_summary,title:_title,keywords:_keywords,driveLink:_driveLink,transcript:(_transcript||'').slice(0,400000),ts:Date.now()}));}catch(e){} }
 function restoreSession(){
   let s;try{s=JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch(e){return;}
   if(!s||!s.summary)return;
-  _summary=s.summary;_title=s.title||'회의록';_keywords=s.keywords||'';_driveLink=s.driveLink||'';
+  _summary=s.summary;_title=s.title||'회의록';_keywords=s.keywords||'';_driveLink=s.driveLink||'';_transcript=s.transcript||'';
   setStep(4,'done'); showResult();
 }
 
