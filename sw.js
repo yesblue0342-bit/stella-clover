@@ -1,5 +1,5 @@
 // Stella Clover Service Worker
-const CACHE = 'stella-clover-v14';
+const CACHE = 'stella-clover-v15';
 
 self.addEventListener('install', e => self.skipWaiting());
 
