@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stella Rate — 환율 계산기</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1a4731">
+<meta name="description" content="한국·미국·일본·베트남 실시간 환율 계산기 (Stella Clover)">
+<style>
+/* ── 테마 토큰 (Clover / Flow 와 공유: localStorage cl_theme) ── */
+:root{
+  --bg:#eef3ee; --surface:#ffffff; --surface2:#f9fafb; --border:#e5e7eb;
+  --text:#111827; --text2:#6b7280; --text3:#9ca3af;
+  --brand:#1a4731; --brand2:#2d6a4f; --accent:#34d399; --accentbg:#ecfdf5;
+  --shadow:0 2px 12px rgba(0,0,0,.07); --chip:#f0fff4;
+}
+[data-theme=dark]{
+  --bg:#0f1713; --surface:#16211b; --surface2:#1c2a22; --border:#2a3a30;
+  --text:#e6efe9; --text2:#9fb3a7; --text3:#7d8f84;
+  --brand:#34d399; --brand2:#5eead4; --accent:#34d399; --accentbg:#10241b;
+  --shadow:0 2px 14px rgba(0,0,0,.4); --chip:#15281e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .2s,color .2s}
+button{font-family:inherit}
+
+.appbar{position:sticky;top:0;z-index:30;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}
+.appbar-in{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:7px;font-weight:900;font-size:1.08rem;letter-spacing:-.3px;white-space:nowrap}
+.logo .leaf{font-size:1.25rem}
+.spacer{flex:1}
+.linkbtn{border:none;background:rgba(255,255,255,.16);color:#fff;border-radius:10px;padding:7px 12px;font-size:.82rem;font-weight:700;text-decoration:none;min-height:38px;display:flex;align-items:center;gap:5px;cursor:pointer}
+.iconbtn{border:none;background:rgba(255,255,255,.16);color:#fff;border-radius:10px;width:40px;height:38px;font-size:1.05rem;cursor:pointer}
+
+.wrap{max-width:900px;margin:0 auto;padding:18px 14px 60px;perspective:1400px}
+.hero{padding:12px 4px 14px}
+.hero h1{font-size:1.5rem;font-weight:900;letter-spacing:-.5px}
+.hero p{font-size:.85rem;color:var(--text2);margin-top:6px;line-height:1.5}
+
+/* ── 입력 (금액 + 기준통화) ── */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow);padding:18px;margin-bottom:18px}
+.amt-label{font-size:.8rem;font-weight:700;color:var(--text2);margin-bottom:8px}
+.amt-row{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
+.amt-input{flex:1;min-width:180px;border:2px solid var(--border);border-radius:14px;padding:14px 16px;font-size:1.5rem;font-weight:800;background:var(--surface2);color:var(--text);outline:none;text-align:right}
+.amt-input:focus{border-color:var(--brand2)}
+.cur-select{border:2px solid var(--border);border-radius:14px;padding:0 14px;font-size:1rem;font-weight:800;background:var(--surface);color:var(--text);outline:none;cursor:pointer;min-width:150px}
+.cur-select:focus{border-color:var(--brand2)}
+
+/* ── 3D 통화 카드 그리드 ── */
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-top:4px}
+@media(max-width:560px){.grid{grid-template-columns:1fr}}
+
+.fx-card{
+  position:relative;border-radius:20px;padding:20px 20px 18px;color:#fff;overflow:hidden;cursor:pointer;
+  transform-style:preserve-3d;transform:translateZ(0) rotateX(0) rotateY(0);
+  transition:transform .35s cubic-bezier(.2,.8,.2,1),box-shadow .35s;
+  box-shadow:0 10px 24px rgba(0,0,0,.22),0 2px 6px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.28);
+}
+.fx-card::before{content:"";position:absolute;inset:0;background:
+  radial-gradient(120% 80% at 15% 10%,rgba(255,255,255,.35),rgba(255,255,255,0) 55%),
+  linear-gradient(160deg,rgba(255,255,255,.10),rgba(0,0,0,.14));pointer-events:none}
+.fx-card::after{content:"";position:absolute;right:-30px;bottom:-40px;font-size:0;
+  width:150px;height:150px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.18),rgba(255,255,255,0) 70%);pointer-events:none}
+.fx-card:hover{transform:translateY(-4px) rotateX(6deg) rotateY(-5deg);box-shadow:0 22px 40px rgba(0,0,0,.30),0 6px 12px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.35)}
+.fx-card.base{outline:3px solid rgba(255,255,255,.55);outline-offset:-3px}
+
+.fx-top{display:flex;align-items:center;gap:10px;position:relative}
+.fx-flag{font-size:1.9rem;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
+.fx-names{line-height:1.2}
+.fx-code{font-size:1.02rem;font-weight:900;letter-spacing:.5px;text-shadow:0 1px 2px rgba(0,0,0,.3)}
+.fx-name{font-size:.74rem;opacity:.9}
+.fx-basechip{margin-left:auto;font-size:.66rem;font-weight:800;background:rgba(255,255,255,.28);padding:3px 9px;border-radius:999px}
+.fx-amount{margin-top:16px;font-size:1.72rem;font-weight:900;letter-spacing:-.5px;text-shadow:0 2px 4px rgba(0,0,0,.28);word-break:break-all;position:relative}
+.fx-amount .sym{font-size:1.1rem;font-weight:800;opacity:.92;margin-right:3px}
+.fx-rate{margin-top:6px;font-size:.72rem;opacity:.92;position:relative}
+
+/* 국가별 그라디언트 (3D 광택) */
+.c-KRW{background:linear-gradient(150deg,#3b7d5a,#1a4731)}
+.c-USD{background:linear-gradient(150deg,#3157a8,#16264f)}
+.c-JPY{background:linear-gradient(150deg,#c0455f,#6a1330)}
+.c-VND{background:linear-gradient(150deg,#d99328,#7a4b0c)}
+
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px;font-size:.78rem;color:var(--text2)}
+.refresh{border:1.5px solid var(--border);background:var(--surface);color:var(--text2);border-radius:10px;padding:8px 14px;font-size:.82rem;font-weight:700;cursor:pointer}
+.refresh:hover{border-color:var(--brand2);color:var(--brand2)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);display:inline-block}
+.dot.stale{background:#f59e0b;box-shadow:0 0 6px #f59e0b}
+.dot.off{background:#ef4444;box-shadow:0 0 6px #ef4444}
+.footer{text-align:center;color:var(--text3);font-size:.72rem;font-weight:700;letter-spacing:.5px;padding:22px 0 6px}
+.quick{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.qbtn{border:1.5px solid var(--border);background:var(--surface2);color:var(--text2);border-radius:999px;padding:6px 12px;font-size:.8rem;font-weight:700;cursor:pointer}
+.qbtn:hover{border-color:var(--brand2);color:var(--brand2)}
+</style>
+</head>
+<body>
+<div class="appbar"><div class="appbar-in">
+  <div class="logo"><span class="leaf">💱</span> Stella Rate</div>
+  <div class="spacer"></div>
+  <a class="linkbtn" href="/" title="Stella Clover">🍀 Clover</a>
+  <a class="linkbtn" href="/flow" title="Stella Flow">🔀 Flow</a>
+  <button class="iconbtn" id="themeToggle" onclick="toggleTheme()" title="다크/라이트">🌙</button>
+</div></div>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>환율 계산기</h1>
+    <p>한국 · 미국 · 일본 · 베트남 환율을 실시간으로 변환합니다. 금액을 입력하면 네 나라 통화로 동시에 계산됩니다.</p>
+  </div>
+
+  <div class="panel">
+    <div class="amt-label">💰 금액 · 기준 통화</div>
+    <div class="amt-row">
+      <input class="amt-input" id="amt" type="text" inputmode="decimal" value="10,000" oninput="onAmt()" aria-label="금액">
+      <select class="cur-select" id="base" onchange="render()" aria-label="기준 통화">
+        <option value="KRW">🇰🇷 KRW 원</option>
+        <option value="USD">🇺🇸 USD 달러</option>
+        <option value="JPY">🇯🇵 JPY 엔</option>
+        <option value="VND">🇻🇳 VND 동</option>
+      </select>
+    </div>
+    <div class="quick" id="quick"></div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="bar">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">환율 불러오는 중…</span>
+      <button class="refresh" onclick="loadRates(true)">↻ 새로고침</button>
+    </div>
+  </div>
+
+  <div class="footer">🍀 Stella Clover · Rate</div>
+</div>
+
+<script>
+var $=function(id){return document.getElementById(id);};
+/* 통화 메타 — 대상국가: 한국/미국/일본/베트남 */
+var CUR={
+  KRW:{flag:'🇰🇷',sym:'₩',name:'대한민국 원',dp:0},
+  USD:{flag:'🇺🇸',sym:'$',name:'미국 달러',dp:2},
+  JPY:{flag:'🇯🇵',sym:'¥',name:'일본 엔',dp:0},
+  VND:{flag:'🇻🇳',sym:'₫',name:'베트남 동',dp:0}
+};
+var ORDER=['KRW','USD','JPY','VND'];
+var RATES_KEY='cl_fx_rates';           // {rates:{USD..},ts}  USD 기준(1 USD 당)
+var THEME_KEY='cl_theme';
+
+/* 테마 (Clover와 공유) */
+function applyTheme(){var t=localStorage.getItem(THEME_KEY)||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+  document.documentElement.setAttribute('data-theme',t);$('themeToggle').textContent=t==='dark'?'☀️':'🌙';}
+function toggleTheme(){var cur=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+  localStorage.setItem(THEME_KEY,cur);applyTheme();}
+
+/* 오프라인/최초 폴백 환율(2024 근사치) — 네트워크 실패해도 계산은 동작. USD 기준. */
+var FALLBACK={USD:1,KRW:1360,JPY:157,VND:25400};
+var _rates=null, _ts=0, _online=false;
+
+function fmtNum(v,dp){
+  if(!isFinite(v))return '—';
+  var s=v.toLocaleString('en-US',{minimumFractionDigits:dp,maximumFractionDigits:dp});
+  return s;
+}
+function parseAmt(){var raw=($('amt').value||'').replace(/[^0-9.]/g,'');var n=parseFloat(raw);return isFinite(n)?n:0;}
+function onAmt(){
+  // 콤마 자동 포맷(커서는 단순화를 위해 끝으로) — 소수 입력 중이면 그대로 둠
+  var el=$('amt'), raw=el.value.replace(/[^0-9.]/g,'');
+  if(raw==='')  { render(); return; }
+  var endsDot=/\.\d*$/.test(raw)||/\.$/.test(raw);
+  if(!endsDot){ var n=parseFloat(raw); if(isFinite(n)) el.value=n.toLocaleString('en-US'); }
+  render();
+}
+function setQuick(){
+  var base=$('base').value, presets=(base==='USD')?[10,100,1000]:(base==='JPY')?[1000,10000,100000]:(base==='VND')?[100000,1000000,10000000]:[10000,100000,1000000];
+  $('quick').innerHTML=presets.map(function(p){return '<button class="qbtn" onclick="setAmt('+p+')">'+CUR[base].sym+' '+p.toLocaleString('en-US')+'</button>';}).join('');
+}
+function setAmt(v){$('amt').value=v.toLocaleString('en-US');render();}
+
+/* USD 기준 rates 로 A→B 환산 */
+function convert(amount,from,to){
+  var r=_rates||FALLBACK;
+  var rf=r[from], rt=r[to];
+  if(!rf||!rt)return NaN;
+  return amount*(rt/rf);
+}
+
+function render(){
+  var base=$('base').value, amt=parseAmt();
+  setQuick();
+  var g=$('grid'); var html='';
+  ORDER.forEach(function(code){
+    var meta=CUR[code];
+    var val=convert(amt,base,code);
+    var isBase=(code===base);
+    var perOne=convert(1,base,code); // 기준 1단위 당
+    html+='<div class="fx-card c-'+code+(isBase?' base':'')+'">'
+      +'<div class="fx-top"><span class="fx-flag">'+meta.flag+'</span>'
+      +'<div class="fx-names"><div class="fx-code">'+code+'</div><div class="fx-name">'+meta.name+'</div></div>'
+      +(isBase?'<span class="fx-basechip">기준</span>':'')+'</div>'
+      +'<div class="fx-amount"><span class="sym">'+meta.sym+'</span>'+fmtNum(val,meta.dp)+'</div>'
+      +'<div class="fx-rate">'+(isBase?'입력 금액':('1 '+base+' = '+meta.sym+fmtNum(perOne,meta.dp>0?meta.dp:2)))+'</div>'
+      +'</div>';
+  });
+  g.innerHTML=html;
+}
+
+function setStatus(kind,text){
+  var d=$('statusDot'); d.className='dot'+(kind==='stale'?' stale':kind==='off'?' off':'');
+  $('statusText').textContent=text;
+}
+function relTime(ts){
+  if(!ts)return '';
+  var diff=Math.max(0,Date.now()-ts), m=Math.round(diff/60000);
+  if(m<1)return '방금';
+  if(m<60)return m+'분 전';
+  var h=Math.round(m/60); if(h<24)return h+'시간 전';
+  return Math.round(h/24)+'일 전';
+}
+
+function applyRates(rates,ts,online){
+  _rates=rates; _ts=ts; _online=online;
+  render();
+  if(online) setStatus('ok','실시간 환율 · '+relTime(ts)+' 업데이트');
+  else setStatus(_ts?'stale':'off',(_ts?'저장된 환율 · '+relTime(_ts)+' (오프라인)':'오프라인 근사 환율'));
+}
+
+/* 무키(no-key) 공개 환율 API. 신규 API 키 없음(청구 0). 실패 시 캐시→폴백. */
+async function loadRates(force){
+  // 캐시 먼저 표시(6시간 이내면 그대로 사용)
+  var cached=null;
+  try{cached=JSON.parse(localStorage.getItem(RATES_KEY)||'null');}catch(e){}
+  if(cached&&cached.rates){ applyRates(cached.rates,cached.ts,true); if(!force&&(Date.now()-cached.ts)<6*3600*1000)return; }
+  else applyRates(FALLBACK,0,false);
+  setStatus('stale','환율 갱신 중…');
+  var urls=['https://open.er-api.com/v6/latest/USD','https://api.exchangerate.host/latest?base=USD'];
+  for(var i=0;i<urls.length;i++){
+    try{
+      var r=await fetch(urls[i],{cache:'no-store'});
+      var d=await r.json();
+      var raw=d&&(d.rates||d.conversion_rates);
+      if(raw&&raw.KRW&&raw.JPY&&raw.VND){
+        var rates={USD:1,KRW:+raw.KRW,JPY:+raw.JPY,VND:+raw.VND};
+        var ts=Date.now();
+        try{localStorage.setItem(RATES_KEY,JSON.stringify({rates:rates,ts:ts}));}catch(e){}
+        applyRates(rates,ts,true);
+        return;
+      }
+    }catch(e){/* 다음 소스 시도 */}
+  }
+  // 전부 실패 → 캐시 있으면 유지(오프라인 표시), 없으면 폴백
+  if(cached&&cached.rates) applyRates(cached.rates,cached.ts,false);
+  else applyRates(FALLBACK,0,false);
+}
+
+/* 초기화 */
+applyTheme();
+render();
+loadRates(false);
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+</script>
+</body>
+</html>

@@ -1,5 +1,39 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-01] 장시간 회의 업로드 안정화 + 차트/환율 메뉴 탭 (브랜치 `claude/stella-clover-improvements-v35rsr`)
+
+### A. 1~2시간 회의 업로드/변환 중단 방지 (탭 닫아도 이어짐)
+- **근본 원인**: 잡(job)은 서버에서 자동 재개되지만, **잡 생성 전 청크 업로드 단계**(1~2시간 = 수십 청크)에서 탭을 닫으면 잡이 아직 없어 전부 유실. 또 한 청크가 재시도를 모두 실패하면 업로드 전체가 throw 되어 중단.
+- **수정 (`index.html`)**:
+  - 업로드 시작 **전에** 오디오를 IndexedDB 저장 + `clover_pending_upload`(localStorage) 복구 레코드 생성. 청크 하나 올릴 때마다 `uploadedRefs` 갱신.
+  - 페이지 로드 시 `resumePendingUpload()`: 끊긴 업로드가 있으면 캐시 오디오를 다시 청크로 나눠 **남은 구간만** 이어서 업로드 → 잡 생성. `chunk-upload` 은 `(sessionId,index)` 로 멱등이라 재업로드 안전.
+  - 청크 재시도 3→5회 + 지수 백오프(≤8s). 업로드 진행 중에만 `beforeunload` 이탈 경고(잡 생성 후엔 서버가 이어서 처리하므로 경고 없음).
+  - 절대 규칙 준수: 청크 120초/16kHz mono WAV(≈3.84MB) 유지, 신규 API 키·라우트 0.
+
+### B. 장시간 회의 요약 정확도 (`api/_analyze.js`)
+- 구조화 요약(`structuredSummary`)이 초장문 전사에서 컨텍스트 초과로 통째 실패(=summary null)하지 않도록 `clampForStruct`(기본 90k자, 앞 60%+뒤 40% 표본화·중략 표기) 추가. 최종 회의록은 `summarize.js` map-reduce 로 전체 반영(기존 유지).
+
+### C. 차트 만들기 + 환율 계산기 메뉴 탭
+- **차트**: Clover 앱바에 `📊 차트` 탭 추가 → 기존 Stella Flow(`/flow`, 표→플로우차트) 로 이동.
+- **환율 계산기(신규 `rate/index.html`, `/rate`·`/currency`·`/stella-rate`)**: 대상국가 **한국(₩)·미국($)·일본(¥)·베트남(₫)**. 금액 입력 시 4개 통화 동시 환산, 3D 그라디언트 카드(광택·호버 rotateX/Y). 무키(no-key) 공개 환율 API(open.er-api.com → exchangerate.host 폴백) + localStorage 캐시 + 오프라인 근사 폴백. 신규 키 0.
+- Clover 앱바에 `💱 환율` 탭, Flow 앱바에 `💱 환율` 링크, Rate 앱바에 🍀 Clover·🔀 Flow 링크(상호 이동). 테마(`cl_theme`) 공유. `server.mjs` rewrite + `sw.js` v14→**v15**.
+
+### 테스트 결과 (샌드박스, Node)
+| # | 항목 | 결과 |
+|---|------|------|
+| 1 | `node --check` 전체 api/lib/server | **전부 OK** ✅ |
+| 2 | 인라인 JS `new Function` 파싱: index/flow/**rate**/talk/db | **전부 OK** ✅ |
+| 3 | `npm test`(node --test) | **56 PASS / 2 skip(라이브 DB) / 0 fail** ✅ |
+| 4 | 서버 부팅 → `/`, `/rate`, `/currency`, `/flow` | **전부 200** ✅ |
+| 5 | Clover 앱바 `📊 차트`·`💱 환율` 탭 렌더 | ✅ |
+| 6 | 환율 환산 로직(KRW↔USD↔JPY↔VND, 항등변환) | ✅ 정상 |
+| 7 | `clampForStruct` 초장문 표본화 길이 | ✅ 한도 준수 |
+| 8 | 시크릿 스캔 | 0 ✅ |
+
+> 참고: 라이브 URL 은 배포 후 사용자 브라우저에서 확인(샌드박스는 정적/기동 검증까지). 재개 로직은 잡 생성 전 새로고침 시 남은 구간부터 업로드됨을 코드 경로로 검증.
+
+---
+
 ## [2026-06-28] STT `invalid_client` 근본 수정 + Stella Flow 신규 앱 (브랜치 `claude/lucid-ptolemy-xx3viy`)
 
 ### A. 음성 변환 "청크 업로드 실패: invalid_client" 근본 수정

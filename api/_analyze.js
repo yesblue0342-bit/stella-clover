@@ -8,6 +8,17 @@ function safeParse(s, fallback) {
   catch (e) { return fallback; }
 }
 
+// 긴 전사(1~2시간 회의)에서 구조화 요약이 컨텍스트 초과로 통째 실패(=summary null)하지 않도록,
+// 아주 긴 경우에만 앞·뒤를 넉넉히 표본화한다(중간 생략 표기). 최종 회의록은 summarize.js 가 map-reduce 로 전체 반영.
+const STRUCT_INPUT_LIMIT = Number(process.env.STRUCT_INPUT_LIMIT || 90000); // 문자
+function clampForStruct(t) {
+  const s = String(t || "").replace(/\r\n/g, "\n").trim();
+  if (s.length <= STRUCT_INPUT_LIMIT) return s;
+  const head = Math.floor(STRUCT_INPUT_LIMIT * 0.6);
+  const tail = STRUCT_INPUT_LIMIT - head;
+  return s.slice(0, head) + "\n\n…(중략)…\n\n" + s.slice(s.length - tail);
+}
+
 // A5: 구조화 요약(JSON) — 한 줄 요약 / 핵심 주제 / 결정사항 / 액션 아이템 / 키워드
 export async function structuredSummary(transcript, lang = "ko") {
   const outLang = lang === "en" ? "English" : (lang === "ja" ? "日本語" : "한국어");
@@ -24,7 +35,7 @@ export async function structuredSummary(transcript, lang = "ko") {
 {"oneLine":"한 줄 요약","topics":["핵심 주제"],"decisions":["결정사항"],"actionItems":[{"who":"담당자 또는 미상","what":"할 일","due":"기한 또는 빈 문자열"}],"keywords":["키워드 5~10"]}
 SAP 전문용어(ABAP, BAPI, IDoc, BOM, MRP, QM, PP, MM, SD, FI, CO, S/4HANA, 검사로트, 자재마스터, 생산오더, 고도화, 인터페이스, 마이그레이션 등)를 정확히 반영하고, 음성 인식 오류로 보이는 용어는 SAP 맥락에 맞게 교정하세요.`
       },
-      { role: "user", content: String(transcript || "").replace(/\r\n/g, "\n").trim() } /* 전사 전체 사용(24000자 잘림 제거) — AI 요약이 일부만 반영되던 문제 수정 */
+      { role: "user", content: clampForStruct(transcript) } /* 기본은 전사 전체, 초장문만 앞·뒤 표본화(컨텍스트 초과 실패 방지) */
     ]
   });
   const d = safeParse(resp.choices?.[0]?.message?.content, {});
