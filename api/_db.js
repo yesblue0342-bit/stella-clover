@@ -279,12 +279,36 @@ export const CREATE_FLOWS = `
   );
   CREATE INDEX IF NOT EXISTS idx_cl_flows_created_at ON cl_flows (created_at);`;
 
+// ★ 마이그레이션 가드: 프로그램이 개정되어 컬럼이 추가돼도 기존 테이블에 자동 반영되도록
+//   idempotent 한 ADD COLUMN IF NOT EXISTS 를 매 기동 시 실행한다(옛 배포로 만든 테이블에 신규 컬럼 backfill).
+//   → "프로그램 개정 후 이전 파일 안 보임 / SELECT 컬럼 없음" 회귀를 원천 차단. (데이터는 보존, 컬럼만 보강)
+export const MIGRATE = `
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS title TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS keywords TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS summary TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS transcript TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS transcript_chars INTEGER;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS summary_chars INTEGER;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS drive_file_id TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS drive_link TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS audio_file TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS audio_session TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS title TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS audio_ref TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS error_msg TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS speakers_json TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS summary_json TEXT;
+  ALTER TABLE cl_flows ADD COLUMN IF NOT EXISTS user_id TEXT;`;
+
 let schemaReady = false;
 async function ensureSchema(pgPool) {
   if (schemaReady) return;
   await pgPool.query(CREATE_TABLE);
   await pgPool.query(CREATE_JOBS);
   await pgPool.query(CREATE_FLOWS);
+  // 마이그레이션은 실패해도(권한/구버전 PG 등) 기동을 막지 않도록 개별 try — 신규 배포에선 no-op.
+  try { await pgPool.query(MIGRATE); } catch (e) { console.warn("[db] 마이그레이션 스킵:", e && e.message); }
   schemaReady = true;
 }
 

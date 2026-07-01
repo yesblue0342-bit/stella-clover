@@ -61,16 +61,19 @@ export default async function handler(req, res) {
                  drive_file_id, drive_link, audio_file, created_at
           FROM cl_meetings
           WHERE title ILIKE @q OR keywords ILIKE @q OR summary ILIKE @q OR transcript ILIKE @q
-          ORDER BY id DESC LIMIT 50`);
+          ORDER BY id DESC LIMIT 200`);
       return res.status(200).json({ ok: true, items: r.recordset || [] });
     }
 
-    // 기본: 목록
+    // 기본: 목록 (이전 파일도 모두 보이도록 상한 상향 + offset 페이지네이션)
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 1000);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const r = await pool.request().query(`
       SELECT id, title, keywords, transcript_chars, summary_chars,
              drive_file_id, drive_link, audio_file, created_at
-      FROM cl_meetings ORDER BY id DESC LIMIT 50`);
-    return res.status(200).json({ ok: true, items: r.recordset || [] });
+      FROM cl_meetings ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`);
+    const items = r.recordset || [];
+    return res.status(200).json({ ok: true, items, offset, limit, hasMore: items.length === limit });
 
   } catch (e) {
     return res.status(200).json({ ok: false, items: [], message: "DB 오류: " + e.message });

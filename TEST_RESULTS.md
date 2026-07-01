@@ -76,6 +76,19 @@
 
 > 주: 전사 완료 후 청크를 지우므로 타임라인 '세그먼트 오디오 재생'은 완료 후 불가(텍스트·요약·타임라인 표시는 유지). 용량 관리 우선 요구에 따른 의도적 트레이드오프.
 
+### G. STT 원본 텍스트 표시 + 이력 지속성(마이그레이션) (후속)
+- **STT 원본 텍스트(전체 원문) 결과에 표시**: 변환 완료(4단계) 카드에 접이식 "🎙 STT 원본 텍스트 (전체 원문)" 섹션 추가 — 요약본 외 전체 원문 확인. 원문 복사/📄 원문 TXT 다운로드. 세션 저장/복원(`_transcript`)·OCR 경로도 원문 표시. (마이 탭 상세의 기존 🎙 STT 원본 버튼도 유지)
+- **이전 파일 안 보임 → 목록 상한 상향**: `meetings.js` 목록 `LIMIT 50` 하드캡 제거 → `limit`(기본 500·최대 1000)+`offset` 페이지네이션(`hasMore` 반환). 검색도 50→200.
+- **프로그램 개정 시 마이그레이션**: `_db.js` `ensureSchema` 에 idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS`(cl_meetings/transcribe_jobs/cl_flows) 추가 — 옛 배포로 만든 테이블에 신규 컬럼 자동 backfill, 파괴적 구문(DROP/DELETE) 없음. 실패해도 기동 계속. `sw.js` v18→**v19**.
+
+| # | 항목(후속 G) | 결과 |
+|---|------|------|
+| 23 | `node --check` 전체 + 인라인 JS(index/flow/rate) 파싱 | OK ✅ |
+| 24 | `npm test`(history-migration 3건 추가) | **65 PASS / 2 skip / 0 fail** ✅ |
+| 25 | 마이그레이션 SQL: 핵심 컬럼 ADD COLUMN IF NOT EXISTS + 파괴적 구문 없음 | ✅ |
+| 26 | `meetings.js` LIMIT 50 제거 + offset/hasMore | ✅ |
+| 27 | 서버 `/` STT 원본 섹션 렌더 + `/sw.js` v19 + `/api/meetings` graceful JSON | ✅ |
+
 ---
 
 ## [2026-06-28] STT `invalid_client` 근본 수정 + Stella Flow 신규 앱 (브랜치 `claude/lucid-ptolemy-xx3viy`)
