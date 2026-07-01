@@ -44,6 +44,21 @@
 | 11 | `1,000,000 KRW → USD/JPY/VND` 환산 | ✅ 정상 |
 | 12 | 서버 `/rate` 200 + 키패드 렌더 | ✅ |
 
+### E. 반복 재발 `invalid_client` 청크 업로드 오류 — 영구 재발 차단 (후속)
+- **증상(사용자 스크린샷)**: "구간 1/12 업로드 실패: 청크 업로드 실패: invalid_client" → 전사 전부 실패.
+- **진단**: 이 오류 문구("청크 업로드 실패")는 **옛 Drive 기반 chunk-upload** 에만 존재. 현재 main/OCI 배포본(`bd7e82a`, 배포 로그상 Docker 재빌드·헬스체크 통과 확인)은 이미 로컬 저장(`lib/chunkStore`)으로 고쳐져 이 문구를 낼 수 없음 → **구버전 캐시(오래된 PWA)** 가 옛 화면/응답을 계속 서빙해 재발.
+- **영구 수정(재발 방지 가드)**:
+  1. `test/no-drive-in-upload.test.js` — `chunk-upload.js` 가 `_drive`/`getDrive`/Drive API 를 다시 부르면 **테스트 실패**(회귀 즉시 차단). 옛 "청크 업로드 실패" 문구 잔존도 금지. `jobs-runtime` 로컬 ref 우선 처리 확인.
+  2. `sw.js` v16→**v17**: 앱 셸(HTML/네비게이션) **network-first** 로 항상 최신 프론트 수신 + 오래된 캐시 삭제. 정적 자산만 캐시 폴백.
+  3. `index.html`: 새 SW가 제어 넘겨받으면 **1회 자동 새로고침**(고친 프론트 즉시 반영). 업로드 중 `invalid_client` 응답(구버전) 감지 시 재시도 중단 + "완전 새로고침 안내" + SW 강제 갱신.
+
+| # | 항목(후속 E) | 결과 |
+|---|------|------|
+| 13 | `no-drive-in-upload` 가드 3케이스(클린 통과) | ✅ |
+| 14 | 회귀 시뮬레이션(getDrive() 재도입) → 가드 검출 | ✅ 실패로 잡힘 |
+| 15 | `npm test` 전체 | **59 PASS / 2 skip / 0 fail** ✅ |
+| 16 | 서버 `/sw.js` = `stella-clover-v17` 서빙 | ✅ |
+
 ---
 
 ## [2026-06-28] STT `invalid_client` 근본 수정 + Stella Flow 신규 앱 (브랜치 `claude/lucid-ptolemy-xx3viy`)
