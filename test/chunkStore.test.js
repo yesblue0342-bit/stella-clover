@@ -10,7 +10,31 @@ import path from "path";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "clover-chunk-"));
 process.env.CHUNK_DIR = TMP;
 const mod = await import("../lib/chunkStore.js");
-const { saveChunk, readChunk, isLocalRef, cleanupOlderThan, CHUNK_DIR } = mod;
+const { saveChunk, readChunk, isLocalRef, cleanupOlderThan, deleteSession, sessionOfRefs, CHUNK_DIR } = mod;
+
+test("sessionOfRefs: 첫 로컬 ref 에서 세션 아이디 추출(레거시/빈 값 방어)", () => {
+  assert.equal(sessionOfRefs([{ id: "local:sessA/000.wav" }, { id: "local:sessA/001.wav" }]), "sessA");
+  assert.equal(sessionOfRefs([{ id: "driveFileId123" }, { id: "local:sessB/000.wav" }]), "sessB"); // 레거시 뒤 로컬
+  assert.equal(sessionOfRefs([{ id: "driveOnly" }]), null); // 로컬 ref 없음
+  assert.equal(sessionOfRefs([]), null);
+  assert.equal(sessionOfRefs(null), null);
+});
+
+test("deleteSession: 전사 완료 후 세션 청크 전량 즉시 삭제(OCI 용량 관리)", async () => {
+  await saveChunk({ sessionId: "delme", index: 0, ext: ".wav", buffer: Buffer.from("a") });
+  await saveChunk({ sessionId: "delme", index: 1, ext: ".wav", buffer: Buffer.from("b") });
+  await saveChunk({ sessionId: "keep", index: 0, ext: ".wav", buffer: Buffer.from("c") });
+  const n = await deleteSession("delme");
+  assert.equal(n, 2, "delme 세션 2개 삭제");
+  assert.ok(!fs.existsSync(path.join(CHUNK_DIR, "delme")), "삭제된 세션 폴더 없음");
+  assert.ok(fs.existsSync(path.join(CHUNK_DIR, "keep")), "다른 세션은 유지");
+});
+
+test("deleteSession: 경로탈출/빈 세션은 거부(0 반환)", async () => {
+  assert.equal(await deleteSession(""), 0);
+  assert.equal(await deleteSession("../etc"), 0); // sanitize → 'etc' 폴더 없음 → 0 (탈출 안 됨)
+  assert.equal(await deleteSession("없는세션999"), 0);
+});
 
 test("CHUNK_DIR 은 환경변수를 따른다", () => {
   assert.equal(CHUNK_DIR, TMP);
