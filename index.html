@@ -671,7 +671,12 @@ async function uploadChunk(blob, sessionId, index, durationSec, retries){
       const d=await safeJson(r);
       if(d.ok&&d.id) return d;
       lastErr=d.message||'업로드 실패';
-    }catch(err){ lastErr=fmtErr(err); }
+      // invalid_client = 옛 Drive 업로드 경로(구버전 캐시/서버). 재시도 무의미 → 최신본 강제 후 안내.
+      if(/invalid_client/i.test(lastErr)){
+        try{ if('serviceWorker' in navigator){ const rs=await navigator.serviceWorker.getRegistrations(); rs.forEach(function(x){x.update();}); } }catch(e){}
+        throw new Error('앱이 이전 버전이라 업로드에 실패했습니다. 페이지를 완전히 새로고침(또는 앱 재시작)하면 최신본으로 정상 동작합니다.');
+      }
+    }catch(err){ lastErr=fmtErr(err); if(/이전 버전/.test(lastErr)) throw err; }
     if(attempt<retries-1) await new Promise(s=>setTimeout(s,Math.min(8000,1200*(attempt+1)))); // 지수 백오프(413 등 무의미해도 짧게)
   }
   throw new Error(lastErr||'업로드 실패');
@@ -1346,7 +1351,12 @@ resumeActiveJobs(); // 진행 중이던 백그라운드 전사 잡을 자동 재
 resumePendingUpload(); // 잡 생성 전에 끊긴 업로드가 있으면 남은 구간을 이어서 올리고 잡 생성
 loadMyJobs();       // "진행 중인 변환" 목록 로드
 
-if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+if('serviceWorker' in navigator){
+  // 새 SW가 제어를 넘겨받으면 1회 자동 새로고침 → 고쳐진 프론트가 즉시 반영(옛 캐시 잔존 방지).
+  var _swReloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',function(){ if(_swReloaded)return; _swReloaded=true; location.reload(); });
+  navigator.serviceWorker.register('/sw.js').then(function(r){ try{r.update();}catch(e){} }).catch(function(){});
+}
 </script>
 </body>
 </html>

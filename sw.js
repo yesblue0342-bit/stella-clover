@@ -1,5 +1,8 @@
 // Stella Clover Service Worker
-const CACHE = 'stella-clover-v16';
+// ★ 회귀 방지: 앱 셸(HTML/네비게이션)은 network-first 로 항상 최신을 받는다.
+//   과거 오래된 캐시가 계속 옛 프론트를 서빙해 이미 고친 버그(invalid_client 등)가 사용자에게 남던
+//   문제를 막는다. 정적 자산(js/css/img)만 캐시 폴백. /api 는 캐시하지 않음.
+const CACHE = 'stella-clover-v17';
 
 self.addEventListener('install', e => self.skipWaiting());
 
@@ -11,17 +14,33 @@ self.addEventListener('activate', e => {
   );
 });
 
-// API 요청은 캐시 안 함, 나머지는 캐시
+// HTML 네비게이션 요청 여부(= 앱 셸). 이것만 network-first 로 최신 강제.
+function isHtmlRequest(req) {
+  if (req.mode === 'navigate') return true;
+  const a = req.headers.get('accept') || '';
+  return a.includes('text/html');
+}
+
 self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  if (url.pathname.startsWith('/api/')) return;
+  const req = e.request;
+  const url = new URL(req.url);
+  if (url.pathname.startsWith('/api/')) return; // API 는 SW 미개입(항상 네트워크)
+  if (req.method !== 'GET') return;
+
+  if (isHtmlRequest(req)) {
+    // 앱 셸: 최신 네트워크 우선, 오프라인일 때만 캐시.
+    e.respondWith(
+      fetch(req)
+        .then(res => { const c = res.clone(); caches.open(CACHE).then(x => x.put(req, c)).catch(() => {}); return res; })
+        .catch(() => caches.match(req).then(m => m || caches.match('/index.html')))
+    );
+    return;
+  }
+
+  // 정적 자산: 네트워크 우선 + 캐시 갱신, 실패 시 캐시.
   e.respondWith(
-    fetch(e.request)
-      .then(res => {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
-        return res;
-      })
-      .catch(() => caches.match(e.request))
+    fetch(req)
+      .then(res => { const c = res.clone(); caches.open(CACHE).then(x => x.put(req, c)).catch(() => {}); return res; })
+      .catch(() => caches.match(req))
   );
 });
