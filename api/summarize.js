@@ -97,7 +97,7 @@ export default async function handler(req, res) {
     try {
       const rawFolder = await ensurePath(drive, ["AI_Report", Y, YM]);
       await uploadText(drive, rawFolder, `${fileBase}_전사.txt`, transcript);
-    } catch (e2) {}
+    } catch (e2) { /* ignore */ }
     // 메타데이터 JSON 미러 (Postgres가 원본, Drive는 포터블 백업)
     try {
       const metaFolder = await ensurePath(drive, ["Metadata", Y, YM]);
@@ -112,7 +112,7 @@ export default async function handler(req, res) {
         audio_session: audioSession || ""
       };
       await uploadText(drive, metaFolder, `${fileBase}.json`, JSON.stringify(meta, null, 2));
-    } catch (e3) {}
+    } catch (e3) { /* ignore */ }
   } catch (e) {
     driveError = e.message;
   }

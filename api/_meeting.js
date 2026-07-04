@@ -6,7 +6,7 @@ export const SINGLE_PASS_LIMIT = 40000;
 
 // 한 줄 내 n-gram 반복 축소(개행은 호출부에서 보존).
 function collapseLine(line, maxRepeat) {
-  const cleanTok = (t) => t.replace(/[,.，。·!?~…\-]+$/u, "").trim().toLowerCase();
+  const cleanTok = (t) => t.replace(/[,.，。·!?~…-]+$/u, "").trim().toLowerCase();
   let toks = line.split(/\s+/).filter(Boolean);
   if (toks.length < 2) return line; // 단일 토큰/빈 줄은 원형 보존(거대 토큰 길이 보존)
   for (let n = 4; n >= 1; n--) {

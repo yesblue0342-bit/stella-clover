@@ -47,7 +47,7 @@ async function aiStructure({ rows, text, direction }) {
       { role: "user", content: tableText || "(빈 입력)" }
     ]
   });
-  let parsed = {};
+  let parsed;
   try { parsed = JSON.parse(resp.choices?.[0]?.message?.content || "{}"); } catch { parsed = {}; }
   const mermaid = String(parsed.mermaid || "").trim();
   if (!looksLikeMermaid(mermaid)) throw new Error("AI 응답이 유효한 flowchart 가 아님");
@@ -119,19 +119,19 @@ export default async function handler(req, res) {
             const up = await uploadText(drive, folderId, `${fileBase}.mmd`, mermaid);
             driveFileId = up.id; driveLink = up.webViewLink;
           }
-          if (svg) { try { await uploadText(drive, folderId, `${fileBase}.svg`, svg); } catch (e) {} }
+          if (svg) { try { await uploadText(drive, folderId, `${fileBase}.svg`, svg); } catch (e) { /* ignore */ } }
           if (pngBase64) {
             try {
               const buf = Buffer.from(pngBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
               const up2 = await uploadBuffer(drive, folderId, `${fileBase}.png`, "image/png", buf);
               if (!driveFileId) { driveFileId = up2.id; driveLink = up2.webViewLink; }
-            } catch (e) {}
+            } catch (e) { /* ignore */ }
           }
           // 메타 JSON 미러
           try {
             const meta = { title, sourceType, nodeCount, edgeCount, created_at: new Date().toISOString(), folder: driveFolderUrl };
             await uploadText(drive, folderId, `${fileBase}.json`, JSON.stringify(meta, null, 2));
-          } catch (e) {}
+          } catch (e) { /* ignore */ }
         } catch (e) { driveError = e.message; }
       } else {
         driveError = "Google Drive 미설정";
