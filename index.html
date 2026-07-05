@@ -825,7 +825,7 @@ async function finalizeTranscript(fullText, meta, job){
     aiProgress(100,'✅ AI 변환 완료','회의록이 생성되었습니다');
     setStep(3,'done'); setStep(4,'done');
     _summary=d2.summary||'';_title=d2.title||meta.title||defaultMeetingTitle();_driveLink=d2.driveLink||'';_keywords=d2.keywords||'';
-    _transcript=(fullText||'').trim(); // STT 원본 전체 원문 보관(요약 외 원문 파악용)
+    _transcript=collapseRepeatsClient((fullText||'').trim()); // STT 원문 보관(반복 환각 축소 후 표시)
     showResult(); renderJobExtras(job); try{$('step4').scrollIntoView({behavior:'smooth'});}catch(e){}
     if(d2.warnings && (d2.warnings.driveError||d2.warnings.dbError)){
       let w='';
@@ -1196,14 +1196,17 @@ function collapseRepeatsClient(text, maxRepeat){
   function line(ln){
     var toks=ln.split(/\s+/).filter(Boolean);
     if(toks.length<2)return ln;
-    for(var n=4;n>=1;n--){
+    // 문장 전체(5~8토큰) 반복 환각까지 잡도록 n을 20까지 확장, 3토큰↑ 구/문장 연속중복은 1개만 남김.
+    var nmax=Math.min(20,toks.length);
+    for(var n=nmax;n>=1;n--){
+      var thr=(n>=3)?1:maxRepeat;
       var out=[],i=0;
       while(i<toks.length){
         var gram=(i+n<=toks.length)?toks.slice(i,i+n).map(cleanTok).join(' '):'';
         if(gram&&gram.replace(/\s/g,'')){
           var rep=1;
           while(i+(rep+1)*n<=toks.length&&toks.slice(i+rep*n,i+(rep+1)*n).map(cleanTok).join(' ')===gram)rep++;
-          if(rep>maxRepeat){ for(var k=0;k<maxRepeat*n;k++)out.push(toks[i+k]); i+=rep*n; continue; }
+          if(rep>thr){ for(var k=0;k<thr*n;k++)out.push(toks[i+k]); i+=rep*n; continue; }
         }
         out.push(toks[i]); i++;
       }
