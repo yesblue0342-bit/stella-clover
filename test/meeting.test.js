@@ -16,11 +16,35 @@ test("collapseRepeats: '3, 3, 3, …' 런어웨이 반복 축소", () => {
 });
 
 test("collapseRepeats: 단어/구 반복 축소 + 정상 문장 보존", () => {
-  assert.equal(collapseRepeats("네 네 네 네 네 네"), "네 네 네");
-  assert.equal(collapseRepeats("그리고 이 그리고 이 그리고 이 그리고 이 끝"), "그리고 이 그리고 이 그리고 이 끝");
+  assert.equal(collapseRepeats("네 네 네 네 네 네"), "네 네 네"); // 1토큰 반복은 3개까지 보존
+  // 2토큰 필러 반복은 더 강하게 축소(구/문장 반복 환각 대응 강화). 3→2개.
+  assert.equal(collapseRepeats("그리고 이 그리고 이 그리고 이 그리고 이 끝"), "그리고 이 그리고 이 끝");
   const normal = "오늘 회의는 자재 마스터와 컷오버 일정을 점검했습니다.";
   assert.equal(collapseRepeats(normal), normal); // 정상 텍스트는 변형 없음
   assert.equal(collapseRepeats(""), "");
+});
+
+test("collapseRepeats: 문장 전체(5~8토큰) 반복 환각 축소 — 실사용 회귀(회의록 품질)", () => {
+  // Whisper 반복 루프: 같은 문장이 수십 번 → 1개만 남고 앞뒤 실제 발화는 보존.
+  const s1 = "논의 시작. " + "Q. 4, 5일에 개발을 시작하겠습니까? ".repeat(20) + "A. 네, 10월 2일에 개발을 시작하겠습니다.";
+  const o1 = collapseRepeats(s1);
+  assert.equal((o1.match(/개발을 시작하겠습니까/g) || []).length, 1, "20회 반복 문장은 1개로 축소");
+  assert.ok(/10월 2일/.test(o1), "뒤따르는 실제 답변(A.) 보존");
+  assert.ok(/논의 시작/.test(o1), "앞선 실제 발화 보존");
+
+  const s2 = "유효성 점검. " + "Q. QM에 대한 리뷰도 중요하지 않겠습니까? ".repeat(15) + "다음 안건으로 넘어갑니다.";
+  const o2 = collapseRepeats(s2);
+  assert.equal((o2.match(/리뷰도 중요하지/g) || []).length, 1, "15회 반복 문장은 1개로 축소");
+  assert.ok(/다음 안건/.test(o2), "뒤 문장 보존");
+
+  // 서로 다른 문장은 절대 병합되지 않는다(내용 손실 없음).
+  const real = "자재 마스터를 정리했습니다. 컷오버 일정을 확정했습니다. 리허설은 다음 주입니다.";
+  assert.equal(collapseRepeats(real), real);
+});
+
+test("isHallucinatedSegment: 극단적 압축비(문구 반복)도 환각 처리", () => {
+  assert.equal(isHallucinatedSegment({ compression_ratio: 3.5, avg_logprob: -0.2 }), true); // 반복 루프(확신도 높아도)
+  assert.equal(isHallucinatedSegment({ compression_ratio: 2.4, avg_logprob: -0.3 }), false); // 정상 범위
 });
 
 test("prepareTranscript: 반복 축소까지 적용", () => {

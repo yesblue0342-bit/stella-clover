@@ -89,6 +89,23 @@
 | 26 | `meetings.js` LIMIT 50 제거 + offset/hasMore | ✅ |
 | 27 | 서버 `/` STT 원본 섹션 렌더 + `/sw.js` v19 + `/api/meetings` graceful JSON | ✅ |
 
+### H. 원본 인식 품질 — Whisper 문장 반복 환각 축소 (후속)
+- **증상(사용자 스크린샷)**: STT 원문에 같은 문장("Q. 4,5일에 개발을 시작하겠습니까?", "Q. QM에 대한 리뷰도 중요하지 않겠습니까?")이 15~20회 반복 → 오염된 전사가 회의록 품질을 떨어뜨림.
+- **원인**: `collapseRepeats` 반복 축소가 **4토큰 n-gram까지만** 봐서, 5~8토큰짜리 **문장 전체** 반복을 못 잡음.
+- **수정**:
+  - `_meeting.js collapseLine`: n-gram 최대 4→**20** 확장, **3토큰 이상 구/문장의 연속 중복은 1개만 남김**(1~2토큰 자연 반복은 3개까지 보존). 서로 다른 문장은 병합 안 함(내용 손실 0).
+  - `_meeting.js isHallucinatedSegment`: 극단 압축비(cr≥3.2) 세그먼트를 확신도와 무관하게 환각 처리(세그먼트 내 문구 반복).
+  - `index.html collapseRepeatsClient`: 서버와 동일 로직으로 확장(상세 STT 뷰 + 결과 STT 원문 표시 모두). 기존 저장분도 표시 시 정리됨.
+  - 적용 지점: 청크별 STT(`_stt`) + 최종 회의록 입력(`prepareTranscript`) + 화면 표시. 반복이 줄어 요약/회의록 품질 개선. `sw.js` v19→**v20**.
+
+| # | 항목(후속 H) | 결과 |
+|---|------|------|
+| 28 | 문장 반복 20회/15회 → 1개 축소 + 앞뒤 실제 발화 보존(서버) | ✅ |
+| 29 | 클라이언트 `collapseRepeatsClient` 동일 동작(문장 반복→1) | ✅ |
+| 30 | 정상 텍스트/서로 다른 문장 무변형(내용 손실 0) | ✅ |
+| 31 | `isHallucinatedSegment` 고압축비 반복 환각 처리 | ✅ |
+| 32 | `npm test` 전체(반복 축소 회귀 2건 추가) | **67 PASS / 2 skip / 0 fail** ✅ |
+
 ---
 
 ## [2026-06-28] STT `invalid_client` 근본 수정 + Stella Flow 신규 앱 (브랜치 `claude/lucid-ptolemy-xx3viy`)

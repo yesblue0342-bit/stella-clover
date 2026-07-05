@@ -4,12 +4,20 @@
 // 단일 호출로 안전한 길이(문자). 초과 시 map-reduce(부분요약→통합)로 잘림 없이 처리.
 export const SINGLE_PASS_LIMIT = 40000;
 
+// 반복 축소 n-gram 최대 길이. Whisper 환각은 **문장 전체**(5~8토큰)가 수십 번 반복되므로
+// 4토큰으로는 못 잡는다(실사용 회귀: "Q. …습니까?"가 20번 반복 → 회의록 품질 저하). 문장 길이까지 커버.
+const NGRAM_MAX = Number(process.env.STT_NGRAM_MAX || 20);
+
 // 한 줄 내 n-gram 반복 축소(개행은 호출부에서 보존).
+// - 1~2토큰 반복(자연스러운 강조: "네 네 네")은 maxRepeat개까지 보존.
+// - 3토큰 이상 **구/문장**이 연속 중복되면 환각으로 보고 1개만 남긴다(회의록 오염 방지).
 function collapseLine(line, maxRepeat) {
   const cleanTok = (t) => t.replace(/[,.，。·!?~…\-]+$/u, "").trim().toLowerCase();
   let toks = line.split(/\s+/).filter(Boolean);
   if (toks.length < 2) return line; // 단일 토큰/빈 줄은 원형 보존(거대 토큰 길이 보존)
-  for (let n = 4; n >= 1; n--) {
+  const nmax = Math.min(NGRAM_MAX, toks.length);
+  for (let n = nmax; n >= 1; n--) {
+    const thr = n >= 3 ? 1 : maxRepeat; // 3토큰 이상 구/문장 중복은 1개만 남김(연속 반복=환각)
     const out = [];
     let i = 0;
     while (i < toks.length) {
@@ -18,8 +26,8 @@ function collapseLine(line, maxRepeat) {
         let rep = 1;
         while (i + (rep + 1) * n <= toks.length &&
                toks.slice(i + rep * n, i + (rep + 1) * n).map(cleanTok).join(" ") === gram) rep++;
-        if (rep > maxRepeat) {
-          for (let k = 0; k < maxRepeat * n; k++) out.push(toks[i + k]);
+        if (rep > thr) {
+          for (let k = 0; k < thr * n; k++) out.push(toks[i + k]);
           i += rep * n;
           continue;
         }
@@ -31,8 +39,8 @@ function collapseLine(line, maxRepeat) {
   return toks.join(" ").replace(/\s+([,.!?。])/g, "$1");
 }
 
-// Whisper 반복 환각("3, 3, 3, …", "네 네 네 …") 축소. n-gram(4→1)이 maxRepeat 초과 연속 반복되면
-// 앞 maxRepeat개만 남긴다. 개행 구조는 보존(줄 단위 처리), 정상 텍스트는 변형 없음.
+// Whisper 반복 환각("3, 3, 3, …", "네 네 네 …", "Q. …습니까? Q. …습니까? …") 축소.
+// n-gram(NGRAM_MAX→1)이 임계 초과 연속 반복되면 축소. 개행 구조 보존, 정상 텍스트는 변형 없음.
 export function collapseRepeats(text, maxRepeat = 3) {
   const raw = String(text == null ? "" : text);
   if (!raw.trim()) return raw.trim();
@@ -47,6 +55,7 @@ export function isHallucinatedSegment(s) {
   const cr = Number((s && s.compression_ratio) || 0);
   if (nsp >= 0.6 && alp <= -0.7) return true;   // 침묵/배경음 환각
   if (cr >= 2.6 && alp <= -0.5) return true;     // 비정상 반복(압축비 큼)
+  if (cr >= 3.2) return true;                    // 극단적 압축비(=한 세그먼트 내 문구 반복 환각) — 확신도 무관
   return false;
 }
 
