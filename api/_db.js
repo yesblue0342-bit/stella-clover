@@ -234,6 +234,9 @@ export const CREATE_TABLE = `
     drive_link TEXT,
     audio_file TEXT,
     audio_session TEXT,
+    transcript_raw TEXT,
+    audio_drive_id TEXT,
+    audio_drive_link TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS idx_cl_meetings_created_at ON cl_meetings (created_at);`;
@@ -255,6 +258,18 @@ export const CREATE_JOBS = `
     audio_ref TEXT,
     title TEXT,
     error_msg TEXT,
+    session_id TEXT,
+    source_name TEXT,
+    file_date TEXT,
+    user_instruction TEXT,
+    transcript_raw TEXT,
+    corrected_text TEXT,
+    minutes_md TEXT,
+    meeting_title TEXT,
+    keywords TEXT,
+    meeting_id BIGINT,
+    audio_drive_id TEXT,
+    audio_drive_link TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
   );
@@ -294,11 +309,26 @@ export const MIGRATE = `
   ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS audio_file TEXT;
   ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS audio_session TEXT;
   ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS transcript_raw TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS audio_drive_id TEXT;
+  ALTER TABLE cl_meetings ADD COLUMN IF NOT EXISTS audio_drive_link TEXT;
   ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS title TEXT;
   ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS audio_ref TEXT;
   ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS error_msg TEXT;
   ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS speakers_json TEXT;
   ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS summary_json TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS session_id TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS source_name TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS file_date TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS user_instruction TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS transcript_raw TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS corrected_text TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS minutes_md TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS meeting_title TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS keywords TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS meeting_id BIGINT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS audio_drive_id TEXT;
+  ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS audio_drive_link TEXT;
   ALTER TABLE cl_flows ADD COLUMN IF NOT EXISTS user_id TEXT;`;
 
 let schemaReady = false;
