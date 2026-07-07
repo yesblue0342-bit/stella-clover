@@ -12,9 +12,7 @@ import { assembleSource } from "../lib/chunkStore.js";
 import { kick } from "../lib/jobs-runtime.js";
 
 // ※ Vercel 함수모델 제거 — worker를 HTTP로 자기재호출하지 않고 OCI 인프로세스 런타임(kick)에 위임.
-
-// 서버가 진행 중으로 취급하는 상태(목록/복구 공용). done/error 만 종료 상태.
-export const ACTIVE_STATUSES = ["preparing", "processing", "correcting", "summarizing", "uploading"];
+//   (진행 중 상태 목록의 단일 출처는 lib/jobs-runtime.ACTIVE_STATUSES.)
 
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");

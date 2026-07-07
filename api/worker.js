@@ -18,6 +18,16 @@ export default async function handler(req, res) {
       .query(`SELECT job_id,status,chunks_total,chunks_done FROM transcribe_jobs WHERE job_id=@id`);
     const j = r.recordset[0];
     if (!j) return res.status(200).json({ ok: false, message: "작업 없음" });
+    if (j.status === "error" && String(req.query.retry || "") === "1") {
+      // 실패 잡 수동 재시도: 상태를 되돌리고 재큐잉. 전처리 전 실패(chunks_total=0)면 preparing 부터,
+      // 그 외에는 processing 부터 — 완료된 단계는 산출물 컬럼 체크포인트(segments/corrected/minutes/
+      // audio_drive_id)로 자동 스킵되므로 실패 지점(예: 원본 Drive 업로드)부터 이어서 진행된다.
+      const back = j.chunks_total ? "processing" : "preparing";
+      await pool.request().input("id", sql.BigInt, id).input("st", sql.NVarChar(32), back)
+        .query(`UPDATE transcribe_jobs SET status=@st, error_msg=NULL, updated_at=now() WHERE job_id=@id AND status='error'`);
+      kick(id);
+      return res.status(200).json({ ok: true, retried: true, status: back, runtime: runtimeStats() });
+    }
     if (j.status === "done" || j.status === "error") {
       return res.status(200).json({ ok: true, done: true, status: j.status });
     }

@@ -69,6 +69,18 @@ export async function uploadBuffer(drive, folderId, fileName, mimeType, buffer) 
   return r.data;
 }
 
+// 대용량 파일 스트리밍 업로드(원본 오디오 보관용 — RAM 에 통째로 올리지 않는다).
+// bodyStream: fs.createReadStream 등. 반환: { id, webViewLink }.
+export async function uploadFileStream(drive, folderId, fileName, mimeType, bodyStream) {
+  const r = await drive.files.create({
+    requestBody: { name: fileName, parents: [folderId] },
+    media: { mimeType, body: bodyStream },
+    fields: "id,webViewLink",
+    supportsAllDrives: true,
+  });
+  return r.data;
+}
+
 // 파일 id로 원본 바이트 다운로드 (worker가 Drive에 올린 청크를 다시 받아 전사).
 export async function downloadFileById(drive, fileId) {
   const r = await drive.files.get(
