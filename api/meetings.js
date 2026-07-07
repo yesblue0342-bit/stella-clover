@@ -58,7 +58,7 @@ export default async function handler(req, res) {
       const r = await pool.request().input("q", sql.NVarChar(200), like)
         .query(`
           SELECT id, title, keywords, transcript_chars, summary_chars,
-                 drive_file_id, drive_link, audio_file, created_at
+                 drive_file_id, drive_link, audio_file, audio_drive_link, created_at
           FROM cl_meetings
           WHERE title ILIKE @q OR keywords ILIKE @q OR summary ILIKE @q OR transcript ILIKE @q
           ORDER BY id DESC LIMIT 200`);
@@ -70,7 +70,7 @@ export default async function handler(req, res) {
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const r = await pool.request().query(`
       SELECT id, title, keywords, transcript_chars, summary_chars,
-             drive_file_id, drive_link, audio_file, created_at
+             drive_file_id, drive_link, audio_file, audio_drive_link, created_at
       FROM cl_meetings ORDER BY id DESC LIMIT ${limit} OFFSET ${offset}`);
     const items = r.recordset || [];
     return res.status(200).json({ ok: true, items, offset, limit, hasMore: items.length === limit });

@@ -43,9 +43,30 @@ async function retry(fn, times = 3) {
   throw lastErr;
 }
 
+// 모델 자체를 못 쓰는 오류(404/model not found — 계정 미지원 등)인가. 재시도 무의미 → whisper-1 폴백 대상.
+function isModelUnavailable(e) {
+  const status = Number((e && (e.status || e.statusCode)) || 0);
+  const msg = String((e && e.message) || "");
+  return status === 404 || /model[^.]*(does not exist|not found|invalid)/i.test(msg);
+}
+
 // buffer 1개 전사 → { text, segments:[{start,end,text}], duration, hasTimestamps }
 // offsetSec: 앞 청크들의 누적 실제 길이 → 세그먼트 start/end를 글로벌 타임라인으로 보정 (A1)
-export async function transcribeBuffer({ buffer, ext = ".wav", lang = "ko", model = "whisper-1", prevText = "", offsetSec = 0 }) {
+// 최신 모델(gpt-4o-transcribe)이 계정에서 사용 불가(404)면 whisper-1 로 1회 폴백(청크 실패 방지).
+export async function transcribeBuffer(opts) {
+  const model = String(opts.model || "whisper-1");
+  try {
+    return await transcribeBufferWithModel({ ...opts, model });
+  } catch (e) {
+    if (model !== "whisper-1" && isModelUnavailable(e)) {
+      console.warn(`[STT] 모델 ${model} 사용 불가(${String(e.message || e).slice(0, 80)}) → whisper-1 폴백`);
+      return await transcribeBufferWithModel({ ...opts, model: "whisper-1" });
+    }
+    throw e;
+  }
+}
+
+async function transcribeBufferWithModel({ buffer, ext = ".wav", lang = "ko", model = "whisper-1", prevText = "", offsetSec = 0 }) {
   const useTs = modelSupportsTimestamps(model);
   return await retry(async () => {
     const file = await toFile(buffer, `audio${ext}`);
