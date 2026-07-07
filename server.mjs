@@ -116,10 +116,13 @@ app.listen(PORT, "0.0.0.0", () => {
 // ── 부팅 작업: 미완료 전사 잡 복구 + 일일 오디오 정리 스케줄 ──
 // (DB/Drive 라이브러리 적재 실패해도 정적 서버는 계속 동작하도록 전부 dynamic import + try/catch.)
 async function bootTasks() {
-  // 1) 미완료(processing/summarizing) 잡 인프로세스 재개 — 탭/서버 재시작과 무관하게 이어서 처리.
+  // 1) 미완료 잡 인프로세스 재개 — 탭/서버 재시작과 무관하게 이어서 처리.
+  //    부팅 시 1회 + 매시간 재실행: 부팅 시점 DB 미가동/일시 오류로 kick 이 드랍된 잡도
+  //    다음 주기에 자동 재개된다(kick 은 멱등 — 실행 중인 잡은 무시).
   try {
     const { recover } = await import("./lib/jobs-runtime.js");
     await recover();
+    setInterval(() => { recover().catch(() => {}); }, 60 * 60 * 1000);
   } catch (e) { console.warn("[boot] 잡 복구 스킵:", e && e.message); }
 
   // 2) 일일 오디오 정리(과거 Vercel Cron 0 18 * * * 대체). 다음 18:00 UTC에 첫 실행 후 24h 간격.

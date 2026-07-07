@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   try {
     const pool = await getPool();
     const r = await pool.request().input("id", sql.BigInt, id)
-      .query(`SELECT job_id,status,chunks_total,chunks_done FROM transcribe_jobs WHERE job_id=@id`);
+      .query(`SELECT job_id,status,chunks_total,chunks_done,error_msg FROM transcribe_jobs WHERE job_id=@id`);
     const j = r.recordset[0];
     if (!j) return res.status(200).json({ ok: false, message: "작업 없음" });
     if (j.status === "error" && String(req.query.retry || "") === "1") {
@@ -23,10 +23,20 @@ export default async function handler(req, res) {
       // 그 외에는 processing 부터 — 완료된 단계는 산출물 컬럼 체크포인트(segments/corrected/minutes/
       // audio_drive_id)로 자동 스킵되므로 실패 지점(예: 원본 Drive 업로드)부터 이어서 진행된다.
       const back = j.chunks_total ? "processing" : "preparing";
-      await pool.request().input("id", sql.BigInt, id).input("st", sql.NVarChar(32), back)
-        .query(`UPDATE transcribe_jobs SET status=@st, error_msg=NULL, updated_at=now() WHERE job_id=@id AND status='error'`);
+      // 전 구간 STT 실패("텍스트를 추출하지 못했습니다")는 세그먼트가 실패 마커뿐이고 chunks_done 이
+      // 이미 끝까지 전진해 있어, 되감지 않으면 재시도가 같은 오류를 결정적으로 반복한다(재전사 없음).
+      // 이 실패 클래스는 교정/회의록 산출물이 없으므로(가드에서 중단) 청크 STT 를 처음부터 다시 돌린다
+      // (청크 파일은 error 시 보존됨 — OpenAI 장애 복구 후 '다시 시도' 한 번으로 완주 가능).
+      const sttWipe = /음성에서 텍스트를 추출하지 못했습니다/.test(String(j.error_msg || ""));
+      if (sttWipe && j.chunks_total) {
+        await pool.request().input("id", sql.BigInt, id)
+          .query(`UPDATE transcribe_jobs SET status='processing', error_msg=NULL, chunks_done=0, segments_json='[]', updated_at=now() WHERE job_id=@id AND status='error'`);
+      } else {
+        await pool.request().input("id", sql.BigInt, id).input("st", sql.NVarChar(32), back)
+          .query(`UPDATE transcribe_jobs SET status=@st, error_msg=NULL, updated_at=now() WHERE job_id=@id AND status='error'`);
+      }
       kick(id);
-      return res.status(200).json({ ok: true, retried: true, status: back, runtime: runtimeStats() });
+      return res.status(200).json({ ok: true, retried: true, status: back, rewound: !!(sttWipe && j.chunks_total), runtime: runtimeStats() });
     }
     if (j.status === "done" || j.status === "error") {
       return res.status(200).json({ ok: true, done: true, status: j.status });
