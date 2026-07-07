@@ -12,6 +12,19 @@ test("SAP_PROMPT: 핵심 용어 포함 + 200토큰(대략 단어수) 이내", ()
   assert.ok(SAP_PROMPT.endsWith("."), "프롬프트 마침표");
 });
 
+test("config/stt-terms.json 이 실제 로드된다(JSON 전용 용어 포함) + 신규 도메인 용어", () => {
+  // Celltrion/BISON 은 내장 폴백에 없고 JSON 에만 있다 → 포함되어 있으면 JSON 로드 성공 증거.
+  for (const t of ["Celltrion", "BISON", "US11", "US1N", "EWM", "HU", "MIC", "Usage Decision", "CBO", "검사계획", "핸들링유닛", "컨버전"]) {
+    assert.ok(SAP_TERMS.includes(t), "JSON 용어 누락: " + t);
+  }
+});
+
+test("applyCorrections: JSON 정의 교정 규칙 동작(Usage Decision/핸들링유닛)", () => {
+  assert.equal(applyCorrections("유세이지 디시전 처리"), "Usage Decision 처리");
+  assert.equal(applyCorrections("핸들링 유닛 구성"), "핸들링유닛 구성");
+  assert.equal(applyCorrections("검사 계획 등록"), "검사계획 등록");
+});
+
 test("applyCorrections: 영문 약어 음차 복원", () => {
   assert.equal(applyCorrections("에이밥 개발이 필요합니다"), "ABAP 개발이 필요합니다");
   assert.equal(applyCorrections("에이 밥 표준"), "ABAP 표준");

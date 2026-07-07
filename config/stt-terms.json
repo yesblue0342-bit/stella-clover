@@ -1,0 +1,37 @@
+{
+  "_설명": "STT 도메인 용어 사전 — 사용자가 직접 항목을 추가/수정할 수 있는 설정 파일. 서버 재시작 시 반영됩니다.",
+  "_promptTerms": "Whisper/gpt-4o-transcribe prompt 파라미터로 주입되는 용어 목록(인식 편향). 200토큰 이내(약 60개) 유지 — 과다하면 디코딩 편향·환각 위험.",
+  "promptTerms": [
+    "SAP", "ERP", "ABAP", "BAPI", "IDoc", "BOM", "MRP", "QM", "PP", "MM", "SD",
+    "FI", "CO", "WM", "EWM", "PM", "S/4HANA", "ECC", "CBO", "HU", "MIC",
+    "Usage Decision", "Celltrion", "BISON", "US11", "US1N",
+    "모듈", "트랜잭션", "인터페이스", "배치", "컨버전", "마스터데이터", "자재마스터",
+    "구매오더", "생산오더", "품질검사", "검사로트", "검사계획", "핸들링유닛",
+    "입고", "출고", "재고", "워크플로우", "커스터마이징", "컨피그",
+    "고도화", "마이그레이션", "롤아웃", "표준화", "단위테스트",
+    "통합테스트", "컷오버", "운영이관", "리허설"
+  ],
+  "_corrections": "전사 후처리 교정 규칙 [{pattern:정규식, flags, replace}]. 보수 원칙 — 오탐(정상어 손상) 위험이 낮은 도메인 고유 표현만. JS 정규식 \\b는 한글에 동작하지 않으므로 한국어 패턴엔 쓰지 않는다(조사 보존).",
+  "corrections": [
+    { "pattern": "에이\\s?밥", "flags": "g", "replace": "ABAP" },
+    { "pattern": "아이\\s?닥", "flags": "g", "replace": "IDoc" },
+    { "pattern": "아이\\s?독", "flags": "g", "replace": "IDoc" },
+    { "pattern": "바\\s?피", "flags": "g", "replace": "BAPI" },
+    { "pattern": "에스\\s?포\\s?하나", "flags": "g", "replace": "S/4HANA" },
+    { "pattern": "에스\\s?사\\s?하나", "flags": "g", "replace": "S/4HANA" },
+    { "pattern": "S4\\s?HANA", "flags": "gi", "replace": "S/4HANA" },
+    { "pattern": "S\\s?4\\s?하나", "flags": "g", "replace": "S/4HANA" },
+    { "pattern": "유세이지\\s?디시전", "flags": "g", "replace": "Usage Decision" },
+    { "pattern": "유시지\\s?디시전", "flags": "g", "replace": "Usage Decision" },
+    { "pattern": "검사\\s+로트", "flags": "g", "replace": "검사로트" },
+    { "pattern": "검사\\s+계획", "flags": "g", "replace": "검사계획" },
+    { "pattern": "핸들링\\s+유닛", "flags": "g", "replace": "핸들링유닛" },
+    { "pattern": "자재\\s+마스터", "flags": "g", "replace": "자재마스터" },
+    { "pattern": "마스터\\s+데이터", "flags": "g", "replace": "마스터데이터" },
+    { "pattern": "생산\\s+오더", "flags": "g", "replace": "생산오더" },
+    { "pattern": "구매\\s+오더", "flags": "g", "replace": "구매오더" },
+    { "pattern": "품질\\s+검사", "flags": "g", "replace": "품질검사" },
+    { "pattern": "컷\\s+오버", "flags": "g", "replace": "컷오버" },
+    { "pattern": "운영\\s+이관", "flags": "g", "replace": "운영이관" }
+  ]
+}
