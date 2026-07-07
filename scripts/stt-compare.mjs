@@ -7,8 +7,10 @@
 //                          + 용어 프롬프트 + LLM 교정 1패스
 //
 // 사용법(OPENAI_API_KEY 필요 — OCI 서버 또는 로컬 .env 쉘):
-//   node scripts/stt-compare.mjs <음성파일> [출력.md]
+//   node scripts/stt-compare.mjs <음성파일 | drive:파일ID> [출력.md]
 //   docker exec stella-clover node scripts/stt-compare.mjs /app/data/sample.m4a /app/data/compare.md
+//   docker exec stella-clover node scripts/stt-compare.mjs drive:1riF1JD-dkmW97UJPt0h_4UOhINWgHbmd /app/data/compare.md
+//   (drive: 접두사는 서버의 Drive 자격증명으로 원본을 내려받아 비교 — 실제 회의 음성 검증용)
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -18,9 +20,23 @@ if (!process.env.OPENAI_API_KEY) {
   console.error("OPENAI_API_KEY 가 필요합니다(서버 .env 로드된 쉘/컨테이너에서 실행).");
   process.exit(1);
 }
-const SRC = process.argv[2];
-if (!SRC || !fs.existsSync(SRC)) {
-  console.error("사용법: node scripts/stt-compare.mjs <음성파일> [출력.md]");
+let SRC = process.argv[2];
+if (!SRC) {
+  console.error("사용법: node scripts/stt-compare.mjs <음성파일 | drive:파일ID> [출력.md]");
+  process.exit(1);
+}
+if (SRC.startsWith("drive:")) {
+  const fileId = SRC.slice("drive:".length);
+  const { getDrive, downloadFileById } = await import("../api/_drive.js");
+  console.log(`▶ Drive 원본 다운로드: ${fileId}`);
+  const buf = await downloadFileById(getDrive(), fileId);
+  const dl = path.join(os.tmpdir(), `stt-src-${fileId.slice(0, 8)}.m4a`);
+  fs.writeFileSync(dl, buf);
+  console.log(`  ${Math.round(buf.length / 1024 / 1024)}MB → ${dl}`);
+  SRC = dl;
+}
+if (!fs.existsSync(SRC)) {
+  console.error("파일을 찾을 수 없습니다: " + SRC);
   process.exit(1);
 }
 const OUT = process.argv[3] || path.join(path.dirname(SRC), path.basename(SRC).replace(/\.[^.]+$/, "") + "_stt_비교.md");
