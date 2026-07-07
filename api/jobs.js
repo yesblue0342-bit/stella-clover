@@ -108,21 +108,23 @@ export default async function handler(req, res) {
       const speakers = parseJson(j.speakers_json, []);
       // segment에 speaker 병합(있으면)
       const merged = segments.map((s, i) => speakers[i] ? { ...s, speaker: speakers[i] } : s);
+      // 회의록/교정 전사 같은 무거운 본문은 종료 상태에서만 내려보낸다 — 3초 폴링이 수백 KB 를 반복 수신하지 않게(모바일 데이터 절약).
+      const terminal = j.status === "done" || j.status === "error";
       return res.status(200).json({
         ok: true,
         job: {
           job_id: j.job_id, status: j.status, model: j.model, language: j.language, title: j.title,
           chunks_total: j.chunks_total, chunks_done: j.chunks_done,
           progress: j.chunks_total ? Math.round((j.chunks_done / j.chunks_total) * 100) : 0,
-          segments: merged,
-          summary: parseJson(j.summary_json, null),
+          segments: terminal ? merged : [],
+          summary: terminal ? parseJson(j.summary_json, null) : null,
           chunkRefs: parseJson(j.chunk_refs, []), // 세그먼트 클릭 재생용(청크별 /api/audio)
           audioRef: parseJson(j.audio_ref, null),
           // 서버측 마무리 산출물(신규): 회의록/제목/키워드/교정 전사/원본 Drive 링크/이력 레코드 id
-          minutes: j.minutes_md || null,
+          minutes: terminal ? (j.minutes_md || null) : null,
           meetingTitle: j.meeting_title || null,
           keywords: j.keywords || null,
-          correctedText: j.corrected_text || null,
+          correctedText: terminal ? (j.corrected_text || null) : null,
           meetingId: j.meeting_id || null,
           audioDriveId: j.audio_drive_id || null,
           audioDriveLink: j.audio_drive_link || null,
