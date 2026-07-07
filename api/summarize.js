@@ -19,10 +19,24 @@ export default async function handler(req, res) {
 
   // 멱등 쇼트서킷: 같은 세션의 회의록이 이미 있으면(예: 서버 워커가 이미 완결한 잡을 구버전 캐시
   // 클라이언트가 다시 마무리하려는 경우) LLM/Drive 를 재실행하지 않고 기존 결과를 그대로 반환.
+  // 구버전 '이어보기' 경로는 실제 세션 대신 'resume_<jobId>' 를 보낸다(meta 유실/타 기기) —
+  // 그대로 두면 세션 불일치로 쇼트서킷을 놓쳐 이력이 중복 저장되므로, 잡의 실제 세션으로 치환해 조회.
   if (audioSession && hasDbConfig()) {
     try {
       const pool = await getPool();
-      const ex = await pool.request().input("s", sql.NVarChar(100), audioSession)
+      let lookupSession = audioSession;
+      const rm = audioSession.match(/^resume_(\d+)$/);
+      if (rm) {
+        const jr = await pool.request().input("jid", sql.BigInt, parseInt(rm[1], 10))
+          .query(`SELECT session_id, chunk_refs FROM transcribe_jobs WHERE job_id=@jid`);
+        const job = jr.recordset && jr.recordset[0];
+        if (job) {
+          const real = String(job.session_id || "")
+            || ((String(job.chunk_refs || "").match(/local:([A-Za-z0-9_.-]+)\//) || [])[1] || "");
+          if (real) lookupSession = real;
+        }
+      }
+      const ex = await pool.request().input("s", sql.NVarChar(100), lookupSession)
         .query(`SELECT id,title,keywords,summary,drive_file_id,drive_link FROM cl_meetings WHERE audio_session=@s ORDER BY id ASC LIMIT 1`);
       const it = ex.recordset && ex.recordset[0];
       if (it) {
