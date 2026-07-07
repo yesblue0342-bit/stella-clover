@@ -1,5 +1,38 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-07] 백그라운드 파이프라인 서버 완결 + 원본 Drive 보관 + STT 정확도 개선 (브랜치 `claude/eager-meitner-d3dp7i`)
+
+### 근본 원인 수정: "창 닫으면 회의록이 안 생김"
+- **원인**: 전사 잡은 서버가 완료해도, 회의록 생성(/api/summarize)과 cl_meetings 이력 저장은 **폴링하던 브라우저**가 트리거 — 탭이 다시 열리지 않으면 영영 실행되지 않음.
+- **수정**: `lib/minutes.js`(회의록/백업/이력 코어) 분리 → `lib/jobs-runtime.js` finalizeJob 이 서버에서
+  correcting(LLM 교정) → summarizing(회의록+이력 저장) → uploading(원본 Drive 보관) → done 까지 완결.
+  산출물 컬럼(corrected_text/minutes_md/meeting_id/audio_drive_id) 체크포인트로 재시작/재시도 멱등.
+
+### 업로드 재설계: 브라우저 디코딩 제거(모바일 메모리 폭주 해소)
+- 클라이언트 decodeAudioData 전체 디코딩 → **File.slice 바이트 조각(3.5MB) 업로드**로 교체.
+- 서버 조립(assembleSource, 누락 파트 검출·512MB 상한) → **ffmpeg 전처리**(loudnorm -16LUFS, 모노 16kHz, silencedetect 무음 정렬 분할 + 6초 오버랩, 청크 ≤120초=3.84MB 절대 규칙 준수).
+
+### STT 정확도: 용어 사전 JSON + gpt-4o-transcribe + LLM 교정 1패스
+- `config/stt-terms.json`: 프롬프트 용어(QM/EWM/HU/MIC/Usage Decision/CBO/검사로트/검사계획/핸들링유닛/Celltrion/BISON/US11/US1N 등)와 교정 정규식 — 사용자 편집 가능, 로드 실패 시 내장 폴백.
+- 기본 모델 gpt-4o-transcribe(계정 미지원 404 시 whisper-1 자동 폴백). language=ko 명시(기존 유지).
+- `lib/transcriptFix.js`: gpt-4.1-mini 교정 1패스 — "교정만" 엄격 프롬프트 + 길이 편차 가드(65~140% 밖이면 원문 유지) + 창 실패 시 원문 유지(비차단). 원문(transcript_raw)과 교정본 둘 다 저장.
+- 전/후 비교 하니스 `scripts/stt-compare.mjs`(OPENAI_API_KEY 필요 — 서버에서 실행).
+
+### 원본 오디오 Drive 보관(디스크 잔존 0)
+- 잡 완료 시 원본을 Drive 폴더 `1ap3oDMkYlTnK5YXI2yR0-ZiHlrgp-1r8`(env DRIVE_AUDIO_FOLDER_ID)로 스트리밍 업로드(지수 백오프 3회) → 성공 시 로컬 임시 전량 삭제, 실패 시 잡 실패 표시(회의록은 저장됨) + 파일 보존 + '다시 시도' 버튼(/api/worker?retry=1).
+- cl_meetings 에 audio_drive_id/link 저장 → 상세 모달 🎧 원본 오디오, 완료 잡 타임라인 재생은 보관 원본 스트리밍(/api/audio 화이트리스트).
+- 잔여 파일 이전: `scripts/migrate-audio-to-drive.mjs`(드라이런 기본 — 목록/용량 보고, `--apply` 시 이전+삭제, 진행 중 잡 세션 보호).
+
+### 검증 (이 세션에서 실제 실행한 것)
+- 단위/통합 테스트 **84 pass / 0 fail** (`npm test`; ffmpeg 통합 포함 — 합성 300초 오디오 무음 2곳에서 3분할·오버랩·loudnorm 증폭 검증).
+- **로컬 E2E(실서버 프로세스 + 로컬 Postgres16 + 가짜 OpenAI(OPENAI_BASE_URL))**:
+  파트 3개 업로드→잡 생성→ffmpeg 전처리(3청크)→STT(사전 교정 '검사 로트→검사로트','에이밥→ABAP' 확인)→LLM 교정 저장→회의록/제목/키워드 생성→**cl_meetings 저장(브라우저 개입 0)**→Drive 자격증명 없음 시 "원본 오디오 Drive 보관 실패(회의록은 저장됨)" + 파일 보존 확인.
+- **서버 재시작 복구**: preparing 중 kill -9 → 재기동 로그 "[jobs] 부팅 복구: 미완료 잡 1건 재개" → 파이프라인 이어서 진행 확인.
+- **재시도 멱등**: worker?retry=1 후 회의록 중복 저장 없음(1건 유지), 실패 단계만 재실행.
+- 키 없는 환경에서 전 구간 STT 실패 시: "[구간 N 변환 실패]" 세그먼트 + 잡 error("음성에서 텍스트를 추출하지 못했습니다") graceful 확인.
+- **미검증(시크릿 필요 — 서버에서 확인 필요)**: 실제 OpenAI 모델 호출 품질(gpt-4o-transcribe 실전 정확도), 실제 Drive 업로드 성공 경로, 실 회의 음성 전/후 비교(scripts/stt-compare.mjs 로 실행).
+
+
 ## [2026-07-01] 장시간 회의 업로드 안정화 + 차트/환율 메뉴 탭 (브랜치 `claude/stella-clover-improvements-v35rsr`)
 
 ### A. 1~2시간 회의 업로드/변환 중단 방지 (탭 닫아도 이어짐)
