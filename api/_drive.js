@@ -91,7 +91,7 @@ export async function downloadFileById(drive, fileId) {
 }
 
 // 폴더 내 파일 하나를 이름으로 찾기(정확히 일치, 트래시 제외). 없으면 null.
-async function findFileByName(drive, folderId, name) {
+export async function findFileByName(drive, folderId, name) {
   const q = `name='${esc(name)}' and '${folderId}' in parents and trashed=false`;
   const r = await drive.files.list({ q, fields: "files(id)", pageSize: 1 });
   return r.data.files?.[0]?.id || null;
