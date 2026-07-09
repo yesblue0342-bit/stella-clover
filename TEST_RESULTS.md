@@ -99,7 +99,36 @@ Google API 왕복의 합(네트워크 상태에 따라 변동이 크지만, 이 
   검색/목록/IME/테마 로직은 무변경, `lib/notesSync.js`가 쓰는 SQL 은 컬럼 하나만 추가(기존 컬럼
   UPDATE 문 구조 동일), 5분 동기화·전사→공유노트 자동저장 경로는 호출 시그니처 변경 없음.
 
+## [2026-07-09] 노트 목록 호버/터치 프리페치 — 클릭 전에 본문을 미리 받아 체감 0초화
 
+- **배경**: 위 항목에서 상세(`action=get`) 응답 자체는 캐시 히트 시 수 ms까지 줄였지만, 목록에서
+  실제로 클릭하는 순간부터 요청이 시작돼 네트워크 왕복(캐시 미스 시 Drive 포함) 동안 모달이
+  "불러오는 중…"으로 잠깐 대기하는 구간은 여전히 남아 있었다. 서버/DB 는 이미 충분히 빠르므로,
+  이번 목표는 서버가 아니라 **요청 자체를 클릭보다 먼저 쏘는 것** — 마우스 hover(`mouseenter`)나
+  터치 시작(`touchstart`) 시점에 미리 본문을 받아두면, 실제 클릭까지 걸리는 수백 ms(사용자가
+  카드를 보고 손가락/마우스를 움직여 누르는 시간) 동안 네트워크가 이미 끝나 있어 클릭 시 캐시
+  히트로 즉시 열린다.
+- **적용한 수정** (`note/index.html`):
+  - `fetchNoteBody(id)`: `/api/notes?action=get` 요청을 감싸 `_bodyCache`에 채우는 공용 함수로
+    분리. **id별 진행 중 요청을 `_prefetchInflight`에 저장해 공유**(de-dupe) — hover 로 이미
+    쏜 요청이 있으면 클릭 시 `openEditor`가 같은 Promise 를 그대로 `await`해 중복 요청을
+    만들지 않는다.
+  - `prefetchNote(id)`: `note-card`의 `onmouseenter`/`ontouchstart`에 연결. 캐시가 15초
+    (`PREFETCH_FRESH_MS`) 이내로 신선하면 재요청하지 않아(hover 반복 진입에도) 과도한 요청을
+    막는다. 실패는 조용히 무시 — 클릭 시 `openEditor`의 기존 SWR 경로가 다시 시도.
+  - `openEditor`의 본문 로딩 블록을 `fetchNoteBody` 호출 한 줄로 단순화(캐시 채우기 로직 중복
+    제거, 동작은 기존과 동일 — 에러 메시지도 API 에러/네트워크 에러 구분 보존).
+  - `sw.js` 캐시 버전 **v27 → v28** bump(프론트 변경 규칙).
+- **검증**:
+  - `note/index.html` 인라인 `<script>` `new Function()` 파싱 통과.
+  - `npm test`: **83 pass / 9 skip(DATABASE_URL 미설정 통합 테스트, 기존과 동일) / 0 fail** —
+    이번 변경은 프론트 전용이라 서버 테스트 스위트에는 영향 없음(회귀 없음 확인 목적으로 전체 재실행).
+  - **미실행(불가)**: 실제 브라우저에서 hover/touchstart 프리페치가 클릭 시 체감을 줄이는지는
+    샌드박스에 브라우저가 없어 육안 확인 불가(CLAUDE.md 개발 워크플로 7 — 실제 동작은 사용자
+    브라우저에서 확인 필요). 로직상 회귀 지점(중복 요청, 캐시 오염, 에러 처리)은 코드 리뷰로
+    점검: `_prefetchInflight`는 완료 시 항상 자기 자신인 경우에만 삭제(경합 시 최신 Promise
+    보존), `fetchNoteBody`가 던지는 에러에 `isApiError` 플래그를 붙여 `openEditor`의 기존
+    메시지 분기(API 메시지 vs 네트워크 오류)를 그대로 보존함.
 
 - **배경**: 직전 개선(`8634f78`)으로 `action=list`는 이미 `notes_meta`(Postgres)만 SELECT하고
   Drive OAuth 왕복을 타지 않는다. 그런데도 실사용 체감상 Stella GPT(`stella-ai-workspace`)의
