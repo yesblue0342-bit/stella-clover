@@ -1,5 +1,32 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-09] 노트 목록 인덱스 캐시 — 실서버 TTFB 개선 측정
+
+- 방식: `stellaclover/notes-index/_index.json`(공유 노트 폴더 밖, Stella GPT 영향 없음)에
+  `{id,title,preview(200자),date,updatedAt}` 요약만 캐시. list 액션은 이 인덱스 1회만 읽음
+  (과거: 노트 개수만큼 Drive `files.get` 반복 — 59건 기준 6배치 순차 다운로드).
+- fresh-context 검증(oh-my-claudecode:verifier)에서 실제 데이터 유실 버그 발견·수정:
+  편집 진입 시 본문을 `action=get`으로 재조회하는 동안 플레이스홀더 "불러오는 중…"이
+  textarea에 그대로 들어가 있어, 그 사이 저장을 누르면 본문이 플레이스홀더 문자열로
+  덮어써지는 경합이 있었음 → 본문 로딩 중 저장 버튼 비활성화로 수정.
+- 배포: `main` 푸시(`62c1282`) → OCI 자동 재배포 → `sw.js v23` 실서버 반영 확인 →
+  `action=rebuildIndex` 1회 호출로 인덱스 사전 생성(64건, 10.37초 — 이번만 발생하는 1회성 비용).
+- **실서버 `GET /api/notes?action=list` TTFB 3회 측정 비교**:
+
+  | | 개선 전(전체 스캔) | 개선 후(인덱스 캐시) |
+  |---|---|---|
+  | 평균 TTFB | 7.146s | 3.206s |
+  | 평균 total | 7.625s | 3.206s(starttransfer와 거의 동일) |
+  | 응답 크기 | 385,733 bytes(전체 body 포함) | 30,007 bytes(preview만) |
+
+  TTFB **약 55% 감소**(7.146s → 3.206s), 응답 크기도 약 92% 감소. 응답 검증: `items[0]` 키가
+  `id/title/preview/date/updatedAt`이고 어떤 항목도 `body` 필드를 포함하지 않음(캐시가 실제로
+  쓰이고 있음을 확인, 과거 전체 스캔 경로로 새지 않음).
+- **남은 병목(참고, 이번 작업 범위 밖)**: 인덱스 1개 파일만 읽는데도 3초대가 남는 건, `getDrive()`가
+  매 요청마다 새 OAuth2 클라이언트를 만들어 refresh_token으로 access_token을 매번 새로 교환하기
+  때문으로 보임(Drive API 호출 자체보다 OAuth 왕복이 더 클 가능성) — 토큰 캐싱/재사용은 별도 최적화
+  과제로 남겨둠.
+
 ## [2026-07-09] 노트 탭 (Google Drive, Stella GPT 공유) — TEST RESULTS
 
 - `node --check server.mjs api/notes.js api/_drive.js` + 나머지 `api/*.js lib/*.js` 전체: 통과.
