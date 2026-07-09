@@ -1,5 +1,19 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-09] 노트 탭 (Google Drive, Stella GPT 공유) — TEST RESULTS
+
+- `node --check server.mjs api/notes.js api/_drive.js` + 나머지 `api/*.js lib/*.js` 전체: 통과.
+- `note/index.html` 인라인 `<script>` `new Function()` 파싱: 통과. `index.html` 기존 인라인 스크립트도 추가 버튼 반영 후 재파싱 통과(회귀 없음).
+- `npm test`: **83 pass / 3 skip(기존 DB 통합 스킵, 무관) / 0 fail** — 기존 회귀 없음.
+- 로컬 서버 기동(`node server.mjs`, PORT 8973/8974/8975 순차):
+  - `GET /`, `/notes`, `/stella-notes` → 200.
+  - `GET /api/notes?action=list` (Drive env 미설정) → `200 {"ok":false,"items":[],"message":"Google Drive 환경변수 미설정 ..."}` — 크래시/평문 없음.
+  - `GET /api/notes?action=list`, `POST /api/notes?action=save` (가짜 GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN, 실제 OAuth 거부 유도) → `200 {"ok":false,"items":[],"message":"Drive 오류: invalid_client"}` — 서버 크래시 없음, 스택트레이스 미노출, 항상 JSON 규칙 준수.
+  - `GET /NOTES/index.html`(정정 후) → 404 확인(기존 개발로그 폴더에 UI 파일이 더는 섞여있지 않음).
+- fresh-context 검증(서브에이전트, oh-my-claudecode:verifier, 이 세션 맥락 없이 코드만 보고 재검토):
+  API 항상-JSON 규칙, save/delete 로직, Drive 쿼리 인젝션, Stella GPT와의 포맷 바이트 단위 비교(폴더ID/파일명/필드명 일치 확인), 라우팅 대소문자, XSS(`esc()` 적용 범위), 시크릿 하드코딩 여부 — **blocker 0, 권고: SHIP**.
+- **미실행(로컬에서 불가)**: 실제 Google Drive 자격증명으로의 실제 파일 생성/조회/삭제 라운드트립(로컬에 프로덕션 자격증명 없음), OCI 프로덕션 배포 후 동작 확인.
+
 ## [2026-07-07] 백그라운드 파이프라인 서버 완결 + 원본 Drive 보관 + STT 정확도 개선 (브랜치 `claude/eager-meitner-d3dp7i`)
 
 ### 근본 원인 수정: "창 닫으면 회의록이 안 생김"

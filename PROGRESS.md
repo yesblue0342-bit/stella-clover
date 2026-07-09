@@ -1,5 +1,35 @@
 # Stella Clover — 진행 기록
 
+## [2026-07-09] 노트 탭 추가 — Google Drive 저장, Stella GPT와 노트 공유 (완료, main 직푸시 `100e531`)
+- **요청**: Stella GPT(별도 앱)의 노트 기능을 Stella Clover에도 추가. 저장/검색은 Google Drive를 단일 소스로,
+  Stella GPT 노트와 같은 폴더·같은 파일 포맷을 공유해 두 앱에서 같은 노트를 보고 편집할 수 있어야 함.
+- **레퍼런스 조사**: `stella-ai-workspace`(Stella GPT) `api/note.js` + `lib/drive-utils.js` 분석 →
+  Drive 폴더 `1Gd_4isQFTIQi0DjaDfE85IZM-tG1cClZ`, 파일명 `{id}.json`(플랫, 하위폴더 없음),
+  JSON 스키마 `{id,userId,title,body,category:"노트",createdAt,updatedAt,deleted,savedAt}`(소프트 삭제) 확인.
+  Drive 인증은 이미 Clover 자체 `api/_drive.js`가 동일 env(GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN)로 보유 —
+  별도 인증 이관 불필요, `getDrive()` 그대로 재사용(신규 키/인프라 없음).
+- **구현**:
+  - `api/_drive.js`: `saveJsonToDrive`(있으면 update, 없으면 create)/`listJsonInFolder`(페이지네이션)/`readJsonById`/
+    `findFileByName` 추가(순수 추가, 기존 export 무변경).
+  - `api/notes.js`(신규): `list`(검색 q, deleted 제외, updatedAt desc 정렬)/`save`(id 있으면 createdAt 보존)/
+    `delete`(소프트 삭제) — 항상 JSON 응답(에러도 200+ok:false), 프로젝트 절대 규칙 준수.
+  - `note/index.html`(신규): 검색+목록+에디터 모달 UI. Clover 테마 토큰(`cl_theme`) 공유, `esc()`로 XSS 방어.
+  - `index.html`: 앱바에 "📝 노트" 탭 버튼 추가(Chart/Rate와 동일하게 `location.href` 네비게이션).
+  - `server.mjs`: `/notes`, `/stella-notes` → `note/index.html` rewrite 추가.
+  - `sw.js`: 캐시 v21→v22(프론트 변경 필수 규칙).
+  - `.env.example`: `STELLA_NOTES_FOLDER_ID`(선택, 기본값 Stella GPT와 동일 폴더) 문서화.
+- **주의(작업 중 발견)**: 저장소 루트에 기존 개발 로그 폴더 `NOTES/`(대문자, md 3개)가 이미 존재 —
+  Windows 대소문자 무시 파일시스템 때문에 최초 작성 시 `notes/index.html`이 그 폴더 안으로 잘못 들어갔다가
+  발견 즉시 `note/`(단수, 대소문자 충돌 없는 이름)로 옮기고 `NOTES/`는 원상 복구. 배포 서버(OCI 우분투)는
+  대소문자 구분이므로 이 정정이 없었으면 `/notes` 라우팅이 실서버에서 404 났을 것.
+- **검증**: `node --check` 전체 통과, 로컬 `npm test` 83 pass/3 skip(회귀 없음), `node server.mjs` 로컬 구동 후
+  `/notes`·`/stella-notes` 200 확인, `/api/notes` list/save/delete를 Drive 자격증명 없음/가짜 자격증명(invalid_client)
+  두 경우 모두 curl로 직접 호출해 매번 200+JSON(`ok:false`, 스택트레이스 미노출) 확인. fresh-context 검증
+  서브에이전트(oh-my-claudecode:verifier) 리뷰 결과 SHIP(blocker 0).
+- **미검증(사용자 확인 필요)**: 실제 OCI 프로덕션 서버에서의 Drive 저장/조회 동작(로컬에 실제 Drive 자격증명 없어
+  invalid_client 이상은 재현 불가) 및 GitHub Actions `deploy-oci.yml` 실배포 성공 여부(이 세션에 GitHub/OCI
+  접근 권한 없음 — `gh` CLI 미설치, 서버 SSH 불가).
+
 ## [2026-06-28] STT `invalid_client` 근본 수정 + Stella Flow 신규 앱 (완료, 브랜치 `claude/lucid-ptolemy-xx3viy`)
 - **STT 수정**: 청크를 Google Drive 왕복 → **로컬 디스크 저장**(`lib/chunkStore.js`). Drive OAuth(`invalid_client`) 와 무관하게 전사 동작.
   - 변경: `chunk-upload.js`·`jobs-runtime.js`·`audio.js`·`cleanup.js`·`deploy/run-stella-oci.sh`(볼륨)·`.env.example`·`.gitignore`.
