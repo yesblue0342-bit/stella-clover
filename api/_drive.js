@@ -99,10 +99,12 @@ export async function findFileByName(drive, folderId, name) {
 
 // JSON 객체를 폴더에 파일명으로 저장(같은 이름 파일이 있으면 내용 갱신, 없으면 새로 생성).
 // savedAt 타임스탬프를 자동으로 덧붙인다(노트 등 Stella GPT와 공유하는 JSON 저장에 사용).
-export async function saveJsonToDrive(drive, folderId, fileName, data) {
+// knownFileId: 호출부가 이미 대상 파일 id 를 알면(예: notes_meta.drive_file_id) 넘겨서
+//  findFileByName 왕복(Drive API 호출 1회)을 생략한다(생략해도 기존 동작과 동일).
+export async function saveJsonToDrive(drive, folderId, fileName, data, knownFileId) {
   const name = fileName.endsWith(".json") ? fileName : `${fileName}.json`;
   const body = JSON.stringify({ ...data, savedAt: new Date().toISOString() }, null, 2);
-  const existingId = await findFileByName(drive, folderId, name);
+  const existingId = knownFileId || await findFileByName(drive, folderId, name);
   if (existingId) {
     await drive.files.update({
       fileId: existingId,
@@ -126,6 +128,23 @@ export async function listJsonInFolder(drive, folderId) {
     const r = await drive.files.list({
       q: `'${folderId}' in parents and trashed=false and name contains '.json'`,
       fields: "nextPageToken, files(id,name)",
+      pageSize: 100,
+      pageToken,
+    });
+    files.push(...(r.data.files || []));
+    pageToken = r.data.nextPageToken;
+  } while (pageToken);
+  return files;
+}
+
+// 폴더 내 .json 파일 중 modifiedTime 이 sinceIso 이후인 것만(증분 동기화용).
+export async function listJsonInFolderSince(drive, folderId, sinceIso) {
+  const files = [];
+  let pageToken;
+  do {
+    const r = await drive.files.list({
+      q: `'${folderId}' in parents and trashed=false and name contains '.json' and modifiedTime > '${sinceIso}'`,
+      fields: "nextPageToken, files(id,name,modifiedTime)",
       pageSize: 100,
       pageToken,
     });

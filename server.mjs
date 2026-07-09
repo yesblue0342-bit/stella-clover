@@ -128,6 +128,23 @@ async function bootTasks() {
 
   // 2) 일일 오디오 정리(과거 Vercel Cron 0 18 * * * 대체). 다음 18:00 UTC에 첫 실행 후 24h 간격.
   scheduleDailyCleanup();
+
+  // 3) 노트 목록 캐시(notes_meta) 증분 동기화 — Stella GPT 등 외부에서 Drive 를 직접 건드린
+  //    변경분을 5분 간격으로 반영(전체 재스캔 아님, modifiedTime 증분만). 부팅 시 1회 + 5분 간격.
+  scheduleNotesSync();
+}
+
+function runNotesSyncOnce() {
+  Promise.all([import("./lib/notesSync.js"), import("./api/_drive.js")])
+    .then(([{ incrementalSync }, { getDrive }]) => incrementalSync(getDrive()))
+    .then(r => console.log(`[notes-sync] ${r.mode} count=${r.count}`))
+    .catch(e => console.warn("[notes-sync] 실행 실패(무시, 다음 주기 재시도):", e && e.message));
+}
+
+function scheduleNotesSync() {
+  const FIVE_MIN = 5 * 60 * 1000;
+  runNotesSyncOnce();
+  setInterval(runNotesSyncOnce, FIVE_MIN);
 }
 
 function runCleanupOnce() {

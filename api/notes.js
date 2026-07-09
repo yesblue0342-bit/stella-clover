@@ -1,69 +1,22 @@
-// api/notes.js - 노트 목록/검색/생성/수정/삭제 (Google Drive 저장)
+// api/notes.js - 노트 목록/검색/생성/수정/삭제 (원본은 Google Drive, 목록/검색은 Postgres notes_meta)
 // Stella GPT 노트(api/note.js)와 같은 Drive 폴더·같은 JSON 포맷을 공유 → 두 앱이 같은 노트를 본다.
 // 노트 포맷: { id, userId, title, body, category, createdAt, updatedAt, deleted, savedAt }
 //
-// 성능: list 액션은 노트 개별 파일을 매번 다 읽지 않고, Clover 전용 인덱스 파일
-// (stellaclover/notes-index/_index.json — 공유 노트 폴더 밖, Stella GPT는 이 폴더를 모름)
-// 하나만 읽어 응답한다. 인덱스에는 미리보기(본문 200자)만 있어 상세/편집 진입 시엔
-// action=get 으로 그 노트 1건만 개별 조회한다.
-import { getDrive, saveJsonToDrive, listJsonInFolder, readJsonById, findFileByName, ensurePath } from "./_drive.js";
+// 성능: list/검색은 notes_meta(Postgres) 만 SELECT — Drive API 를 절대 타지 않는다.
+//   본문은 노트 클릭(action=get) 시에만 lazy load. 쓰기(save/delete)는 notes_meta upsert 와
+//   Drive 저장을 한 트랜잭션 흐름으로 처리(Drive 실패 시 메타 롤백, withTransaction 참고).
+//   Stella GPT 등 외부에서 Drive 를 직접 건드린 변경분은 5분 간격 백그라운드 증분 동기화
+//   (lib/notesSync.incrementalSync, server.mjs 부팅 스케줄)가 notes_meta 에 반영한다.
+import { getDrive, saveJsonToDrive, findFileByName, readJsonById } from "./_drive.js";
+import { getPool, hasDbConfig, withTransaction } from "./_db.js";
+import { fullScanToMeta } from "../lib/notesSync.js";
 
 // Stella GPT(lib/drive-utils.js DEFAULT_NOTES_FOLDER_ID)와 동일한 기본 폴더(공유).
 const NOTES_FOLDER_ID = process.env.STELLA_NOTES_FOLDER_ID || process.env.NOTES_FOLDER_ID || "1Gd_4isQFTIQi0DjaDfE85IZM-tG1cClZ";
-
-const INDEX_FOLDER_PARTS = ["notes-index"];
-const INDEX_FILE = "_index";
+const PAGE_SIZE = 30;
 
 function genId() {
   return "note_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
-function toIndexEntry(note) {
-  return {
-    id: note.id,
-    title: note.title || "제목 없음",
-    preview: String(note.body || "").slice(0, 200),
-    date: note.createdAt || note.updatedAt || null,
-    updatedAt: note.updatedAt || null,
-  };
-}
-
-async function getIndexFolderId(drive) {
-  return ensurePath(drive, INDEX_FOLDER_PARTS);
-}
-
-// 인덱스 읽기 — 없거나 형식이 깨졌으면 null(호출부가 재생성 판단).
-async function readIndex(drive) {
-  const folderId = await getIndexFolderId(drive);
-  const fileId = await findFileByName(drive, folderId, `${INDEX_FILE}.json`);
-  if (!fileId) return null;
-  try {
-    const data = await readJsonById(drive, fileId);
-    if (!data || !Array.isArray(data.items)) return null;
-    return data.items;
-  } catch {
-    return null;
-  }
-}
-
-async function writeIndex(drive, items) {
-  const folderId = await getIndexFolderId(drive);
-  await saveJsonToDrive(drive, folderId, INDEX_FILE, { items, rebuiltAt: new Date().toISOString() });
-}
-
-// 느린 전체 스캔(과거 list 로직) — 인덱스가 없거나 깨졌을 때만 실행하고, 결과로 인덱스를 재생성한다.
-async function rebuildIndexFromScan(drive) {
-  const files = await listJsonInFolder(drive, NOTES_FOLDER_ID);
-  const items = [];
-  const BATCH = 10;
-  for (let i = 0; i < files.length; i += BATCH) {
-    const batch = files.slice(i, i + BATCH);
-    const notes = await Promise.all(batch.map(f => readJsonById(drive, f.id).catch(() => null)));
-    for (const n of notes) if (n && !n.deleted) items.push(toIndexEntry(n));
-  }
-  items.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-  await writeIndex(drive, items);
-  return items;
 }
 
 export default async function handler(req, res) {
@@ -74,93 +27,139 @@ export default async function handler(req, res) {
   if (!process.env.GOOGLE_REFRESH_TOKEN) {
     return res.status(200).json({ ok: false, items: [], message: "Google Drive 환경변수 미설정 (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REFRESH_TOKEN 확인)" });
   }
+  if (!hasDbConfig()) {
+    return res.status(200).json({ ok: false, items: [], message: "DB 환경변수 미설정 — 노트 목록은 Postgres(notes_meta) 필요" });
+  }
 
   const action = req.query.action || (req.body && req.body.action) || "list";
 
   try {
-    const drive = getDrive();
-
     // 상세 조회 — 목록엔 없는 전체 본문. 편집기 진입 시에만 호출.
     if (action === "get") {
       const id = String(req.query.id || (req.body && req.body.id) || "").trim();
       if (!id) return res.status(400).json({ ok: false, message: "id가 필요합니다" });
-      const fileId = await findFileByName(drive, NOTES_FOLDER_ID, `${id}.json`);
+
+      const t0 = Date.now();
+      const drive = getDrive();
+      const pool = await getPool();
+      const metaR = await pool.request().input("id", id)
+        .query(`SELECT drive_file_id AS "driveFileId" FROM notes_meta WHERE id=@id AND deleted_at IS NULL`);
+      let fileId = metaR.recordset?.[0]?.driveFileId || null;
+      if (!fileId) fileId = await findFileByName(drive, NOTES_FOLDER_ID, `${id}.json`); // 메타에 아직 없는 구노트 폴백
+
       if (!fileId) return res.status(200).json({ ok: false, message: "대상 노트를 찾을 수 없습니다" });
       const note = await readJsonById(drive, fileId);
+      console.log(`[notes] get id=${id} ${Date.now() - t0}ms`);
       if (!note || note.deleted) return res.status(200).json({ ok: false, message: "대상 노트를 찾을 수 없습니다" });
       return res.status(200).json({ ok: true, item: note });
     }
 
-    // 인덱스 강제 재생성(수동 복구용).
+    // 인덱스 강제 재생성(수동 복구용) — Drive 전체 재스캔 → notes_meta 재구성.
     if (action === "rebuildIndex") {
-      const items = await rebuildIndexFromScan(drive);
-      return res.status(200).json({ ok: true, count: items.length });
+      const t0 = Date.now();
+      const drive = getDrive();
+      const count = await fullScanToMeta(drive);
+      console.log(`[notes] rebuildIndex(full scan) ${Date.now() - t0}ms count=${count}`);
+      return res.status(200).json({ ok: true, count });
     }
 
-    // 생성/수정 — id 있으면 갱신(createdAt 유지), 없으면 신규 생성. 인덱스도 함께 갱신.
+    // 생성/수정 — id 있으면 갱신(createdAt 유지), 없으면 신규 생성.
+    //  notes_meta upsert + Drive 저장을 한 트랜잭션으로: Drive 저장 실패 시 메타 upsert 롤백.
     if (action === "save") {
       const id = String((req.body && req.body.id) || "").trim() || genId();
       const title = String((req.body && req.body.title) || "").trim() || "제목 없음";
       const body = String((req.body && req.body.body) || "");
       const now = new Date().toISOString();
+      const t0 = Date.now();
+
+      const drive = getDrive();
+      const pool = await getPool();
+      const metaR = await pool.request().input("id", id)
+        .query(`SELECT drive_file_id AS "driveFileId" FROM notes_meta WHERE id=@id`);
+      let prevDriveFileId = metaR.recordset?.[0]?.driveFileId || null;
+      if (!prevDriveFileId) prevDriveFileId = await findFileByName(drive, NOTES_FOLDER_ID, `${id}.json`);
 
       let createdAt = now;
-      const existingId = await findFileByName(drive, NOTES_FOLDER_ID, `${id}.json`);
-      if (existingId) {
+      if (prevDriveFileId) {
         try {
-          const prev = await readJsonById(drive, existingId);
+          const prev = await readJsonById(drive, prevDriveFileId);
           if (prev && prev.createdAt) createdAt = prev.createdAt;
         } catch { /* 읽기 실패 시 새 createdAt으로 계속 */ }
       }
 
       const data = { id, userId: "clover", title, body, category: "노트", createdAt, updatedAt: now, deleted: false };
-      await saveJsonToDrive(drive, NOTES_FOLDER_ID, id, data);
+      const preview = body.slice(0, 200);
 
-      let items = await readIndex(drive);
-      if (!items) {
-        items = await rebuildIndexFromScan(drive); // 방금 저장한 노트도 스캔에 포함됨
-      } else {
-        const entry = toIndexEntry(data);
-        const i = items.findIndex(x => x.id === id);
-        if (i >= 0) items[i] = entry; else items.unshift(entry);
-        await writeIndex(drive, items);
-      }
+      await withTransaction(async (client) => {
+        await client.query(
+          `INSERT INTO notes_meta (id, drive_file_id, title, preview, source, updated_at, deleted_at)
+           VALUES ($1, $2, $3, $4, 'clover', $5, NULL)
+           ON CONFLICT (id) DO UPDATE SET
+             title = $3, preview = $4, source = 'clover', updated_at = $5, deleted_at = NULL`,
+          [id, prevDriveFileId, title, preview, now]
+        );
+        const up = await saveJsonToDrive(drive, NOTES_FOLDER_ID, id, data, prevDriveFileId); // 실패 시 throw → 트랜잭션 롤백(메타 되돌림)
+        if (up.id !== prevDriveFileId) {
+          await client.query(`UPDATE notes_meta SET drive_file_id=$1 WHERE id=$2`, [up.id, id]);
+        }
+      });
+
+      console.log(`[notes] save id=${id} ${Date.now() - t0}ms`);
       return res.status(200).json({ ok: true, item: data });
     }
 
-    // 삭제 — 소프트 삭제(deleted:true). Stella GPT 쪽 파일도 동일 규칙이라 서로 호환. 인덱스에서도 제거.
+    // 삭제 — 소프트 삭제(deleted:true). Stella GPT 쪽 파일도 동일 규칙이라 서로 호환.
+    //  notes_meta.deleted_at 세팅 + Drive 저장을 한 트랜잭션으로: Drive 실패 시 메타 롤백(삭제 취소).
     if (action === "delete") {
       const id = String((req.body && req.body.id) || req.query.id || "").trim();
       if (!id) return res.status(400).json({ ok: false, message: "id가 필요합니다" });
+      const t0 = Date.now();
 
-      const fileId = await findFileByName(drive, NOTES_FOLDER_ID, `${id}.json`);
+      const drive = getDrive();
+      const pool = await getPool();
+      const metaR = await pool.request().input("id", id)
+        .query(`SELECT drive_file_id AS "driveFileId" FROM notes_meta WHERE id=@id`);
+      let fileId = metaR.recordset?.[0]?.driveFileId || null;
+      if (!fileId) fileId = await findFileByName(drive, NOTES_FOLDER_ID, `${id}.json`);
       if (!fileId) return res.status(200).json({ ok: false, message: "대상 노트를 찾을 수 없습니다" });
 
       const prev = await readJsonById(drive, fileId);
       const now = new Date().toISOString();
       const data = { ...prev, deleted: true, deletedAt: now, updatedAt: now };
-      await saveJsonToDrive(drive, NOTES_FOLDER_ID, id, data);
 
-      let items = await readIndex(drive);
-      if (!items) {
-        items = await rebuildIndexFromScan(drive); // 스캔 자체가 deleted 노트를 걸러냄
-      } else {
-        items = items.filter(x => x.id !== id);
-        await writeIndex(drive, items);
-      }
+      await withTransaction(async (client) => {
+        await client.query(`UPDATE notes_meta SET deleted_at=$1, updated_at=$1 WHERE id=$2`, [now, id]);
+        await saveJsonToDrive(drive, NOTES_FOLDER_ID, id, data, fileId); // 실패 시 throw → 트랜잭션 롤백(삭제 취소)
+      });
+
+      console.log(`[notes] delete id=${id} ${Date.now() - t0}ms`);
       return res.status(200).json({ ok: true });
     }
 
-    // 기본: 목록 + 검색(q, 제목+미리보기 부분일치) — 인덱스 1회만 읽는다.
-    const q = String(req.query.q || "").trim().toLowerCase();
-    let items = await readIndex(drive);
-    if (!items) items = await rebuildIndexFromScan(drive); // 최초 1회/손상 시에만 느린 전체 스캔
+    // 기본: 목록 + 검색(q, 제목+미리보기 부분일치) + 페이지네이션. notes_meta 만 SELECT(Drive 미접근).
+    const q = String(req.query.q || "").trim();
+    const page = Math.max(0, parseInt(req.query.page, 10) || 0);
+    const offset = page * PAGE_SIZE;
 
-    const filtered = q ? items.filter(n => ((n.title || "") + (n.preview || "")).toLowerCase().includes(q)) : items;
-    const sorted = [...filtered].sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-    return res.status(200).json({ ok: true, items: sorted });
+    const t0 = Date.now();
+    const pool = await getPool();
+    const request = pool.request().input("limit", PAGE_SIZE + 1).input("offset", offset);
+    let where = "deleted_at IS NULL";
+    if (q) { request.input("q", `%${q}%`); where += " AND (title ILIKE @q OR preview ILIKE @q)"; }
+    const r = await request.query(`
+      SELECT id, title, preview, updated_at AS "updatedAt"
+      FROM notes_meta
+      WHERE ${where}
+      ORDER BY updated_at DESC
+      LIMIT @limit OFFSET @offset
+    `);
+    const rows = r.recordset || [];
+    const hasMore = rows.length > PAGE_SIZE;
+    const items = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+    console.log(`[notes] list ${Date.now() - t0}ms rows=${items.length} page=${page} q=${q ? "yes" : "no"}`);
+    return res.status(200).json({ ok: true, items, page, hasMore });
 
   } catch (e) {
-    return res.status(200).json({ ok: false, items: [], message: "Drive 오류: " + e.message });
+    return res.status(200).json({ ok: false, items: [], message: "노트 처리 오류: " + e.message });
   }
 }

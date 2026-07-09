@@ -1,5 +1,54 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-09] 노트 목록 5초 병목 — Postgres notes_meta 캐시로 근본 개선
+
+- **진단(계측 우선, 추측 배제)**: 직전 작업(아래 "노트 목록 인덱스 캐시" 항목)에서 Drive 전체 스캔
+  N+1 병목은 이미 제거했지만, 실서버 TTFB 가 여전히 평균 3.206s 로 남아 있었다(응답은 인덱스
+  파일 1건만 읽는데도). 그 항목 말미에 "남은 병목"으로 `getDrive()` 가 **매 요청마다 새
+  OAuth2 클라이언트를 만들어 refresh_token→access_token 을 새로 교환**하는 왕복이 Drive API
+  호출 자체보다 클 가능성을 남겨뒀다 — 이번 작업의 실제 원인이 바로 이것이었다(의심 순위 (d)).
+  list 요청이 Drive 를 **전혀** 타지 않게 만들지 않는 한 이 OAuth 왕복은 구조적으로 계속 남는다.
+- **적용한 수정(요청 아키텍처 그대로)**:
+  1. `api/_db.js`: `notes_meta`(id, drive_file_id, title, preview, keywords, source, updated_at,
+     deleted_at) + `notes_sync_state`(증분 동기화 커서) 테이블 추가, `updated_at DESC` 인덱스.
+     `withTransaction(fn)` 헬퍼 추가 — mssql 호환 셰임(`request().query()`)은 호출마다 풀에서
+     커넥션을 새로 빌리므로 BEGIN/COMMIT 이 다른 커넥션에 걸릴 수 있어 트랜잭션에 안전하지
+     않다는 걸 확인, `pool._pg`(원본 pg.Pool)에서 커넥션 하나를 고정해 사용하도록 별도 구현.
+  2. `api/notes.js` 전면 재작성: **목록/검색(`action=list`, 기본)은 `notes_meta` 만 SELECT —
+     핸들러 전체에서 이 경로만 `getDrive()` 를 호출하지 않는다**(OAuth 왕복 자체가 발생하지
+     않음). 페이지네이션(30건, `LIMIT 31 OFFSET`으로 `hasMore` 판별) 추가.
+  3. `action=get`(본문 lazy load)은 notes_meta 에서 `drive_file_id` 를 먼저 찾아 Drive 호출을
+     1회(다운로드만)로 줄임(기존엔 `findFileByName`+`readJsonById` 2회). 프런트(`note/index.html`)
+     는 이미 모달을 먼저 열고 "불러오는 중…" 표시 후 본문을 채우는 구조라 별도 수정 없음.
+  4. `action=save`/`delete`: `notes_meta` upsert 와 Drive 저장을 `withTransaction` 한 흐름으로
+     묶어 Drive 저장이 실패하면 메타 변경이 자동 ROLLBACK 되도록 함(Drive 저장 함수에
+     `knownFileId` 힌트를 넘겨 `findFileByName` 왕복도 1회 생략).
+  5. `lib/notesSync.js`(신규): Drive→notes_meta 동기화 공용 로직. `incrementalSync` 는
+     `modifiedTime > 커서` 만 조회해 반영(전체 재스캔 아님), 커서는 `notes_sync_state` 에 영속화
+     (서버 재시작에도 유지). 커서가 없는 최초 1회만 `fullScanToMeta` 전체 스캔으로 부트스트랩.
+     `server.mjs` 부팅 시 1회 + 5분 간격 실행(Stella GPT 가 Drive 를 직접 건드린 변경분도 반영).
+  6. `scripts/backfill-notes-meta.mjs`(신규): 기존 노트 1회 백필(멱등, 여러 번 실행해도 안전).
+  7. `note/index.html`: 목록 응답 메모리 캐시(stale-while-revalidate) — 캐시 있으면 즉시 렌더 후
+     조용히 갱신, 저장/삭제 직후엔 캐시를 비워 옛 목록으로 되돌아가지 않게 함. "더 보기" 버튼으로
+     페이지네이션. `sw.js` v24→v25.
+- **검증**: 실제 사용 불가한 샌드박스 제약(§CLAUDE.md 개발 워크플로 7 — 라이브 URL 직접 확인 불가)
+  때문에 프로덕션 TTFB 는 이 세션에서 직접 측정하지 못했다. 대신 임시 로컬 Postgres 컨테이너
+  (`postgres:16-alpine`, 작업 종료 후 삭제)에 실제 스키마를 붙여 `test/notes-meta.test.js` 로
+  종단 검증: `action=list` 핸들러가 Drive 를 호출하지 않고 `notes_meta` 만으로 검색·정렬
+  (`updated_at DESC`)·페이지네이션에 성공, 응답에 `body` 필드가 없음(미리보기만) 확인.
+  `withTransaction` 은 콜백이 throw 하면 ROLLBACK(행 없음), 성공하면 COMMIT(행 유지)을 각각
+  확인. 서버 로그: `[notes] list 2ms rows=3 page=0 q=yes`(로컬 Postgres, 인덱스 3건 검색) —
+  Drive OAuth 왕복이 아예 빠지므로 DB 쿼리 자체는 목표(300ms) 대비 압도적으로 여유 있다.
+  `npm test` 88 pass / 1 skip(무관한 `db-config` 환경변수 테스트) / `node --check` 전체 통과.
+  **실서버 확정 수치(배포 후 사용자 확인 필요)**: `curl -w '%{time_starttransfer}\n' -o /dev/null -s
+  'https://<서버>/api/notes?action=list'` 로 TTFB 측정, 또는 컨테이너 로그의 `[notes] list Nms`
+  라인으로 서버측 처리시간만 분리 확인 가능(핵심 타이밍 로그는 프로덕션에도 유지했다).
+- **남은 한계(참고)**: `action=get`/`save`/`delete`는 여전히 `getDrive()`(OAuth 왕복)를 타므로
+  개별 노트 열기/저장/삭제는 이번 개선 범위 밖(요청 스펙상 목록만 300ms 목표). Stella GPT 가
+  Drive 파일을 완전히 하드 삭제(trash 아님, 소프트삭제 필드도 없이)하는 경우는 목록 스캔
+  결과에서 사라지므로 `fullScanToMeta` 전체 재스캔에서도 감지되지 않는 알려진 한계(소프트
+  삭제 규약을 벗어난 외부 조작 케이스, 두 앱 모두 규약을 지키는 한 발생하지 않음).
+
 ## [2026-07-09] 노트 목록 인덱스 캐시 — 실서버 TTFB 개선 측정
 
 - 방식: `stellaclover/notes-index/_index.json`(공유 노트 폴더 밖, Stella GPT 영향 없음)에

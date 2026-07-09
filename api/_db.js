@@ -216,6 +216,27 @@ export function getPool() {
   return poolPromise;
 }
 
+// 단일 커넥션에서 BEGIN/COMMIT/ROLLBACK 을 보장하는 트랜잭션 헬퍼.
+//  (위 mssql 호환 셰임의 request().query() 는 호출마다 풀에서 커넥션을 새로 빌려 쓰므로
+//   BEGIN 과 COMMIT 이 서로 다른 커넥션에서 실행될 수 있어 트랜잭션에 안전하지 않다 —
+//   여기서는 pool._pg(원본 pg.Pool)에서 커넥션 하나를 직접 체크아웃해 고정한다.)
+//  fn(client) 안에서는 client.query(text, params) 를 $1,$2 표준 pg 파라미터로 사용한다.
+export async function withTransaction(fn) {
+  const pool = await getPool();
+  const client = await pool._pg.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (e) {
+    try { await client.query("ROLLBACK"); } catch { /* 롤백 자체 실패는 무시(원래 에러를 그대로 던짐) */ }
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 // ── 스키마 자동생성 (Postgres, 멱등) ─────────────────────────────
 //  pg 단순 쿼리(파라미터 없음)는 멀티스테이트먼트 허용 → CREATE/INDEX를 한 번에.
 //  (mssql 시절 매 쿼리에 ${CREATE_*} 프리픽스로 self-heal 하던 것을, getPool 보장으로 대체.)
@@ -294,6 +315,25 @@ export const CREATE_FLOWS = `
   );
   CREATE INDEX IF NOT EXISTS idx_cl_flows_created_at ON cl_flows (created_at);`;
 
+// 노트 목록 메타 캐시(Drive 원본의 읽기 전용 인덱스) + 증분 동기화 커서.
+//  목록/검색은 이 테이블만 SELECT — Drive API 를 타지 않는다(TTFB 개선, api/notes.js 참고).
+export const CREATE_NOTES_META = `
+  CREATE TABLE IF NOT EXISTS notes_meta (
+    id TEXT PRIMARY KEY,
+    drive_file_id TEXT,
+    title TEXT,
+    preview TEXT,
+    keywords TEXT,
+    source TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS idx_notes_meta_updated_at ON notes_meta (updated_at DESC);
+  CREATE TABLE IF NOT EXISTS notes_sync_state (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );`;
+
 // ★ 마이그레이션 가드: 프로그램이 개정되어 컬럼이 추가돼도 기존 테이블에 자동 반영되도록
 //   idempotent 한 ADD COLUMN IF NOT EXISTS 를 매 기동 시 실행한다(옛 배포로 만든 테이블에 신규 컬럼 backfill).
 //   → "프로그램 개정 후 이전 파일 안 보임 / SELECT 컬럼 없음" 회귀를 원천 차단. (데이터는 보존, 컬럼만 보강)
@@ -337,6 +377,7 @@ async function ensureSchema(pgPool) {
   await pgPool.query(CREATE_TABLE);
   await pgPool.query(CREATE_JOBS);
   await pgPool.query(CREATE_FLOWS);
+  await pgPool.query(CREATE_NOTES_META);
   // 마이그레이션은 실패해도(권한/구버전 PG 등) 기동을 막지 않도록 개별 try — 신규 배포에선 no-op.
   try { await pgPool.query(MIGRATE); } catch (e) { console.warn("[db] 마이그레이션 스킵:", e && e.message); }
   schemaReady = true;

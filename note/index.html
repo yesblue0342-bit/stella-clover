@@ -117,6 +117,11 @@ var $=function(id){return document.getElementById(id);};
 var THEME_KEY='cl_theme';
 var notes=[];
 var currentId=null;
+var _cache={};        // stale-while-revalidate 메모리 캐시: q별 마지막 페이지1까지의 items
+var _page=0;
+var _q='';
+var _hasMore=false;
+function cacheKey(q){ return 'q:'+q; }
 
 /* ── 한글 IME composition 가드 (제목/본문/검색) ──
    조합 중(한글 입력 미완)에는 검색을 재실행하지 않고, 저장 시엔 조합을 먼저 확정한다. */
@@ -146,23 +151,52 @@ async function safeJson(res){
 var _searchT;
 function onSearchInput(){ if(_composing) return; clearTimeout(_searchT); _searchT=setTimeout(loadNotes, 300); } // 조합 중 재검색 억제(compositionend 에서 재개)
 
+// stale-while-revalidate: 캐시가 있으면 즉시 그려 보여주고(정체 데이터), 그 사이 최신 응답으로
+// 조용히 갱신한다 — 목록 첫 화면(page 0)만 캐시 대상(30건, note-card 리스트 상단).
 async function loadNotes(){
   var q = $('searchInput').value.trim();
-  $('list').innerHTML = '<div class="empty">불러오는 중…</div>';
+  _q = q; _page = 0;
+  var key = cacheKey(q);
+  var cached = _cache[key];
+  if(cached){
+    notes = cached.items.slice();
+    _hasMore = cached.hasMore;
+    renderList();
+  } else {
+    $('list').innerHTML = '<div class="empty">불러오는 중…</div>';
+  }
   try{
-    var r = await fetch('/api/notes?action=list&q='+encodeURIComponent(q));
+    var r = await fetch('/api/notes?action=list&page=0&q='+encodeURIComponent(q));
     var d = await safeJson(r);
-    if(!d.ok){ $('list').innerHTML='<div class="empty">'+esc(d.message||'노트를 불러오지 못했습니다')+'</div>'; notes=[]; return; }
+    if(_q!==q) return; // 응답 도착 전에 검색어가 바뀌었으면 무시(경합 방지)
+    if(!d.ok){ if(!cached){ $('list').innerHTML='<div class="empty">'+esc(d.message||'노트를 불러오지 못했습니다')+'</div>'; notes=[]; } return; }
     notes = d.items||[];
+    _hasMore = !!d.hasMore;
+    _cache[key] = { items: notes.slice(), hasMore: _hasMore };
     renderList();
   }catch(e){
-    $('list').innerHTML = '<div class="empty">네트워크 오류: '+esc(e.message||e)+'</div>';
+    if(!cached) $('list').innerHTML = '<div class="empty">네트워크 오류: '+esc(e.message||e)+'</div>';
   }
+}
+
+async function loadMore(){
+  if(!_hasMore) return;
+  var q = _q, nextPage = _page + 1;
+  try{
+    var r = await fetch('/api/notes?action=list&page='+nextPage+'&q='+encodeURIComponent(q));
+    var d = await safeJson(r);
+    if(_q!==q || !d.ok) return;
+    _page = nextPage;
+    notes = notes.concat(d.items||[]);
+    _hasMore = !!d.hasMore;
+    _cache[cacheKey(q)] = { items: notes.slice(), hasMore: _hasMore };
+    renderList();
+  }catch(e){ toast('네트워크 오류: '+(e.message||e)); }
 }
 
 function renderList(){
   if(!notes.length){ $('list').innerHTML='<div class="empty">노트가 없습니다. "+ 새 노트"로 시작하세요.</div>'; return; }
-  $('list').innerHTML = notes.map(function(n){
+  var html = notes.map(function(n){
     var when = n.updatedAt ? new Date(n.updatedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
     return '<div class="note-card" onclick="openEditor(\''+esc(n.id)+'\')">'
       + '<div class="note-title">'+esc(n.title||'제목 없음')+'</div>'
@@ -170,6 +204,8 @@ function renderList(){
       + '<div class="note-meta">'+esc(when)+'</div>'
       + '</div>';
   }).join('');
+  if(_hasMore) html += '<button class="new-btn" style="background:var(--surface2);color:var(--text);box-shadow:none;border:1px solid var(--border)" onclick="loadMore()">더 보기</button>';
+  $('list').innerHTML = html;
 }
 
 /* ── 편집기 ── */
@@ -217,6 +253,7 @@ async function saveCurrent(){
     if(!d.ok){ toast(d.message||'저장 실패'); return; }
     toast('저장되었습니다');
     closeEditor();
+    _cache={}; // 방금 쓴 변경을 즉시 반영(캐시된 옛 목록으로 잠깐 되돌아가지 않도록)
     loadNotes();
   }catch(e){ toast('네트워크 오류: '+(e.message||e)); }
 }
@@ -233,6 +270,7 @@ async function deleteCurrent(){
     if(!d.ok){ toast(d.message||'삭제 실패'); return; }
     toast('삭제되었습니다');
     closeEditor();
+    _cache={}; // 방금 지운 노트가 캐시된 옛 목록에 다시 나타나지 않도록
     loadNotes();
   }catch(e){ toast('네트워크 오류: '+(e.message||e)); }
 }
