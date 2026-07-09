@@ -162,9 +162,21 @@ function persistBodyCache(){
    중복 호출 없이 "이미 도착해 있는" 체감으로 열린다. id별 진행 중 요청은 1개로 합침(de-dupe). */
 var _prefetchInflight={};
 var PREFETCH_FRESH_MS=15000; // 최근에 채운 캐시는 재요청하지 않음(과도한 hover 재발화 방지)
-function fetchNoteBody(id){
+// 서로 다른 id 동시 프리페치 상한. 초과분은 "가장 오래된 요청을 취소"하지 않고 그냥 스킵한다 —
+// 이미 네트워크로 나간 요청은 취소해도 서버 부담이 줄지 않고, 클릭(openEditor)은 이 상한과 무관하게
+// 항상 fetchNoteBody 를 새로 호출하므로 스킵해도 실제 열람 시 회귀가 없다(더 단순하고 안전한 선택).
+var PREFETCH_MAX_CONCURRENT=3;
+function canStartPrefetch(id){
+  var cached=_bodyCache[id];
+  if(cached && (Date.now()-(cached.cachedAt||0))<PREFETCH_FRESH_MS) return false; // 이미 신선함
+  if(_prefetchInflight[id]) return false; // 이미 진행 중(다른 트리거가 먼저 걸었음)
+  if(Object.keys(_prefetchInflight).length >= PREFETCH_MAX_CONCURRENT) return false; // 동시 상한 초과
+  return true;
+}
+function fetchNoteBody(id, signal){
   if(_prefetchInflight[id]) return _prefetchInflight[id];
-  var p = fetch('/api/notes?action=get&id='+encodeURIComponent(id))
+  var opts = signal ? { signal: signal } : undefined;
+  var p = fetch('/api/notes?action=get&id='+encodeURIComponent(id), opts)
     .then(function(r){ return safeJson(r); })
     .then(function(d){
       if(d && d.ok && d.item){
@@ -177,14 +189,59 @@ function fetchNoteBody(id){
       throw err;
     });
   _prefetchInflight[id] = p;
+  // 취소(AbortError)든 실패든 여기서 in-flight 등록을 해제 — 이후 openEditor 클릭이 새 요청을 다시 시작할 수 있어야 한다.
   p.finally(function(){ if(_prefetchInflight[id]===p) delete _prefetchInflight[id]; });
   return p;
 }
 function prefetchNote(id){
-  if(!id) return;
-  var cached=_bodyCache[id];
-  if(cached && (Date.now()-(cached.cachedAt||0))<PREFETCH_FRESH_MS) return; // 이미 신선함
+  if(!id || !canStartPrefetch(id)) return;
   fetchNoteBody(id).catch(function(){}); // 프리페치 실패는 조용히 무시(클릭 시 openEditor 가 다시 시도)
+}
+
+/* ── 터치 프리페치(스크롤 오탐 방지): touchstart 좌표를 기록하고 TOUCH_PREFETCH_DELAY_MS 만큼
+   대기했다가 발동한다 — 그 사이 touchmove 가 임계값(10px) 이상 움직이면(=스크롤) 아직 안 나간
+   요청은 타이머만 지워 아예 트리거하지 않고, 이미 나간 요청은 AbortController 로 중단한다.
+   목록 컨테이너 1곳에만 위임 바인딩(카드마다 리스너를 달지 않음) + passive 라 스크롤 성능에 영향 없다. */
+var TOUCH_PREFETCH_DELAY_MS=70;
+var TOUCH_MOVE_THRESHOLD_SQ=10*10;
+var _touchPrefetch=null; // {x,y,timer,controller}
+function cancelTouchPrefetch(){
+  if(!_touchPrefetch) return;
+  if(_touchPrefetch.timer){ clearTimeout(_touchPrefetch.timer); }
+  if(_touchPrefetch.controller){ _touchPrefetch.controller.abort(); }
+  _touchPrefetch=null;
+}
+function startTouchPrefetch(id, x, y){
+  cancelTouchPrefetch();
+  var state={ x:x, y:y, timer:null, controller:null };
+  state.timer=setTimeout(function(){
+    state.timer=null;
+    if(!canStartPrefetch(id)) return;
+    state.controller = ('AbortController' in window) ? new AbortController() : null;
+    fetchNoteBody(id, state.controller && state.controller.signal).catch(function(){});
+  }, TOUCH_PREFETCH_DELAY_MS);
+  _touchPrefetch=state;
+}
+function bindListTouch(){
+  var list=$('list');
+  if(!list || list._touchBound) return;
+  list._touchBound=true;
+  list.addEventListener('touchstart', function(e){
+    var card=e.target.closest('.note-card');
+    var t=e.touches[0];
+    var id=card && card.getAttribute('data-id');
+    if(!id || !t) return;
+    startTouchPrefetch(id, t.clientX, t.clientY);
+  }, {passive:true});
+  list.addEventListener('touchmove', function(e){
+    if(!_touchPrefetch) return;
+    var t=e.touches[0];
+    if(!t) return;
+    var dx=t.clientX-_touchPrefetch.x, dy=t.clientY-_touchPrefetch.y;
+    if((dx*dx+dy*dy) > TOUCH_MOVE_THRESHOLD_SQ) cancelTouchPrefetch(); // 스크롤로 판단 — 취소
+  }, {passive:true});
+  list.addEventListener('touchend', function(){ _touchPrefetch=null; }, {passive:true}); // 발동된 요청은 그대로 진행(정상 탭)
+  list.addEventListener('touchcancel', function(){ cancelTouchPrefetch(); }, {passive:true});
 }
 
 /* ── 한글 IME composition 가드 (제목/본문/검색) ──
@@ -263,7 +320,7 @@ function renderList(){
   if(!notes.length){ $('list').innerHTML='<div class="empty">노트가 없습니다. "+ 새 노트"로 시작하세요.</div>'; return; }
   var html = notes.map(function(n){
     var when = n.updatedAt ? new Date(n.updatedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
-    return '<div class="note-card" onclick="openEditor(\''+esc(n.id)+'\')" onmouseenter="prefetchNote(\''+esc(n.id)+'\')" ontouchstart="prefetchNote(\''+esc(n.id)+'\')">'
+    return '<div class="note-card" data-id="'+esc(n.id)+'" onclick="openEditor(\''+esc(n.id)+'\')" onmouseenter="prefetchNote(\''+esc(n.id)+'\')">'
       + '<div class="note-title">'+esc(n.title||'제목 없음')+'</div>'
       + '<div class="note-body">'+esc(n.preview||n.body||'')+'</div>'
       + '<div class="note-meta">'+esc(when)+'</div>'
@@ -349,6 +406,7 @@ async function deleteCurrent(){
 applyTheme();
 bindIme($('titleInput')); bindIme($('bodyInput')); bindIme($('searchInput')); // IME 조합 가드
 $('bodyInput').addEventListener('input', function(){ _bodyDirty = true; }); // 사용자 편집 중엔 SWR 백그라운드 응답으로 덮어쓰지 않음
+bindListTouch(); // 목록 컨테이너에 터치 프리페치 위임 바인딩(카드 재렌더와 무관하게 1회만)
 loadNotes();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
