@@ -35,22 +35,40 @@ export default async function handler(req, res) {
 
   try {
     // 상세 조회 — 목록엔 없는 전체 본문. 편집기 진입 시에만 호출.
+    //  본문은 notes_meta.body 에 캐시돼 있으면 Drive 를 전혀 타지 않는다(빠른 경로, 목표 <300ms).
+    //  캐시 미스(구 노트 미백필 등)일 때만 Drive 폴백 + 다음 조회를 위해 백필.
     if (action === "get") {
       const id = String(req.query.id || (req.body && req.body.id) || "").trim();
       if (!id) return res.status(400).json({ ok: false, message: "id가 필요합니다" });
 
       const t0 = Date.now();
-      const drive = getDrive();
       const pool = await getPool();
       const metaR = await pool.request().input("id", id)
-        .query(`SELECT drive_file_id AS "driveFileId" FROM notes_meta WHERE id=@id AND deleted_at IS NULL`);
-      let fileId = metaR.recordset?.[0]?.driveFileId || null;
-      if (!fileId) fileId = await findFileByName(drive, NOTES_FOLDER_ID, `${id}.json`); // 메타에 아직 없는 구노트 폴백
+        .query(`SELECT drive_file_id AS "driveFileId", title, body, updated_at AS "updatedAt"
+                FROM notes_meta WHERE id=@id AND deleted_at IS NULL`);
+      const row = metaR.recordset?.[0] || null;
+      const tMeta = Date.now() - t0;
 
+      if (row && row.body != null) {
+        console.log(`[notes] get(cache-hit) id=${id} meta=${tMeta}ms total=${Date.now() - t0}ms`);
+        return res.status(200).json({ ok: true, item: { id, title: row.title, body: row.body, updatedAt: row.updatedAt } });
+      }
+
+      const tDriveStart = Date.now();
+      const drive = getDrive();
+      let fileId = row?.driveFileId || null;
+      if (!fileId) fileId = await findFileByName(drive, NOTES_FOLDER_ID, `${id}.json`); // 메타에 아직 없는 구노트 폴백
       if (!fileId) return res.status(200).json({ ok: false, message: "대상 노트를 찾을 수 없습니다" });
       const note = await readJsonById(drive, fileId);
-      console.log(`[notes] get id=${id} ${Date.now() - t0}ms`);
+      const tDrive = Date.now() - tDriveStart;
+      console.log(`[notes] get(cache-miss) id=${id} meta=${tMeta}ms drive=${tDrive}ms total=${Date.now() - t0}ms`);
       if (!note || note.deleted) return res.status(200).json({ ok: false, message: "대상 노트를 찾을 수 없습니다" });
+
+      // 백필: 다음 조회부턴 캐시 히트 되도록(실패해도 응답엔 영향 없음, 다음 5분 동기화가 다시 채움).
+      pool.request().input("id", id).input("driveFileId", fileId).input("body", note.body || "")
+        .query(`UPDATE notes_meta SET drive_file_id=@driveFileId, body=@body WHERE id=@id`)
+        .catch(e => console.warn("[notes] get 백필 실패(무시):", e.message));
+
       return res.status(200).json({ ok: true, item: note });
     }
 
@@ -92,11 +110,11 @@ export default async function handler(req, res) {
 
       await withTransaction(async (client) => {
         await client.query(
-          `INSERT INTO notes_meta (id, drive_file_id, title, preview, source, updated_at, deleted_at)
-           VALUES ($1, $2, $3, $4, 'clover', $5, NULL)
+          `INSERT INTO notes_meta (id, drive_file_id, title, preview, body, source, updated_at, deleted_at)
+           VALUES ($1, $2, $3, $4, $5, 'clover', $6, NULL)
            ON CONFLICT (id) DO UPDATE SET
-             title = $3, preview = $4, source = 'clover', updated_at = $5, deleted_at = NULL`,
-          [id, prevDriveFileId, title, preview, now]
+             title = $3, preview = $4, body = $5, source = 'clover', updated_at = $6, deleted_at = NULL`,
+          [id, prevDriveFileId, title, preview, body, now]
         );
         const up = await saveJsonToDrive(drive, NOTES_FOLDER_ID, id, data, prevDriveFileId); // 실패 시 throw → 트랜잭션 롤백(메타 되돌림)
         if (up.id !== prevDriveFileId) {

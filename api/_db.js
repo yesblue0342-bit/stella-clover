@@ -333,12 +333,15 @@ export const CREATE_FLOWS = `
 
 // 노트 목록 메타 캐시(Drive 원본의 읽기 전용 인덱스) + 증분 동기화 커서.
 //  목록/검색은 이 테이블만 SELECT — Drive API 를 타지 않는다(TTFB 개선, api/notes.js 참고).
+//  body: 상세 열람(action=get)도 Drive 를 타지 않도록 본문까지 캐시(Drive 는 여전히 원본,
+//  이 컬럼은 캐시일 뿐 — 쓰기는 항상 Drive 와 같은 트랜잭션, 5분 동기화가 외부 변경분을 갱신).
 export const CREATE_NOTES_META = `
   CREATE TABLE IF NOT EXISTS notes_meta (
     id TEXT PRIMARY KEY,
     drive_file_id TEXT,
     title TEXT,
     preview TEXT,
+    body TEXT,
     keywords TEXT,
     source TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -386,7 +389,8 @@ export const MIGRATE = `
   ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS meeting_id BIGINT;
   ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS audio_drive_id TEXT;
   ALTER TABLE transcribe_jobs ADD COLUMN IF NOT EXISTS audio_drive_link TEXT;
-  ALTER TABLE cl_flows ADD COLUMN IF NOT EXISTS user_id TEXT;`;
+  ALTER TABLE cl_flows ADD COLUMN IF NOT EXISTS user_id TEXT;
+  ALTER TABLE notes_meta ADD COLUMN IF NOT EXISTS body TEXT;`;
 
 let schemaReady = false;
 async function ensureSchema(pgPool) {

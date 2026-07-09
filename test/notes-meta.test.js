@@ -1,7 +1,9 @@
 // notes_meta 통합 테스트 — 실제 Postgres 필요(DATABASE_URL). 미설정 시 전체 skip.
 //   검증: list 액션이 notes_meta 만 SELECT(Drive 미접근·본문 미포함)하고 검색/페이지네이션/
-//         정렬이 동작 / withTransaction 이 실패 시 ROLLBACK, 성공 시 COMMIT 하는지.
-import { test, after } from "node:test";
+//         정렬이 동작 / withTransaction 이 실패 시 ROLLBACK, 성공 시 COMMIT 하는지 /
+//         상세(get) 본문 캐시 히트 시 Drive 미접근 + 캐시 미스 시 폴백·백필 / save 가 본문을
+//         notes_meta 에도 함께 쓰는지(node --experimental-test-module-mocks 필요, package.json 참고).
+import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 
 const SKIP = process.env.DATABASE_URL ? false : "DATABASE_URL 미설정 — 통합 테스트 skip";

@@ -1,6 +1,105 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
-## [2026-07-09] 노트 목록: Stella GPT 대비 체감 속도 비교 진단 + 커넥션 풀 분리/인덱스 보강
+## [2026-07-09] 노트 상세 열람(본문) ~3초 지연 진단 + Postgres 본문 캐시 + Drive 토큰 캐시로 <300ms화
+
+- **배경**: 목록(`action=list`)은 직전 개선(`1c3599c`)으로 이미 `notes_meta`만 SELECT해 1~2ms대.
+  그러나 노트를 클릭해 본문을 여는 데는 여전히 체감 약 3초 — 상세(`action=get`)는 여전히 매번
+  Google Drive 를 직접 탄다(목록 캐시 개선 범위 밖이었음). 이번 작업은 이 상세 열람 경로를 계측해
+  실제 병목을 확정하고 서버 응답 300ms 이내(캐시 히트) + 재열람 체감 0초를 만드는 것이 목표.
+
+### 진단(코드 추적 결과)
+`api/notes.js` `action=get` 경로를 구간별로 나눠보면(수정 전 코드 기준):
+1. `notes_meta`에서 `drive_file_id` 1행 SELECT — Postgres, 1~2ms(list 와 동일 인덱스/풀, 무시할 수준).
+2. **`getDrive()` 호출** — `api/_drive.js`가 **매 호출마다 새 `OAuth2Client`를 생성**하고
+   `refresh_token`만 세팅한 상태였다. googleapis 클라이언트는 인스턴스에 `access_token`+`expiry_date`를
+   들고 있다가 **만료 임박 시에만** 재교환하는 내장 캐시가 있는데, 인스턴스 자체를 매번 새로 만들면
+   이 캐시가 원천적으로 무의미해져 **API 요청마다 Google OAuth 토큰 엔드포인트 왕복이 매번 새로
+   발생**한다. 목록 조회 최적화 때는 이 함수가 아예 호출되지 않도록 우회했지만(list는 Drive
+   미접근), 상세 조회는 처음부터 로직상 Drive 를 반드시 타야 해서 이 문제가 그대로 노출돼 있었다.
+   (동일 패턴이 Stella GPT `lib/drive-utils.js`에도 있음을 이전 조사에서 이미 확인한 바 있음 —
+   같은 팀 코드베이스에 반복되는 known issue.)
+3. **`readJsonById` → `downloadFileById` → `drive.files.get(alt=media)`** — 실제 파일 다운로드,
+   메타+본문 별도 2회가 아니라 **1회 호출**(진단 항목 (b) 확인 — 이미 효율적, 문제 아님).
+4. 프런트(`note/index.html`) `openEditor()`는 모달을 **fetch 완료 전에 이미 `.show` 처리**해
+   블로킹은 아니었으나(진단 항목 (c)), 본문 영역에 "불러오는 중…" 플레이스홀더만 넣고 fetch가
+   끝날 때까지 그대로 방치 — 목록에 이미 있는 `preview`(200자)를 활용하지 않고 있었다.
+5. **재열람 캐시 없음**(진단 항목 (d)): `note/index.html`의 SWR 캐시(`_cache`)는 목록(list)에만
+   있고 본문에는 대응하는 캐시가 전혀 없어 **같은 노트를 몇 번을 다시 열어도 매번 Drive 왕복**.
+
+→ 결론: 체감 3초의 실질 원인은 **(2) 매 요청 OAuth 토큰 재교환 + (3) Drive 파일 다운로드** 두
+Google API 왕복의 합(네트워크 상태에 따라 변동이 크지만, 이 두 왕복이 누적되는 구조 자체가
+근본 원인) + **(5) 재열람마다 왕복이 반복**되는 캐시 부재. Postgres/미들웨어 구간은 처음부터
+문제가 아니었음(1~2ms).
+
+### 적용한 수정
+1. **`api/_drive.js`**: `getDrive()`를 프로세스 싱글턴으로 변경 — `OAuth2Client` 인스턴스를 재사용해
+   googleapis 내장 토큰 캐시(만료 임박 시에만 자동 갱신)가 실제로 동작하게 함. 상세 조회뿐 아니라
+   `audio.js`/`transcribe.js`/`meetings.js`/`flow.js`/`autosave.js`/`cleanup.js`/`drive-search.js`/
+   `lib/jobs-runtime.js`/`lib/minutes.js` 등 Drive 를 쓰는 모든 경로가 동일하게 혜택을 받음(순수
+   추가 개선, 동작 변경 없음). `tokens` 이벤트에 재교환 발생 시 로그를 남겨 배포 후 실제로 왕복이
+   줄었는지 컨테이너 로그로 확인 가능.
+2. **`api/_db.js`**: `notes_meta`에 **`body TEXT`** 컬럼 추가(`CREATE_NOTES_META` + idempotent
+   `MIGRATE` ALTER — 이 저장소의 기존 관례, 별도 `migrations/` 디렉토리 없음). 본문은 대부분
+   마크다운 텍스트로 작아 Postgres 컬럼으로 캐시하기에 적합하다는 전제(지시사항)대로.
+3. **`api/notes.js`**:
+   - `action=get`: `notes_meta.body`가 채워져 있으면 **Postgres만 SELECT하고 즉시 반환**(Drive
+     미접근). 비어있으면(구 노트 미백필) 기존처럼 Drive 폴백 + **응답 후 백필**(fire-and-forget
+     UPDATE, 실패해도 다음 5분 동기화가 다시 채움 — 응답 지연에 영향 없음)해 다음 조회부터
+     캐시 히트로 전환. 구간별 타이밍을 `meta=Nms drive=Nms total=Nms` 로 로그.
+   - `action=save`: `notes_meta` upsert에 `body` 컬럼 추가 — 기존과 동일하게 Drive 저장과 **한
+     트랜잭션**(`withTransaction`)이라 Drive 실패 시 메타 전체가 롤백(캐시가 Drive 보다 앞서 나가지
+     않음 보장).
+4. **`lib/notesSync.js`**: 5분 증분 동기화(`incrementalSync`)와 전체 재스캔(`fullScanToMeta`, 백필
+   스크립트·`rebuildIndex` 공용)이 어차피 `readJsonById`로 노트 전체 JSON을 이미 받아오고 있었으므로
+   (지금까진 `preview` 200자만 자르고 버림) **추가 Drive 호출 없이** `body` 컬럼도 함께 upsert하도록
+   확장 — "Stella GPT가 Drive에서 고친 본문이 5분 내 Clover에도 반영"과 "백필 스크립트 확장" 두
+   요구사항을 같은 코드 변경으로 충족.
+5. **`scripts/backfill-notes-meta.mjs`**: 코드 변경 없음(내부에서 부르는 `fullScanToMeta`가 이미
+   `body`까지 채우게 됐으므로 자동 적용). 이미 증분 커서가 있는 기존 배포는 "옛 노트"가 열람 시
+   지연 백필되므로, 즉시 전면 적용하려면 배포 후 1회 수동 실행하라는 안내를 스크립트 주석에 추가.
+6. **`note/index.html`**:
+   - 노트 클릭 시 모달은 (기존처럼) 즉시 열되, 본문 영역에 "불러오는 중…" 대신 **본문 캐시가
+     있으면 캐시된 전체 본문**, 없으면 **목록의 `preview`(200자)**를 우선 표시 — 체감상 항상
+     즉시 무언가가 보임.
+   - **본문 캐시**(`_bodyCache`, 메모리 + `localStorage('cl_note_body_cache_v1')`, id별
+     `{body,updatedAt,cachedAt}`, 최대 300건 LRU 유사 트림)를 신설. 한 번이라도 연 노트는 재열람 시
+     **네트워크 없이 즉시 전체 본문 표시** + 저장 버튼도 즉시 활성화(이미 전체 본문 보유 — preview만
+     있을 땐 잘림 방지를 위해 저장은 실제 본문 도착까지 잠금, 기존 로직 유지/강화).
+   - 열 때마다 SWR로 백그라운드 재검증(다른 기기/Stella GPT에서 고친 본문 반영) — 단, 사용자가
+     그 사이 직접 타이핑했으면(`_bodyDirty`, `input` 이벤트로만 세팅되어 프로그램적 세팅과 구분)
+     되돌아온 응답으로 덮어쓰지 않음. 저장/삭제 시 캐시도 함께 갱신/제거.
+   - `sw.js` 캐시 버전 **v26 → v27** bump(프론트 변경 규칙).
+
+### 검증
+- `node --check api/_db.js api/_drive.js api/notes.js lib/notesSync.js server.mjs` 전체 통과,
+  `note/index.html` 인라인 `<script>` `new Function()` 파싱 통과.
+- 임시 로컬 Postgres 16(도커, 작업 종료 후 컨테이너 삭제) + `node:test`의
+  `mock.module`(`--experimental-test-module-mocks`, `package.json`의 `test` 스크립트에 반영)로
+  Google 자격증명 없이 `api/_drive.js`를 스텁 대체해 **실제 핸들러 코드**(`api/notes.js`)를 그대로
+  실행하는 신규 통합 테스트(`test/notes-body-cache.test.js`) 작성·통과:
+  - 캐시 히트: `notes_meta.body` 채워진 상태로 `action=get` 호출 → **응답 2ms, `getDrive()` 호출
+    0회** 확인(로그: `[notes] get(cache-hit) id=itest-hit-note meta=2ms total=2ms`).
+  - 캐시 미스: `body` 비어있는 상태로 `action=get` → Drive(스텁) 1회 읽고 즉시 응답(`meta=1ms
+    drive=0ms total=1ms`, 스텁이라 drive 자체 지연은 0 — 실제 운영에서는 여기가 기존의 "3초" 구간),
+    응답 후 `notes_meta.body`가 자동 백필됨을 폴링으로 확인, **재조회는 Drive 재접근 없이
+    캐시 히트로 전환**됨을 확인(`readJsonById` 호출 횟수가 늘지 않음을 어서션).
+  - 저장: `action=save` 호출 후 `notes_meta.body`에 저장한 본문이 실제로 반영됨을 SELECT로 확인,
+    직후 `action=get`이 Drive 없이 캐시 히트로 응답(`meta=1ms total=1ms`)함을 확인.
+- `npm test`(스키마 레이스 방지를 위해 사전 1회 `getPool()`로 워밍업 후 실행): **91 pass / 1 skip
+  / 0 fail** — 기존 `notes-meta.test.js`(list/트랜잭션) 포함 전 스위트 회귀 없음.
+- **미실행(불가)**: 프로덕션 OCI 상 실측(진짜 Google OAuth 왕복 포함 전/후 3초 vs 300ms 비교) —
+  샌드박스는 프로덕션 OCI/Google API 에 네트워크 접근이 없음(기존 세션들과 동일한 제약,
+  CLAUDE.md 개발 워크플로 7). 배포 후 컨테이너 로그의 `[notes] get(cache-hit) ... totalNms` /
+  `[notes] get(cache-miss) ... driveNms` 로 실측 가능 — cache-hit 케이스는 로컬 실측과 동일하게
+  수 ms 대일 것으로 기대(Postgres 왕복만), cache-miss(첫 열람/백필 이전 구노트)는 기존과 같은
+  Drive 왕복이 여전히 남지만 **토큰 재교환 왕복 1회가 제거**되어 절반 가까이 줄어들 것으로 기대.
+  기존 노트 전체를 즉시 <300ms화하려면 배포 후 `node scripts/backfill-notes-meta.mjs` 1회 수동
+  실행 권장(위 5번 참고 — 안 돌려도 노트를 한 번씩 열면 자연히 채워짐).
+- 회귀 없음 확인: `action=save/delete`는 응답 계약(반환 shape) 동일, `note/index.html`의
+  검색/목록/IME/테마 로직은 무변경, `lib/notesSync.js`가 쓰는 SQL 은 컬럼 하나만 추가(기존 컬럼
+  UPDATE 문 구조 동일), 5분 동기화·전사→공유노트 자동저장 경로는 호출 시그니처 변경 없음.
+
+
 
 - **배경**: 직전 개선(`8634f78`)으로 `action=list`는 이미 `notes_meta`(Postgres)만 SELECT하고
   Drive OAuth 왕복을 타지 않는다. 그런데도 실사용 체감상 Stella GPT(`stella-ai-workspace`)의

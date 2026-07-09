@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test/*.test.js"
+    "test": "node --experimental-test-module-mocks --test test/*.test.js"
   },
   "dependencies": {
     "express": "^4.21.2",

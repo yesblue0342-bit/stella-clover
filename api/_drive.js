@@ -5,10 +5,19 @@ import { Readable } from "stream";
 const CLOVER_FOLDER = "stellaclover";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 
+// ★ 프로세스 싱글턴 — 호출마다 새 OAuth2Client 를 만들면 access_token 캐시가 없어(googleapis는
+//   클라이언트 인스턴스에 access_token+expiry_date 를 들고 있다가 만료 임박 시에만 재교환)
+//   요청마다 refresh_token→access_token 교환 왕복이 매번 새로 발생한다(노트 상세 열람 지연의
+//   주 원인으로 진단됨, TEST_RESULTS.md 참고). 인스턴스를 프로세스 수명 동안 재사용해
+//   googleapis 내장 토큰 캐시(만료 임박 시에만 자동 갱신)가 실제로 동작하게 한다.
+let _driveClient = null;
 export function getDrive() {
+  if (_driveClient) return _driveClient;
   const o = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
   o.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
-  return google.drive({ version: "v3", auth: o });
+  o.on("tokens", () => console.log("[drive] access_token 재교환(refresh_token 왕복 발생)"));
+  _driveClient = google.drive({ version: "v3", auth: o });
+  return _driveClient;
 }
 
 // Drive 검색 쿼리에서 작은따옴표 이스케이프 (폴더/파일명 인젝션 방지)

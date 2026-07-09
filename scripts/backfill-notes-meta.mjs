@@ -9,6 +9,10 @@
 //   upsert 한다(lib/notesSync.fullScanToMeta 와 동일 로직, 멱등 — 몇 번을 다시 돌려도 안전).
 //   서버가 이미 부팅 시 증분 동기화 커서가 없으면 자동으로 같은 전체 스캔을 1회 수행하므로,
 //   이 스크립트는 배포 전 수동으로 미리 백필해 두거나 진행 상황을 즉시 확인하고 싶을 때 쓴다.
+//   ★ notes_meta.body 컬럼 추가(상세 열람 캐시) 이후: 이미 커서가 있어 5분 증분 동기화만
+//   도는 기존 배포에선 "이미 동기화된 옛 노트"의 body 가 채워지지 않는다(증분은 최근 변경분만).
+//   그런 기존 배포에 body 캐시를 즉시 전면 적용하려면 이 스크립트를 1회 수동 실행할 것
+//   (그러지 않아도 노트를 한 번씩 열면 그때마다 캐시 미스→Drive 폴백→자동 백필되어 결국 채워짐).
 import { getDrive } from "../api/_drive.js";
 import { hasDbConfig } from "../api/_db.js";
 import { fullScanToMeta } from "../lib/notesSync.js";

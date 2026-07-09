@@ -134,6 +134,29 @@ var NOTES_CACHE_KEY='cl_notes_cache_v1';
   }catch(e){}
 })();
 
+/* ── 노트 본문 캐시(SWR): 한 번 연 노트는 재열람 시 네트워크 없이 즉시 표시, 백그라운드로 갱신 ──
+   메모리(_bodyCache) + localStorage(cl_note_body_cache_v1) 이중 캐시, id별 {body,updatedAt,cachedAt}. */
+var BODY_CACHE_KEY='cl_note_body_cache_v1';
+var BODY_CACHE_MAX=300; // 과대 성장 방지(오래된 항목부터 제거)
+var _bodyCache={};
+var _bodyDirty=false; // 사용자가 본문을 직접 편집했으면(프로그램적 세팅은 'input' 이벤트 미발생) 백그라운드 갱신으로 덮어쓰지 않음
+(function hydrateBodyCache(){
+  try{
+    var saved=JSON.parse(localStorage.getItem(BODY_CACHE_KEY)||'null');
+    if(saved && typeof saved==='object') _bodyCache=saved;
+  }catch(e){}
+})();
+function persistBodyCache(){
+  try{
+    var keys=Object.keys(_bodyCache);
+    if(keys.length>BODY_CACHE_MAX){
+      keys.sort(function(a,b){return (_bodyCache[a].cachedAt||0)-(_bodyCache[b].cachedAt||0);});
+      keys.slice(0, keys.length-BODY_CACHE_MAX).forEach(function(k){ delete _bodyCache[k]; });
+    }
+    localStorage.setItem(BODY_CACHE_KEY, JSON.stringify(_bodyCache));
+  }catch(e){}
+}
+
 /* ── 한글 IME composition 가드 (제목/본문/검색) ──
    조합 중(한글 입력 미완)에는 검색을 재실행하지 않고, 저장 시엔 조합을 먼저 확정한다. */
 var _composing=false;
@@ -220,36 +243,42 @@ function renderList(){
   $('list').innerHTML = html;
 }
 
-/* ── 편집기 ── */
+/* ── 편집기 ──
+   즉시 열림: 모달은 네트워크를 기다리지 않고 바로 뜬다. 본문 캐시가 있으면(재열람) 그걸
+   바로 보여주고 저장도 즉시 가능(이미 전체 본문 보유) — 없으면 목록 미리보기(200자)를 우선
+   보여준 뒤(저장은 잠금, 잘림 방지) 전체 본문이 도착하면 교체하고 저장을 푼다. */
 async function openEditor(id){
   currentId = id;
+  _bodyDirty = false;
   var n = id ? notes.find(function(x){return x.id===id;}) : null;
+  var cached = id ? _bodyCache[id] : null;
   $('editorHead').textContent = n ? '노트 편집' : '새 노트';
   $('titleInput').value = n ? (n.title||'') : '';
-  $('bodyInput').value = n ? '불러오는 중…' : '';
+  $('bodyInput').value = cached ? cached.body : (n ? (n.preview||'') : '');
   $('deleteBtn').style.display = n ? 'block' : 'none';
-  $('saveBtn').disabled = !!id; // 본문 로딩 중엔 저장 금지(플레이스홀더 텍스트로 덮어쓰기 방지)
+  $('saveBtn').disabled = !!id && !cached; // 전체 본문을 이미 캐시로 갖고 있으면 즉시 저장 허용
   $('editorModal').classList.add('show');
   setTimeout(function(){ $('titleInput').focus(); }, 50);
 
   if(id){
-    // 목록엔 본문 미리보기(200자)만 있으므로, 편집 진입 시 전체 본문을 새로 받아온다.
+    // SWR: 캐시가 있어도 최신본으로 백그라운드 갱신(다른 기기/Stella GPT에서 고쳤을 수 있음).
     try{
       var r = await fetch('/api/notes?action=get&id='+encodeURIComponent(id));
       var d = await safeJson(r);
       if(currentId!==id) return; // 그 사이 다른 노트를 열었으면 무시
-      if(!d.ok){ $('bodyInput').value=''; toast(d.message||'본문을 불러오지 못했습니다'); return; }
-      $('bodyInput').value = d.item.body||'';
+      if(!d.ok){ if(!cached) toast(d.message||'본문을 불러오지 못했습니다'); return; }
+      var freshBody = d.item.body||'';
+      _bodyCache[id] = { body: freshBody, updatedAt: d.item.updatedAt||null, cachedAt: Date.now() };
+      persistBodyCache();
+      if(!_bodyDirty) $('bodyInput').value = freshBody;
+      $('saveBtn').disabled = false;
     }catch(e){
       if(currentId!==id) return;
-      $('bodyInput').value='';
-      toast('네트워크 오류: '+(e.message||e));
-    } finally {
-      if(currentId===id) $('saveBtn').disabled = false;
+      if(!cached) toast('네트워크 오류: '+(e.message||e)); // 캐시가 있으면 이미 보여준 본문 유지, 저장도 이미 허용된 상태
     }
   }
 }
-function closeEditor(){ $('editorModal').classList.remove('show'); currentId=null; }
+function closeEditor(){ $('editorModal').classList.remove('show'); currentId=null; _bodyDirty=false; }
 
 async function saveCurrent(){
   if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); // 진행 중 한글 조합 확정 후 값 읽기
@@ -264,6 +293,8 @@ async function saveCurrent(){
     var d = await safeJson(r);
     if(!d.ok){ toast(d.message||'저장 실패'); return; }
     toast('저장되었습니다');
+    _bodyCache[d.item.id] = { body: d.item.body||'', updatedAt: d.item.updatedAt||null, cachedAt: Date.now() };
+    persistBodyCache();
     closeEditor();
     _cache={}; try{ localStorage.removeItem(NOTES_CACHE_KEY); }catch(e){} // 방금 쓴 변경을 즉시 반영(캐시된 옛 목록으로 잠깐 되돌아가지 않도록, 영속 캐시도 함께)
     loadNotes();
@@ -281,6 +312,7 @@ async function deleteCurrent(){
     var d = await safeJson(r);
     if(!d.ok){ toast(d.message||'삭제 실패'); return; }
     toast('삭제되었습니다');
+    delete _bodyCache[currentId]; persistBodyCache();
     closeEditor();
     _cache={}; try{ localStorage.removeItem(NOTES_CACHE_KEY); }catch(e){} // 방금 지운 노트가 캐시된 옛 목록에 다시 나타나지 않도록, 영속 캐시도 함께
     loadNotes();
@@ -290,6 +322,7 @@ async function deleteCurrent(){
 /* ── 초기화 ── */
 applyTheme();
 bindIme($('titleInput')); bindIme($('bodyInput')); bindIme($('searchInput')); // IME 조합 가드
+$('bodyInput').addEventListener('input', function(){ _bodyDirty = true; }); // 사용자 편집 중엔 SWR 백그라운드 응답으로 덮어쓰지 않음
 loadNotes();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
