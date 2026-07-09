@@ -87,6 +87,7 @@ const REWRITES = {
   "/db": "db.html", "/stella-db": "db.html",
   "/flow": "flow/index.html", "/stella-flow": "flow/index.html",
   "/rate": "rate/index.html", "/stella-rate": "rate/index.html", "/currency": "rate/index.html",
+  "/notes": "note/index.html", "/stella-notes": "note/index.html",
 };
 app.get(/.*/, (req, res, next) => {
   const target = REWRITES[req.path];

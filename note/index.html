@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stella 노트</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#1a4731">
+<meta name="description" content="Stella Clover 노트 — 메모 작성/검색 (Stella GPT와 노트 공유)">
+<style>
+/* ── 테마 토큰 (Clover / Flow / Rate 와 공유: localStorage cl_theme) ── */
+:root{
+  --bg:#eef3ee; --surface:#ffffff; --surface2:#f9fafb; --border:#e5e7eb;
+  --text:#111827; --text2:#6b7280; --text3:#9ca3af;
+  --brand:#1a4731; --brand2:#2d6a4f; --accent:#34d399; --accentbg:#ecfdf5;
+  --danger:#dc2626; --dangerbg:#fff5f5; --shadow:0 2px 12px rgba(0,0,0,.07);
+}
+[data-theme=dark]{
+  --bg:#0f1713; --surface:#16211b; --surface2:#1c2a22; --border:#2a3a30;
+  --text:#e6efe9; --text2:#9fb3a7; --text3:#7d8f84;
+  --brand:#34d399; --brand2:#5eead4; --accent:#34d399; --accentbg:#10241b;
+  --danger:#f87171; --dangerbg:#2a1414; --shadow:0 2px 14px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .2s,color .2s}
+button,input,textarea{font-family:inherit}
+
+.appbar{position:sticky;top:0;z-index:30;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}
+.appbar-in{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:8px;padding:10px 14px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:7px;font-weight:900;font-size:1.05rem;white-space:nowrap}
+.logo .leaf{font-size:1.2rem}
+.spacer{flex:1}
+.linkbtn{border:none;background:rgba(255,255,255,.16);color:#fff;border-radius:9px;padding:6px 10px;font-size:.78rem;font-weight:700;text-decoration:none;min-height:36px;display:flex;align-items:center;gap:4px}
+.iconbtn{border:none;background:rgba(255,255,255,.16);color:#fff;border-radius:9px;width:38px;height:36px;font-size:1rem}
+
+.app{max-width:720px;margin:0 auto;padding:14px 14px 60px}
+
+.search-box{display:flex;gap:8px;margin-bottom:12px}
+.search-box input{flex:1;min-width:0;border:2px solid var(--border);border-radius:12px;padding:10px 14px;font-size:.9rem;outline:none;background:var(--surface);color:var(--text)}
+.search-box input:focus{border-color:var(--brand2)}
+.new-btn{width:100%;height:48px;border:none;border-radius:14px;background:var(--brand);color:#fff;font-size:.94rem;font-weight:800;cursor:pointer;margin-bottom:14px}
+.new-btn:hover{background:var(--brand2)}
+
+.note-card{display:flex;flex-direction:column;gap:4px;padding:14px;border:1px solid var(--border);border-radius:14px;margin-bottom:8px;background:var(--surface);box-shadow:var(--shadow);cursor:pointer}
+.note-card:hover{border-color:var(--brand2)}
+.note-title{font-weight:800;font-size:.92rem}
+.note-body{font-size:.8rem;color:var(--text2);white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.note-meta{font-size:.72rem;color:var(--text3)}
+
+.empty{color:var(--text3);text-align:center;font-size:.85rem;padding:40px 10px}
+
+/* ── 에디터 모달 ── */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:none;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
+.modal.show{display:flex}
+.modal-content{background:var(--surface);color:var(--text);border-radius:18px;padding:18px;max-width:560px;width:100%;margin-top:24px}
+.modal-head{display:flex;align-items:center;margin-bottom:10px}
+.modal-close{margin-left:auto;border:none;background:none;font-size:1.4rem;cursor:pointer;color:var(--text3)}
+.title-input{width:100%;border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;font-size:.98rem;font-weight:700;background:var(--surface2);color:var(--text);outline:none;margin-bottom:8px}
+.body-input{width:100%;min-height:220px;border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;font-size:.86rem;line-height:1.6;background:var(--surface2);color:var(--text);outline:none;resize:vertical;margin-bottom:12px}
+.title-input:focus,.body-input:focus{border-color:var(--brand2)}
+.modal-btns{display:flex;gap:8px}
+.mbtn{flex:1;height:44px;border:none;border-radius:12px;font-size:.86rem;font-weight:700;cursor:pointer}
+.mbtn.save{background:var(--brand);color:#fff}
+.mbtn.save:hover{background:var(--brand2)}
+.mbtn.del{background:var(--dangerbg);color:var(--danger)}
+
+.toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:var(--brand);color:#fff;padding:10px 18px;border-radius:12px;font-size:.85rem;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<header class="appbar"><div class="appbar-in">
+  <div class="logo"><span class="leaf">📝</span> Stella 노트</div>
+  <div class="spacer"></div>
+  <a class="linkbtn" href="/" title="Stella Clover">🍀 Clover</a>
+  <button class="iconbtn" id="themeToggle" onclick="toggleTheme()" title="다크/라이트">🌙</button>
+</div></header>
+
+<div class="app">
+  <div class="search-box">
+    <input id="searchInput" type="text" placeholder="제목/내용 검색" oninput="onSearchInput()">
+  </div>
+  <button class="new-btn" onclick="openEditor(null)">+ 새 노트</button>
+  <div id="list"></div>
+</div>
+
+<div class="modal" id="editorModal">
+  <div class="modal-content">
+    <div class="modal-head">
+      <strong id="editorHead">새 노트</strong>
+      <button class="modal-close" onclick="closeEditor()">&times;</button>
+    </div>
+    <input class="title-input" id="titleInput" type="text" placeholder="제목">
+    <textarea class="body-input" id="bodyInput" placeholder="내용을 입력하세요"></textarea>
+    <div class="modal-btns">
+      <button class="mbtn del" id="deleteBtn" onclick="deleteCurrent()" style="display:none">삭제</button>
+      <button class="mbtn save" onclick="saveCurrent()">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var $=function(id){return document.getElementById(id);};
+var THEME_KEY='cl_theme';
+var notes=[];
+var currentId=null;
+
+/* ── 테마 (Clover 앱과 공유) ── */
+function applyTheme(){var t=localStorage.getItem(THEME_KEY)||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+  document.documentElement.setAttribute('data-theme',t);$('themeToggle').textContent=t==='dark'?'☀️':'🌙';}
+function toggleTheme(){var cur=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+  localStorage.setItem(THEME_KEY,cur);applyTheme();}
+
+var _tt;
+function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(_tt);_tt=setTimeout(function(){t.classList.remove('show');},2200);}
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+async function safeJson(res){
+  var text = await res.text();
+  try { return JSON.parse(text); } catch(e) { return { ok:false, message:'서버 응답 파싱 실패' }; }
+}
+
+/* ── 목록/검색 ── */
+var _searchT;
+function onSearchInput(){ clearTimeout(_searchT); _searchT=setTimeout(loadNotes, 300); }
+
+async function loadNotes(){
+  var q = $('searchInput').value.trim();
+  $('list').innerHTML = '<div class="empty">불러오는 중…</div>';
+  try{
+    var r = await fetch('/api/notes?action=list&q='+encodeURIComponent(q));
+    var d = await safeJson(r);
+    if(!d.ok){ $('list').innerHTML='<div class="empty">'+esc(d.message||'노트를 불러오지 못했습니다')+'</div>'; notes=[]; return; }
+    notes = d.items||[];
+    renderList();
+  }catch(e){
+    $('list').innerHTML = '<div class="empty">네트워크 오류: '+esc(e.message||e)+'</div>';
+  }
+}
+
+function renderList(){
+  if(!notes.length){ $('list').innerHTML='<div class="empty">노트가 없습니다. "+ 새 노트"로 시작하세요.</div>'; return; }
+  $('list').innerHTML = notes.map(function(n){
+    var when = n.updatedAt ? new Date(n.updatedAt).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    return '<div class="note-card" onclick="openEditor(\''+esc(n.id)+'\')">'
+      + '<div class="note-title">'+esc(n.title||'제목 없음')+'</div>'
+      + '<div class="note-body">'+esc(n.body||'')+'</div>'
+      + '<div class="note-meta">'+esc(when)+'</div>'
+      + '</div>';
+  }).join('');
+}
+
+/* ── 편집기 ── */
+function openEditor(id){
+  currentId = id;
+  var n = id ? notes.find(function(x){return x.id===id;}) : null;
+  $('editorHead').textContent = n ? '노트 편집' : '새 노트';
+  $('titleInput').value = n ? (n.title||'') : '';
+  $('bodyInput').value = n ? (n.body||'') : '';
+  $('deleteBtn').style.display = n ? 'block' : 'none';
+  $('editorModal').classList.add('show');
+  setTimeout(function(){ $('titleInput').focus(); }, 50);
+}
+function closeEditor(){ $('editorModal').classList.remove('show'); currentId=null; }
+
+async function saveCurrent(){
+  var title = $('titleInput').value.trim();
+  var body = $('bodyInput').value;
+  if(!title && !body){ toast('제목이나 내용을 입력하세요'); return; }
+  try{
+    var r = await fetch('/api/notes?action=save', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: currentId, title: title, body: body })
+    });
+    var d = await safeJson(r);
+    if(!d.ok){ toast(d.message||'저장 실패'); return; }
+    toast('저장되었습니다');
+    closeEditor();
+    loadNotes();
+  }catch(e){ toast('네트워크 오류: '+(e.message||e)); }
+}
+
+async function deleteCurrent(){
+  if(!currentId) return;
+  if(!confirm('이 노트를 삭제할까요?')) return;
+  try{
+    var r = await fetch('/api/notes?action=delete', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: currentId })
+    });
+    var d = await safeJson(r);
+    if(!d.ok){ toast(d.message||'삭제 실패'); return; }
+    toast('삭제되었습니다');
+    closeEditor();
+    loadNotes();
+  }catch(e){ toast('네트워크 오류: '+(e.message||e)); }
+}
+
+/* ── 초기화 ── */
+applyTheme();
+loadNotes();
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
+</script>
+</body>
+</html>

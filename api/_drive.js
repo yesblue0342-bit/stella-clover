@@ -90,6 +90,57 @@ export async function downloadFileById(drive, fileId) {
   return Buffer.from(r.data);
 }
 
+// 폴더 내 파일 하나를 이름으로 찾기(정확히 일치, 트래시 제외). 없으면 null.
+async function findFileByName(drive, folderId, name) {
+  const q = `name='${esc(name)}' and '${folderId}' in parents and trashed=false`;
+  const r = await drive.files.list({ q, fields: "files(id)", pageSize: 1 });
+  return r.data.files?.[0]?.id || null;
+}
+
+// JSON 객체를 폴더에 파일명으로 저장(같은 이름 파일이 있으면 내용 갱신, 없으면 새로 생성).
+// savedAt 타임스탬프를 자동으로 덧붙인다(노트 등 Stella GPT와 공유하는 JSON 저장에 사용).
+export async function saveJsonToDrive(drive, folderId, fileName, data) {
+  const name = fileName.endsWith(".json") ? fileName : `${fileName}.json`;
+  const body = JSON.stringify({ ...data, savedAt: new Date().toISOString() }, null, 2);
+  const existingId = await findFileByName(drive, folderId, name);
+  if (existingId) {
+    await drive.files.update({
+      fileId: existingId,
+      media: { mimeType: "application/json", body: Readable.from([Buffer.from(body, "utf-8")]) },
+    });
+    return { id: existingId };
+  }
+  const r = await drive.files.create({
+    requestBody: { name, parents: [folderId] },
+    media: { mimeType: "application/json", body: Readable.from([Buffer.from(body, "utf-8")]) },
+    fields: "id",
+  });
+  return { id: r.data.id };
+}
+
+// 폴더 내 .json 파일 목록(id, name) — 페이지네이션 처리.
+export async function listJsonInFolder(drive, folderId) {
+  const files = [];
+  let pageToken;
+  do {
+    const r = await drive.files.list({
+      q: `'${folderId}' in parents and trashed=false and name contains '.json'`,
+      fields: "nextPageToken, files(id,name)",
+      pageSize: 100,
+      pageToken,
+    });
+    files.push(...(r.data.files || []));
+    pageToken = r.data.nextPageToken;
+  } while (pageToken);
+  return files;
+}
+
+// 파일 id의 내용을 JSON으로 파싱해 반환.
+export async function readJsonById(drive, fileId) {
+  const buf = await downloadFileById(drive, fileId);
+  return JSON.parse(buf.toString("utf-8"));
+}
+
 // 지정 폴더에서 modifiedTime이 cutoffIso 이전인 파일을 모두 삭제. 삭제 개수 반환.
 export async function deleteOlderThan(drive, folderId, cutoffIso) {
   let deleted = 0, pageToken;
