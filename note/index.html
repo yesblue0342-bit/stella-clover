@@ -123,6 +123,17 @@ var _q='';
 var _hasMore=false;
 function cacheKey(q){ return 'q:'+q; }
 
+// 전체 페이지 이동(별개 SPA라 index.html→/notes는 새 문서 로드)에도 첫 화면(검색어 없음)만은
+// localStorage 로 넘겨받아 즉시 그린다 — index.html 이 유휴 시간에 미리 채워두면(prefetchNotesCache)
+// /notes 진입 첫 렌더가 네트워크를 기다리지 않는다. index.html 과 키/모양을 동일하게 유지할 것.
+var NOTES_CACHE_KEY='cl_notes_cache_v1';
+(function hydrateFromPersistedCache(){
+  try{
+    var saved=JSON.parse(localStorage.getItem(NOTES_CACHE_KEY)||'null');
+    if(saved && Array.isArray(saved.items)) _cache[cacheKey('')]=saved;
+  }catch(e){}
+})();
+
 /* ── 한글 IME composition 가드 (제목/본문/검색) ──
    조합 중(한글 입력 미완)에는 검색을 재실행하지 않고, 저장 시엔 조합을 먼저 확정한다. */
 var _composing=false;
@@ -173,6 +184,7 @@ async function loadNotes(){
     notes = d.items||[];
     _hasMore = !!d.hasMore;
     _cache[key] = { items: notes.slice(), hasMore: _hasMore };
+    if(!q){ try{ localStorage.setItem(NOTES_CACHE_KEY, JSON.stringify(_cache[key])); }catch(e){} }
     renderList();
   }catch(e){
     if(!cached) $('list').innerHTML = '<div class="empty">네트워크 오류: '+esc(e.message||e)+'</div>';
@@ -253,7 +265,7 @@ async function saveCurrent(){
     if(!d.ok){ toast(d.message||'저장 실패'); return; }
     toast('저장되었습니다');
     closeEditor();
-    _cache={}; // 방금 쓴 변경을 즉시 반영(캐시된 옛 목록으로 잠깐 되돌아가지 않도록)
+    _cache={}; try{ localStorage.removeItem(NOTES_CACHE_KEY); }catch(e){} // 방금 쓴 변경을 즉시 반영(캐시된 옛 목록으로 잠깐 되돌아가지 않도록, 영속 캐시도 함께)
     loadNotes();
   }catch(e){ toast('네트워크 오류: '+(e.message||e)); }
 }
@@ -270,7 +282,7 @@ async function deleteCurrent(){
     if(!d.ok){ toast(d.message||'삭제 실패'); return; }
     toast('삭제되었습니다');
     closeEditor();
-    _cache={}; // 방금 지운 노트가 캐시된 옛 목록에 다시 나타나지 않도록
+    _cache={}; try{ localStorage.removeItem(NOTES_CACHE_KEY); }catch(e){} // 방금 지운 노트가 캐시된 옛 목록에 다시 나타나지 않도록, 영속 캐시도 함께
     loadNotes();
   }catch(e){ toast('네트워크 오류: '+(e.message||e)); }
 }

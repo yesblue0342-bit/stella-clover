@@ -1,5 +1,97 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-09] 노트 목록: Stella GPT 대비 체감 속도 비교 진단 + 커넥션 풀 분리/인덱스 보강
+
+- **배경**: 직전 개선(`8634f78`)으로 `action=list`는 이미 `notes_meta`(Postgres)만 SELECT하고
+  Drive OAuth 왕복을 타지 않는다. 그런데도 실사용 체감상 Stella GPT(`stella-ai-workspace`)의
+  Note 패널보다 Clover `/notes` 가 느리다는 리포트 → 두 코드베이스를 실제로 열어 1:1 비교.
+- **비교 대상**: Stella GPT `api/note.js`(action=list) vs Clover `api/notes.js`(action=list, 기본).
+  로컬 경로 `C:\workspace\stella-ai-workspace`(origin 최신 커밋 기준 확인).
+
+### 코드 비교로 확인한 사실
+1. **Stella GPT `note.js` list는 오히려 Clover보다 구조적으로 훨씬 무겁다** — DB를 전혀 쓰지 않고
+   매 요청마다 (a) 고정 폴더 Drive 파일 목록 조회 + 개별 `readJsonFromDrive`(N+1, 10개씩 배치),
+   (b) `users/*/notes` 전수 스윕(`sweepScatteredUserNotes`), (c) 레거시 `Board/boards` 루트 전체
+   스캔까지 수행한다. `lib/drive-utils.js`의 `getDrive()`는 **호출마다 새 OAuth2 클라이언트를
+   생성**(refresh_token→access_token 재교환, 캐시 없음) — 한 번의 list 요청 안에서 이 왕복이
+   수십 번 반복될 수 있는 구조. 즉 API 자체 처리량은 Clover(단일 인덱스 SELECT)가 이미 압도적으로
+   가볍다 — Drive 커넥션 풀링/쿼리 인덱스 문제는 GPT 쪽에도 없고(애초에 DB 미사용), Clover
+   쪽에도 이미 없음(직전 개선으로 해소).
+2. **진짜 차이는 "페이지 이동 비용"**: Stella GPT 의 노트는 이미 로드된 `gpt.html` SPA 안의
+   슬라이드 패널(`openNotePanel()`)로, 페이지 이동이 전혀 없다. Clover 는 `index.html` 의
+   "📝 노트" 버튼이 `location.href='/notes'`로 **완전히 새 문서**(`note/index.html`)를 새로
+   내려받는다 — HTML/CSS 파싱, 인라인 스크립트 재실행, SW 재등록까지 치른 "다음에야" API
+   호출이 시작된다. 게다가 `note/index.html`의 SWR 메모리 캐시(`_cache`)는 **문서 인스턴스
+   스코프라 매 이동마다 빈 상태로 리셋** — 매번 "불러오는 중…" 플레이스홀더 후 네트워크
+   응답을 기다리는 구조였다(반면 GPT 패널은 세션 중 한 번이라도 열었으면 이후엔 사실상
+   이미 열려있는 문서 위에서 API만 다시 부르는 형태이고, 최초 오픈조차 페이지 이동 지연이 없음).
+   → 체감 차이의 실제 원인은 API 처리 시간이 아니라 **네비게이션 비용 + 캐시가 페이지 이동을
+   못 넘는 구조**로 결론.
+3. **부수 점검**(요청된 체크리스트 전부 확인): DB 풀은 이미 프로세스당 싱글턴 재사용(`getPool()`,
+   `api/_db.js`) — 매 요청 새 커넥션 아님. `notes_meta.updated_at`엔 이미 `idx_notes_meta_updated_at`
+   인덱스가 있었음(단, `WHERE deleted_at IS NULL` 조건과 정확히 맞는 partial index는 없었음 →
+   아래 보강). 응답 페이로드는 이미 preview(200자)만 반환, `body` 없음. 인증/미들웨어 체인은
+   Clover·GPT 모두 얇음(둘 다 무상태 헤더 기반, 추가 미들웨어 없음). 두 앱은 별개 OCI 컨테이너/
+   프로세스라 콜드스타트 상호간섭 없음. 5분 주기 백그라운드 동기화(`lib/notesSync.js`)는 목록
+   조회와 **같은 풀**(`getPool()`, max 5)을 공유하고 있었음 — 실사용 노트 수에선 미미하지만,
+   요청 지침대로 분리(아래).
+4. **실서버 직접 측정은 이번에도 불가**(샌드박스는 프로덕션 OCI 인스턴스에 네트워크 접근
+   불가 — CLAUDE.md 개발 워크플로 7 그대로 재확인, Tailscale 경유로 접근 가능한 호스트들도
+   OCI Clover 컨테이너가 아님을 확인함). 대신 임시 로컬 Postgres 16(도커, 작업 종료 후 삭제)에
+   실제 스키마를 붙여 `api/notes.js` 핸들러를 직접 호출하는 방식으로 서버측 처리시간을 측정.
+
+### 적용한 수정
+1. `api/_db.js`: `notes_meta`에 **partial index** `idx_notes_meta_list ON notes_meta (updated_at DESC)
+   WHERE deleted_at IS NULL` 추가(list 쿼리의 WHERE 절과 정확히 일치, 기존 `idx_notes_meta_updated_at`
+   보다 더 좁고 빠름). 스키마는 기존 관례대로 `CREATE_NOTES_META`(idempotent, 기동 시 자동 적용) —
+   별도 `migrations/` 디렉토리가 없는 이 저장소의 기존 패턴을 따름.
+2. `api/_db.js`: **`getSyncPool()`** 신규 — 5분 백그라운드 동기화(`lib/notesSync.js`) 전용 소형
+   풀(max 2), 사용자 요청용 메인 풀(`getPool()`, max 5)과 완전히 분리된 별도 `pg.Pool` 인스턴스.
+   `connectWithRetry()`에 pool-config override 인자 추가해 재사용.
+3. `lib/notesSync.js`: `getPool()` → `getSyncPool()`로 전환(`fullScanToMeta`/`incrementalSync`
+   양쪽, `action=rebuildIndex` 수동 재스캔도 내부적으로 같은 함수라 자동 적용).
+4. `note/index.html`: SWR 메모리 캐시(`_cache`)를 **localStorage(`cl_notes_cache_v1`)에도 영속화**
+   — 검색어 없는 첫 화면(page 0)만 대상. 스크립트 시작 시 저장된 캐시를 `_cache`에 미리 채워
+   넣어, 같은 세션에서 `/notes`를 다시 열 때 네트워크 없이 즉시 첫 렌더(그 뒤 조용히 최신으로
+   갱신). 저장/삭제 시 메모리 캐시와 함께 localStorage 캐시도 비움(옛 목록 재노출 방지).
+5. `index.html`: `<link rel="prefetch" href="/notes">` 추가(문서 자체 프리페치) + 유휴 시간
+   (`requestIdleCallback`, 폴백 `setTimeout` 1.5s)에 `/api/notes?action=list`를 백그라운드로 먼저
+   호출해 **같은 localStorage 키**(`cl_notes_cache_v1`)에 채워둠 — 메인 화면을 켠 뒤 한 번도
+   `/notes`를 연 적 없어도, 이후 "📝 노트" 클릭 시 이미 캐시가 따뜻한 상태. 이 두 가지가 GPT의
+   "이미 로드된 패널" 체감과 가장 가깝게 Clover의 "새 문서 이동" 구조적 한계를 상쇄한다.
+6. `sw.js`: `v25` → **`v26`**(프론트 변경 규칙에 따른 필수 캐시 버전 bump).
+
+### 검증
+- `node --check api/_db.js api/notes.js lib/notesSync.js server.mjs` 전체 통과.
+- `note/index.html`·`index.html` 인라인 `<script>` `new Function()` 파싱 통과(문법 오류 없음).
+- `npm test`: **83 pass / 6 skip(DATABASE_URL 미설정 통합 테스트, 무관) / 0 fail** — 기존 회귀 없음.
+- 임시 로컬 Postgres 16(도커, `postgres:16-alpine`, 작업 종료 후 컨테이너 삭제)에 실제 스키마를
+  붙여 `notes_meta` 500건 시드 후 확인:
+  - `EXPLAIN`: 목록 쿼리가 신규 `idx_notes_meta_list`를 **Bitmap Index Scan**으로 사용(순차
+    스캔 아님).
+  - `api/notes.js` 핸들러를 직접 호출(mock req/res)해 `action=list` 서버측 처리시간 5회 측정:
+    **1~2ms**(로그: `[notes] list 1ms rows=30 page=0 q=no`) — 이전 세션 로컬 측정치(`2ms`, 3건)와
+    500건 규모에서도 동일 수준 유지, DB 쿼리 자체는 병목이 전혀 아님을 재확인.
+  - `getPool()`과 `getSyncPool()`이 **서로 다른 `pg.Pool` 인스턴스**임을 확인. 동기화 풀에서
+    커넥션 하나를 1.5초간 붙잡아둔(`pg_sleep(1.5)`) 상태에서도 메인 풀을 쓰는 `action=list`
+    요청은 **2ms**로 즉시 응답 — 풀 분리가 실제로 동기화 작업의 커넥션 점유로부터 목록 조회를
+    보호함을 검증.
+- **미실행(이번에도 불가, 다음 확인 필요)**: 프로덕션 OCI TTFB 실측(`curl -w
+  '%{time_starttransfer}'`) 전/후 비교. 배포 후 `[notes] list Nms` 컨테이너 로그로 서버측
+  처리시간만 우선 확인 가능(코드상 1~2ms대 유지가 기대치), 클라이언트 체감(네비게이션+프리페치
+  효과)은 실제 브라우저에서 "📝 노트" 클릭 시 로딩 없이 바로 목록이 보이는지로 확인 필요.
+- 기존 기능 회귀 없음 확인: `action=save/delete/get`는 이번 변경(메인 `getPool()` 유지)과
+  무관, `note/index.html` 편집/저장/삭제 로직은 캐시 무효화 지점만 보강(로직 흐름 동일),
+  `server.mjs`의 5분 동기화 스케줄·전사→노트 자동저장(`pushMeetingNote`, `index.html`)도 호출
+  경로 변경 없음(내부적으로 쓰는 풀만 교체).
+
+### 남은 한계(참고, 이번 범위 밖)
+- Stella GPT `api/note.js`는 이번 지시(읽기 전용) 때문에 손대지 않았다 — 위 1번 관찰대로 GPT
+  쪽이 오히려 구조적으로 더 무거우므로, "GPT보다 느리다"는 체감은 API 처리량 문제가 아니라
+  Clover의 별개-SPA 네비게이션 구조 문제였다는 결론이 이번 조사의 핵심. 만약 배포 후에도
+  체감 차이가 남는다면 다음 유력 후보는 note/index.html 자체의 정적 자산(CSS/JS 인라인 크기)
+  전송 시간 — 현재는 단일 HTML 파일이라 크지 않지만 확인 필요.
+
 ## [2026-07-09] 노트 목록 5초 병목 — Postgres notes_meta 캐시로 근본 개선
 
 - **진단(계측 우선, 추측 배제)**: 직전 작업(아래 "노트 목록 인덱스 캐시" 항목)에서 Drive 전체 스캔

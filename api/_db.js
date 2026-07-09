@@ -186,10 +186,10 @@ export function makeShimPool(pgPool) {
 }
 
 // 기동 대기 확보: 스키마 보장 쿼리로 실제 커넥션을 강제. 최대 3회, 시도 간 3초.
-async function connectWithRetry(retries = 3, delay = 3000) {
+async function connectWithRetry(retries = 3, delay = 3000, overrides = {}) {
   let lastErr;
   for (let i = 0; i < retries; i++) {
-    const pgPool = new Pool(getPoolConfig());
+    const pgPool = new Pool({ ...getPoolConfig(), ...overrides });
     try {
       await ensureSchema(pgPool);
       return makeShimPool(pgPool);
@@ -214,6 +214,22 @@ export function getPool() {
       .catch(err => { poolPromise = undefined; throw err; });
   }
   return poolPromise;
+}
+
+// 노트 백그라운드 동기화(5분 주기, lib/notesSync.js) 전용 소형 풀 — 사용자 요청(list/get/save/delete,
+// 메인 풀 max 5)과 커넥션을 분리해, 동기화 쓰기가 몰려도(전체 재스캔 등) 목록 조회가 커넥션
+// 대기로 밀리지 않게 한다. 같은 Postgres 서버·스키마를 보되, pg.Pool 객체 자체는 별도.
+let syncPoolPromise;
+export function getSyncPool() {
+  if (!syncPoolPromise) {
+    syncPoolPromise = connectWithRetry(3, 3000, { max: 2 })
+      .then(pool => {
+        pool.on("error", () => { syncPoolPromise = undefined; });
+        return pool;
+      })
+      .catch(err => { syncPoolPromise = undefined; throw err; });
+  }
+  return syncPoolPromise;
 }
 
 // 단일 커넥션에서 BEGIN/COMMIT/ROLLBACK 을 보장하는 트랜잭션 헬퍼.
@@ -329,6 +345,7 @@ export const CREATE_NOTES_META = `
     deleted_at TIMESTAMPTZ
   );
   CREATE INDEX IF NOT EXISTS idx_notes_meta_updated_at ON notes_meta (updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_notes_meta_list ON notes_meta (updated_at DESC) WHERE deleted_at IS NULL;
   CREATE TABLE IF NOT EXISTS notes_sync_state (
     key TEXT PRIMARY KEY,
     value TEXT

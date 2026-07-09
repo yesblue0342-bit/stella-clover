@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Stella Clover</title>
 <link rel="manifest" href="/manifest.json">
+<link rel="prefetch" href="/notes">
 <meta name="theme-color" content="#1a4731">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1372,6 +1373,18 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('controllerchange',function(){ if(_swReloaded)return; _swReloaded=true; location.reload(); });
   navigator.serviceWorker.register('/sw.js').then(function(r){ try{r.update();}catch(e){} }).catch(function(){});
 }
+
+// 📝 노트 탭은 별개 SPA(/notes, note/index.html)라 클릭 시 새 문서를 새로 받는다 — Stella GPT의
+// 인앱 패널(이미 로드된 화면에서 즉시 열림)과 달리 "체감 로딩"이 생기는 주된 원인이 이 이동
+// 비용이라, 유휴 시간에 목록 첫 화면을 미리 받아 note/index.html 과 같은 localStorage 키에
+// 채워둔다 — /notes 진입 시 네트워크를 기다리지 않고 바로 그려짐(그 사이 최신으로 조용히 갱신).
+function prefetchNotesCache(){
+  fetch('/api/notes?action=list&page=0&q=',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+    if(d && d.ok){ try{ localStorage.setItem('cl_notes_cache_v1', JSON.stringify({items:d.items||[],hasMore:!!d.hasMore})); }catch(e){} }
+  }).catch(function(){});
+}
+if('requestIdleCallback' in window) requestIdleCallback(prefetchNotesCache,{timeout:4000});
+else setTimeout(prefetchNotesCache,1500);
 </script>
 </body>
 </html>
