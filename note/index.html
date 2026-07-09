@@ -262,6 +262,10 @@ var _tt;
 function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(_tt);_tt=setTimeout(function(){t.classList.remove('show');},2200);}
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function todayStr(){
+  var d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 
 async function safeJson(res){
   var text = await res.text();
@@ -340,12 +344,12 @@ async function openEditor(id){
   var n = id ? notes.find(function(x){return x.id===id;}) : null;
   var cached = id ? _bodyCache[id] : null;
   $('editorHead').textContent = n ? '노트 편집' : '새 노트';
-  $('titleInput').value = n ? (n.title||'') : '';
+  $('titleInput').value = n ? (n.title||'') : todayStr();
   $('bodyInput').value = cached ? cached.body : (n ? (n.preview||'') : '');
   $('deleteBtn').style.display = n ? 'block' : 'none';
   $('saveBtn').disabled = !!id && !cached; // 전체 본문을 이미 캐시로 갖고 있으면 즉시 저장 허용
   $('editorModal').classList.add('show');
-  setTimeout(function(){ $('titleInput').focus(); }, 50);
+  setTimeout(function(){ $('titleInput').focus(); if(!n) $('titleInput').select(); }, 50);
 
   if(id){
     // SWR: 캐시가 있어도 최신본으로 백그라운드 갱신(다른 기기/Stella GPT에서 고쳤을 수 있음).
