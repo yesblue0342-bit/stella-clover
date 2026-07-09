@@ -382,3 +382,35 @@
 1. Whisper가 침묵/잡음 구간에서 "3, 3, 3, …" 토큰을 폭주 반복하던 환각을, 세그먼트 메타(no_speech_prob·압축비)로 걸러내고 n-gram 반복을 maxRepeat개로 축소해 제거.
 2. 핵심 원인 중 하나—반복된 청크 텍스트가 prevText(prompt)로 다음 청크에 전파돼 연쇄 반복—을 prevText 정제로 차단.
 3. 신규 변환은 저장 단계에서 정제(전사/요약 모두), 기존 저장분은 STT 보기에서 표시-시점 정제. 정상 발화/개행은 보존(단위테스트로 확인).
+
+---
+
+## [2026-07-09] 노트 편집 모달 UX + IME 가드 + 전사→노트 자동저장 (브랜치 `claude/stella-clover-improvements-v35rsr`)
+
+전제 정정: 지정된 `stella-ai-workspace/docs/NOTES_API.md`·`STELLA_NOTES_API_KEY`(REST/`:id`/pagination)는 대상에 **부재**.
+실제 노트 마스터는 `api/note.js`(무상태 HMAC 세션 인증)이고, **Clover 노트는 이미 main 에 구현돼 있었다**
+(`api/notes.js` + `note/index.html`, ★Stella GPT 와 **같은 Google Drive 공유 폴더**에 같은 JSON 포맷으로 저장 →
+두 앱이 같은 노트를 봄. 목록은 인덱스 캐시로 TTFB 개선, 상세는 `action=get` lazy). 따라서 CRUD/공유/속도(태스크 1·3)는
+충족 상태 → **중복 재작성 없이**, 남은 태스크(4 모달 UX·2 IME)만 기존 코드에 가산.
+
+### 변경 (note/index.html · index.html)
+- **편집 모달 풀높이화(태스크 4)**: `.modal-content` 를 flex 컬럼으로 — 모바일(S22) `100dvh` 풀스크린,
+  PC `92vh`. 제목 위, **본문 textarea `flex:1`(내부 스크롤 최소화)**, **저장/삭제 버튼 하단 고정**(safe-area 패딩).
+- **한글 IME composition 가드(태스크 2)**: 제목/본문/검색에 `compositionstart/end` 바인딩. 조합 중 검색 억제
+  (`compositionend` 에서 재개), 저장 시 `blur()` 로 조합 확정 후 값 읽기.
+- **전사 → 노트 자동저장(태스크 2)**: 전사 완료(신규 `renderServerResult` + 레거시 `finalizeTranscript`) 시
+  회의록(제목+요약)을 `/api/notes?action=save` 로 Stella GPT 공유 노트에 저장(`pushMeetingNote`, 베스트에포트,
+  중복 시그니처 스킵). 실패해도 전사 흐름 무영향.
+- `sw.js` v23→**v24**.
+
+### 테스트 (샌드박스, Node)
+| # | 항목 | 결과 |
+|---|------|------|
+| 1 | `node --check` api/lib/server + 인라인 JS(index/note/flow/rate) `new Function` | 전부 OK ✅ |
+| 2 | `npm test`(기존 스위트) | **83 PASS / 3 skip / 0 fail** ✅ |
+| 3 | 서버 `/notes` 200 + 풀높이 모달(`92dvh/editor-scroll`)·IME(`compositionstart/bindIme`) 렌더 | ✅ |
+| 4 | 변환 탭 📝 노트 → `/notes` 링크 | ✅ |
+| 5 | `/api/notes`(Drive 미설정) → graceful JSON(평문 크래시 없음) | ✅ |
+
+> 양방향 동기화(Clover↔Stella GPT)·1초 로드는 **같은 Drive 공유 폴더 + Drive 자격증명**이 설정된 라이브 서버에서 성립
+> (샌드박스는 정적/기동/파싱까지 검증). 파괴적 변경 없음 — Clover 엔 제거할 자체 노트 테이블이 애초에 없고(회의록=cl_meetings 는 별개, 유지).

@@ -49,20 +49,28 @@ button,input,textarea{font-family:inherit}
 
 .empty{color:var(--text3);text-align:center;font-size:.85rem;padding:40px 10px}
 
-/* ── 에디터 모달 ── */
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:none;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
+/* ── 에디터 모달: 세로를 거의 가득(모바일 풀스크린, PC 92vh) + 본문 flex + 하단 버튼 고정 ── */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:none;align-items:center;justify-content:center;padding:16px}
 .modal.show{display:flex}
-.modal-content{background:var(--surface);color:var(--text);border-radius:18px;padding:18px;max-width:560px;width:100%;margin-top:24px}
-.modal-head{display:flex;align-items:center;margin-bottom:10px}
-.modal-close{margin-left:auto;border:none;background:none;font-size:1.4rem;cursor:pointer;color:var(--text3)}
-.title-input{width:100%;border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;font-size:.98rem;font-weight:700;background:var(--surface2);color:var(--text);outline:none;margin-bottom:8px}
-.body-input{width:100%;min-height:220px;border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;font-size:.86rem;line-height:1.6;background:var(--surface2);color:var(--text);outline:none;resize:vertical;margin-bottom:12px}
+.modal-content{background:var(--surface);color:var(--text);border-radius:18px;display:flex;flex-direction:column;
+  width:100%;max-width:760px;height:92vh;height:92dvh;max-height:92vh;max-height:92dvh;padding:0;overflow:hidden;box-shadow:var(--shadow)}
+.modal-head{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;border-bottom:1px solid var(--border);flex:0 0 auto}
+.modal-head strong{font-size:1.02rem}
+.modal-close{margin-left:auto;border:none;background:none;font-size:1.5rem;cursor:pointer;color:var(--text3);line-height:1}
+.editor-scroll{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:12px 16px}
+.title-input{width:100%;border:1.5px solid var(--border);border-radius:10px;padding:11px 12px;font-size:1rem;font-weight:700;background:var(--surface2);color:var(--text);outline:none;margin-bottom:8px;flex:0 0 auto}
+.body-input{flex:1 1 auto;min-height:0;width:100%;border:1.5px solid var(--border);border-radius:10px;padding:11px 12px;font-size:.9rem;line-height:1.7;background:var(--surface2);color:var(--text);outline:none;resize:none;overflow-y:auto}
 .title-input:focus,.body-input:focus{border-color:var(--brand2)}
-.modal-btns{display:flex;gap:8px}
-.mbtn{flex:1;height:44px;border:none;border-radius:12px;font-size:.86rem;font-weight:700;cursor:pointer}
-.mbtn.save{background:var(--brand);color:#fff}
+.modal-btns{display:flex;gap:8px;flex:0 0 auto;padding:10px 14px;border-top:1px solid var(--border);background:var(--surface);padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+.mbtn{flex:1;height:46px;border:none;border-radius:12px;font-size:.9rem;font-weight:800;cursor:pointer}
+.mbtn.save{background:var(--brand);color:#fff;flex:2}
 .mbtn.save:hover{background:var(--brand2)}
+.mbtn.save:disabled{opacity:.55;cursor:not-allowed}
 .mbtn.del{background:var(--dangerbg);color:var(--danger)}
+@media(max-width:560px){
+  #editorModal{padding:0}
+  .modal-content{height:100vh;height:100dvh;max-height:100vh;max-height:100dvh;border-radius:0;max-width:100%}
+}
 
 .toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:var(--brand);color:#fff;padding:10px 18px;border-radius:12px;font-size:.85rem;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:200}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -91,11 +99,13 @@ button,input,textarea{font-family:inherit}
       <strong id="editorHead">새 노트</strong>
       <button class="modal-close" onclick="closeEditor()">&times;</button>
     </div>
-    <input class="title-input" id="titleInput" type="text" placeholder="제목">
-    <textarea class="body-input" id="bodyInput" placeholder="내용을 입력하세요"></textarea>
+    <div class="editor-scroll">
+      <input class="title-input" id="titleInput" type="text" placeholder="제목" maxlength="300">
+      <textarea class="body-input" id="bodyInput" placeholder="내용을 입력하세요"></textarea>
+    </div>
     <div class="modal-btns">
-      <button class="mbtn del" id="deleteBtn" onclick="deleteCurrent()" style="display:none">삭제</button>
-      <button class="mbtn save" id="saveBtn" onclick="saveCurrent()">저장</button>
+      <button class="mbtn del" id="deleteBtn" onclick="deleteCurrent()" style="display:none">🗑 삭제</button>
+      <button class="mbtn save" id="saveBtn" onclick="saveCurrent()">💾 저장</button>
     </div>
   </div>
 </div>
@@ -107,6 +117,14 @@ var $=function(id){return document.getElementById(id);};
 var THEME_KEY='cl_theme';
 var notes=[];
 var currentId=null;
+
+/* ── 한글 IME composition 가드 (제목/본문/검색) ──
+   조합 중(한글 입력 미완)에는 검색을 재실행하지 않고, 저장 시엔 조합을 먼저 확정한다. */
+var _composing=false;
+function bindIme(el){ if(!el||el._imeBound)return; el._imeBound=true;
+  el.addEventListener('compositionstart',function(){_composing=true;});
+  el.addEventListener('compositionend',function(){_composing=false; if(el.id==='searchInput') onSearchInput();});
+}
 
 /* ── 테마 (Clover 앱과 공유) ── */
 function applyTheme(){var t=localStorage.getItem(THEME_KEY)||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
@@ -126,7 +144,7 @@ async function safeJson(res){
 
 /* ── 목록/검색 ── */
 var _searchT;
-function onSearchInput(){ clearTimeout(_searchT); _searchT=setTimeout(loadNotes, 300); }
+function onSearchInput(){ if(_composing) return; clearTimeout(_searchT); _searchT=setTimeout(loadNotes, 300); } // 조합 중 재검색 억제(compositionend 에서 재개)
 
 async function loadNotes(){
   var q = $('searchInput').value.trim();
@@ -186,6 +204,7 @@ async function openEditor(id){
 function closeEditor(){ $('editorModal').classList.remove('show'); currentId=null; }
 
 async function saveCurrent(){
+  if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); // 진행 중 한글 조합 확정 후 값 읽기
   var title = $('titleInput').value.trim();
   var body = $('bodyInput').value;
   if(!title && !body){ toast('제목이나 내용을 입력하세요'); return; }
@@ -220,6 +239,7 @@ async function deleteCurrent(){
 
 /* ── 초기화 ── */
 applyTheme();
+bindIme($('titleInput')); bindIme($('bodyInput')); bindIme($('searchInput')); // IME 조합 가드
 loadNotes();
 if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>

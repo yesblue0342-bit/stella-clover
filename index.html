@@ -786,11 +786,26 @@ async function renderServerResult(job, meta){
     if(job.audioDriveLink){ showToast('원본 오디오가 Drive 에 보관되었습니다'); }
     try{$('step4').scrollIntoView({behavior:'smooth'});}catch(e){}
     saveSession(); invalidateListCache(); loadMeetings();
+    pushMeetingNote(_title, _summary); // 전사 완료 회의록을 Stella GPT 공유 노트로도 저장(베스트에포트)
   }catch(e){
     showErr('결과 표시 오류: '+fmtErr(e));
   }finally{
     $('genBtn').disabled=false;
   }
+}
+
+// 전사 완료 회의록을 Stella GPT 공유 노트로도 저장(source=clover, userId=clover). 베스트에포트 — 실패해도 전사 흐름 무영향.
+// 같은 (title+body) 중복 저장 방지: 최근 저장 시그니처를 기억해 동일하면 스킵.
+var _lastNotePushed='';
+async function pushMeetingNote(title, body){
+  try{
+    var sig=(title||'')+'\n'+(body||'').slice(0,200);
+    if(!body||!String(body).trim()||sig===_lastNotePushed) return false;
+    _lastNotePushed=sig;
+    var r=await fetch('/api/notes?action=save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({title:(title||'회의록'), body:String(body||'')})});
+    var d=await safeJson(r); return !!(d&&d.ok);
+  }catch(e){ return false; }
 }
 
 // transcript → 기존 /api/summarize(회의록 마크다운 + Drive 저장 + cl_meetings 이력)로 마무리. 렌더는 기존 그대로.
@@ -819,6 +834,7 @@ async function finalizeTranscript(fullText, meta, job){
       showErr('⚠️ 회의록은 생성됐으나 일부 저장 실패: '+w);
     }
     saveSession(); invalidateListCache(); loadMeetings();
+    pushMeetingNote(_title, _summary); // 전사 완료 회의록을 Stella GPT 공유 노트로도 저장(베스트에포트)
     return true;
   }catch(e){
     showErr('오류: '+fmtErr(e)); setStep(3,'wait');
