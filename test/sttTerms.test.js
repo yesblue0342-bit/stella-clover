@@ -19,6 +19,21 @@ test("config/stt-terms.json 이 실제 로드된다(JSON 전용 용어 포함) +
   }
 });
 
+test("config/stt-terms.json: GMP/밸리데이션/변화관리 도메인 용어 반영(CLAUDE.md 명시 회의 도메인)", () => {
+  for (const t of ["GMP", "밸리데이션", "변화관리"]) {
+    assert.ok(SAP_TERMS.includes(t), "도메인 용어 누락: " + t);
+  }
+  assert.ok(SAP_TERMS.length <= 60, "용어 과다(프롬프트 편향 위험) — 확장 후에도 상한 준수해야 함");
+});
+
+test("applyCorrections: GMP/밸리데이션 음차 오인식 복원", () => {
+  assert.equal(applyCorrections("지엠피 밸리데이션 일정 논의"), "GMP 밸리데이션 일정 논의");
+  assert.equal(applyCorrections("쥐엠피 문서 검토"), "GMP 문서 검토");
+  assert.equal(applyCorrections("밸리데이숀 계획 수립"), "밸리데이션 계획 수립");
+  assert.equal(applyCorrections("벨리데이션 리허설"), "밸리데이션 리허설");
+  assert.equal(applyCorrections("발리데이션 승인"), "밸리데이션 승인");
+});
+
 test("applyCorrections: JSON 정의 교정 규칙 동작(Usage Decision/핸들링유닛)", () => {
   assert.equal(applyCorrections("유세이지 디시전 처리"), "Usage Decision 처리");
   assert.equal(applyCorrections("핸들링 유닛 구성"), "핸들링유닛 구성");
