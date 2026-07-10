@@ -107,6 +107,24 @@ export function meetingDateFromName(name) {
   return "";
 }
 
+// 업로드 파일명 → 회의 제목 후보. 확장자 제거 + 선행 날짜 스탬프(YYYYMMDD/YYMMDD/YYYY-MM-DD 등, meetingDateFromName과 동일 판정) 제거.
+// 사용자가 업로드 전 파일명을 원하는 제목으로 바꿔 놓는 관례를 그대로 반영(제목 추출의 1순위 소스).
+export function titleFromFileName(name) {
+  const raw = String(name || "").trim();
+  if (!raw) return "";
+  let base = raw.replace(/\.[^./\\]+$/, "").trim();
+  const m8 = base.match(/^(20\d{2})[._-]?(\d{2})[._-]?(\d{2})(?:[._\-\s]+|$)/);
+  if (m8 && +m8[2] >= 1 && +m8[2] <= 12 && +m8[3] >= 1 && +m8[3] <= 31) {
+    base = base.slice(m8[0].length);
+  } else {
+    const m6 = base.match(/^(\d{2})(\d{2})(\d{2})(?:[._\-\s]+|$)/);
+    if (m6 && +m6[2] >= 1 && +m6[2] <= 12 && +m6[3] >= 1 && +m6[3] <= 31) {
+      base = base.slice(m6[0].length);
+    }
+  }
+  return base.trim();
+}
+
 // 업로드 기본 제목(키 제목) — KST 기준 "YYYY-MM-DD HH:MM 회의록".
 // AI가 제목을 못 뽑거나 "회의록"만 나올 때 날짜+시각으로 각 업로드를 구분 가능하게.
 export function defaultMeetingTitle(date = new Date(), suffix = "회의록") {
@@ -196,5 +214,5 @@ export function buildPartialSystemPrompt({ outLang = "한국어", idx = 0, total
 export default {
   SINGLE_PASS_LIMIT, prepareTranscript, needsMapReduce, splitTranscript, splitCoversAll,
   buildMinutesSystemPrompt, buildSummarySystemPrompt, buildPartialSystemPrompt,
-  meetingDateFromName, defaultMeetingTitle, resolveMeetingTitle, collapseRepeats, isHallucinatedSegment,
+  meetingDateFromName, defaultMeetingTitle, resolveMeetingTitle, titleFromFileName, collapseRepeats, isHallucinatedSegment,
 };
