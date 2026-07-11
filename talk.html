@@ -32,6 +32,36 @@ input[type=file]{display:none}
 #loginView button{border:none;background:#1a4731;color:#fff;border-radius:12px;padding:12px 24px;font-size:1rem;font-weight:800;cursor:pointer}
 #avatarPick span{cursor:pointer;opacity:.4;transition:transform .15s,opacity .15s}
 #avatarPick span.sel{opacity:1;transform:scale(1.25)}
+/* ── 알림 설정 모달 ── */
+.modal-wrap{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:50}
+.modal-wrap.show{display:flex}
+.sheet{background:#fff;width:100%;max-width:600px;max-height:88vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:18px 18px 30px}
+.sheet h2{font-size:1.05rem;font-weight:900;display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.sheet .sub{font-size:.82rem;color:#6b7280;margin-bottom:14px}
+.mode-row{display:flex;gap:8px;margin-bottom:18px}
+.mode-btn{flex:1;border:2px solid #e5e7eb;background:#fff;border-radius:14px;padding:12px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;font-size:.85rem;font-weight:700;color:#374151}
+.mode-btn .ic{font-size:1.4rem}
+.mode-btn.sel{border-color:#7c3aed;background:#f5f3ff;color:#6d28d9}
+.card{border:1.5px solid #e9d5ff;background:#faf5ff;border-radius:14px;padding:12px;margin-bottom:16px}
+.card .ct{font-weight:800;font-size:.92rem;margin-bottom:4px}
+.card .cd{font-size:.78rem;color:#6b7280;line-height:1.45;margin-bottom:10px}
+.chip{display:block;width:100%;text-align:left;border:1.5px solid #d8b4fe;background:#fff;border-radius:10px;padding:10px 12px;font-size:.9rem;font-weight:700;color:#6d28d9;cursor:pointer;margin-bottom:8px}
+.chip.sel{background:#7c3aed;color:#fff;border-color:#7c3aed}
+.chip.disabled{opacity:.5;cursor:default}
+.btn-row{display:flex;gap:8px}
+.mini-btn{flex:1;border:1.5px solid #d1d5db;background:#fff;border-radius:10px;padding:10px;font-size:.88rem;font-weight:700;cursor:pointer;color:#374151;display:flex;align-items:center;justify-content:center;gap:6px}
+.mini-btn.rec{border-color:#ef4444;color:#ef4444}
+.mini-btn.recording{background:#ef4444;color:#fff;border-color:#ef4444}
+.mini-btn:disabled{opacity:.4;cursor:default}
+.list-title{font-size:.85rem;font-weight:800;color:#374151;margin:6px 0 8px}
+.snd-row{display:flex;align-items:center;gap:8px;border:1.5px solid #e5e7eb;border-radius:12px;padding:11px 12px;margin-bottom:8px;cursor:pointer;background:#fff}
+.snd-row.sel{border-color:#7c3aed;background:#f5f3ff}
+.snd-row .em{font-size:1.15rem}
+.snd-row .nm{flex:1;font-size:.92rem;font-weight:700;color:#374151}
+.snd-row .tag{font-size:.68rem;font-weight:800;padding:2px 7px;border-radius:99px;background:#ede9fe;color:#6d28d9}
+.snd-row .tag.real{background:#dcfce7;color:#15803d}
+.snd-row .play{font-size:1rem;color:#7c3aed}
+.sheet .close{position:sticky;top:0;float:right;border:none;background:#f3f4f6;border-radius:50%;width:32px;height:32px;font-size:1rem;cursor:pointer}
 </style>
 </head>
 <body>
@@ -39,7 +69,7 @@ input[type=file]{display:none}
   <div class="header">
     <span id="hdrAvatar" style="font-size:1.4rem">🍀</span>
     <h1>Stella Talk</h1>
-    <button class="icon-btn" id="soundBtn" onclick="cycleSound()" title="알림 방식">🔔</button>
+    <button class="icon-btn" id="soundBtn" onclick="openSound()" title="알림 설정">🔔</button>
     <button class="icon-btn" id="bellBtn" onclick="markRead()" title="안읽음 메시지">📬<span class="badge" id="unreadBadge"></span></button>
     <button class="icon-btn" onclick="clearChat()" title="대화 비우기">🗑</button>
   </div>
@@ -67,17 +97,74 @@ input[type=file]{display:none}
   </div>
 </div>
 
+<!-- 알림 설정 시트 -->
+<div class="modal-wrap" id="soundModal" onclick="if(event.target===this)closeSound()">
+  <div class="sheet">
+    <button class="close" onclick="closeSound()">✕</button>
+    <h2>🔔 알림 설정</h2>
+    <div class="sub">메시지 수신 시 알림 방식을 선택하세요</div>
+
+    <div class="mode-row" id="modeRow">
+      <button class="mode-btn" data-mode="sound" onclick="setMode('sound')"><span class="ic">🔔</span>소리</button>
+      <button class="mode-btn" data-mode="vibrate" onclick="setMode('vibrate')"><span class="ic">📳</span>진동</button>
+      <button class="mode-btn" data-mode="silent" onclick="setMode('silent')"><span class="ic">🔕</span>무음</button>
+    </div>
+
+    <div class="card">
+      <div class="ct">💕 내 목소리로 벨소리</div>
+      <div class="cd">딸이 "스텔라~"처럼 말하는 걸 녹음하면 그게 알림음이 됩니다. (이 폰에만 저장·외부 전송 없음)</div>
+      <button class="chip" id="customChip" onclick="selectSound('custom')">💗 내 목소리 벨소리 <span style="font-weight:600">(눌러 미리듣기)</span></button>
+      <div class="btn-row">
+        <button class="mini-btn rec" id="recBtn" onclick="toggleRecord()">🎤 녹음하기</button>
+        <button class="mini-btn" id="delBtn" onclick="deleteCustom()">🗑 삭제</button>
+      </div>
+    </div>
+
+    <div class="list-title">🎵 알림 음성 (눌러서 미리듣기)</div>
+    <div id="presetList"></div>
+  </div>
+</div>
+
+<audio id="ringAudio" preload="auto"></audio>
+
 <script>
-const MSG_KEY='stella_talk_msgs', USER_KEY='stella_talk_user', USERS_KEY='stella_talk_users', SOUND_KEY='stella_talk_sound';
+const MSG_KEY='stella_talk_msgs', USER_KEY='stella_talk_user', USERS_KEY='stella_talk_users',
+      SOUND_KEY='stella_talk_sound', RING_KEY='stella_talk_ringtone';
 let _user=null, _avatar='🍀', _msgs=[], _unread=0;
-let _soundMode=localStorage.getItem(SOUND_KEY)||'sound'; // sound | vibrate | silent
+let _soundMode=localStorage.getItem(SOUND_KEY)||'sound';        // sound | vibrate | silent
+let _ringtone=localStorage.getItem(RING_KEY)||'stella';         // preset key | 'custom'
+
+// 프리셋 음성: 스텔라~톡 = 영상에서 추출한 실제 목소리(실사), 나머지 = 무료 AI(8세 여아 톤).
+const PRESETS=[
+  {key:'stella',    emoji:'⭐', name:'스텔라~ (기본)', file:'talk-sounds/stella.mp3',    tag:'AI',   real:false},
+  {key:'stella-tok',emoji:'✨', name:'스텔라~톡',      file:'talk-sounds/stella-tok.mp3',tag:'실제 목소리', real:true},
+  {key:'byeolping', emoji:'🐤', name:'우리 별핑~',     file:'talk-sounds/byeolping.mp3', tag:'AI',   real:false},
+  {key:'princess',  emoji:'👸', name:'별하 공주님~',   file:'talk-sounds/princess.mp3',  tag:'AI',   real:false},
+  {key:'byeolha',   emoji:'🌟', name:'김별하~',        file:'talk-sounds/byeolha.mp3',   tag:'AI',   real:false},
+];
+function presetByKey(k){return PRESETS.find(p=>p.key===k)||null;}
 
 function esc(s){return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function save(){try{localStorage.setItem(MSG_KEY,JSON.stringify(_msgs.slice(-200)));}catch(e){}}
 
-// ── 알림음 (Web Audio 비프) ──
+// ══════════ IndexedDB: 커스텀 녹음 저장(오디오 blob은 localStorage 한도 초과 → IndexedDB) ══════════
+// ★ 기존 버그("녹음이 저장 안 됨"): 오디오 blob을 localStorage에 넣으려다 실패. IndexedDB로 영속 저장한다.
+const IDB_NAME='stella_talk_audio', IDB_STORE='ring';
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const rq=indexedDB.open(IDB_NAME,1);
+    rq.onupgradeneeded=()=>{const db=rq.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE);};
+    rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error);
+  });
+}
+async function idbPut(key,blob){const db=await idbOpen();return new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(blob,key);tx.oncomplete=()=>res(true);tx.onerror=()=>rej(tx.error);});}
+async function idbGet(key){const db=await idbOpen();return new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readonly');const rq=tx.objectStore(IDB_STORE).get(key);rq.onsuccess=()=>res(rq.result||null);rq.onerror=()=>rej(rq.error);});}
+async function idbDel(key){const db=await idbOpen();return new Promise((res,rej)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).delete(key);tx.oncomplete=()=>res(true);tx.onerror=()=>rej(tx.error);});}
+async function hasCustom(){try{return !!(await idbGet('custom'));}catch(e){return false;}}
+
+// ══════════ 오디오 재생 ══════════
 let _audioCtx=null;
-function beep(){
+function beep(){ // 최종 폴백(파일/녹음 재생 실패 시)
   try{
     _audioCtx=_audioCtx||new (window.AudioContext||window.webkitAudioContext)();
     const o=_audioCtx.createOscillator(), g=_audioCtx.createGain();
@@ -89,25 +176,124 @@ function beep(){
     o.start();o.stop(_audioCtx.currentTime+0.26);
   }catch(e){}
 }
-// 자동재생 정책: 사용자 제스처에서 오디오 컨텍스트를 미리 깨워둠 (버그수정)
+// 자동재생 정책: 사용자 제스처에서 오디오를 미리 깨워둔다.
 function primeAudio(){
   try{_audioCtx=_audioCtx||new (window.AudioContext||window.webkitAudioContext)();if(_audioCtx.state==='suspended')_audioCtx.resume();}catch(e){}
+  const a=document.getElementById('ringAudio'); if(a){a.muted=true;a.play().then(()=>{a.pause();a.currentTime=0;a.muted=false;}).catch(()=>{a.muted=false;});}
 }
-// 소리 옵션: 소리 / 진동 / 무음
+let _curUrl=null;
+// 현재 선택된 벨소리를 재생. custom이면 IndexedDB blob, 아니면 프리셋 mp3. 실패 시 beep.
+async function playRingtone(){
+  const a=document.getElementById('ringAudio'); if(!a)return beep();
+  try{
+    let src;
+    if(_ringtone==='custom'){
+      const blob=await idbGet('custom');
+      if(!blob) return playPreset('stella'); // 커스텀 없으면 기본
+      if(_curUrl){URL.revokeObjectURL(_curUrl);_curUrl=null;}
+      _curUrl=URL.createObjectURL(blob); src=_curUrl;
+    }else{
+      const p=presetByKey(_ringtone)||PRESETS[0]; src=p.file;
+    }
+    a.muted=false; a.src=src; a.currentTime=0;   // ★ 실제 재생은 항상 음소거 해제(primeAudio 뮤트와 경합 방지)
+    await a.play();
+  }catch(e){ beep(); }
+}
+async function playPreset(key){
+  const a=document.getElementById('ringAudio'); if(!a)return beep();
+  const p=presetByKey(key)||PRESETS[0];
+  try{ a.muted=false; a.src=p.file; a.currentTime=0; await a.play(); }catch(e){ beep(); }
+}
+
+// 소리 옵션: 소리(선택 벨소리) / 진동 / 무음
 function notify(){
-  if(_soundMode==='sound')beep();
+  if(_soundMode==='sound') playRingtone();
   else if(_soundMode==='vibrate'){try{navigator.vibrate&&navigator.vibrate(120);}catch(e){}}
 }
 const SOUND_ICON={sound:'🔔',vibrate:'📳',silent:'🔕'};
 function applySoundIcon(){const b=document.getElementById('soundBtn');if(b)b.textContent=SOUND_ICON[_soundMode]||'🔔';}
-function cycleSound(){
-  _soundMode=_soundMode==='sound'?'vibrate':_soundMode==='vibrate'?'silent':'sound';
-  try{localStorage.setItem(SOUND_KEY,_soundMode);}catch(e){}
-  applySoundIcon();primeAudio();
-  if(_soundMode==='sound')beep();
+
+// ══════════ 알림 설정 시트 ══════════
+function openSound(){ primeAudio(); renderSoundSheet(); document.getElementById('soundModal').classList.add('show'); }
+function closeSound(){ document.getElementById('soundModal').classList.remove('show'); }
+function setMode(m){
+  _soundMode=m; try{localStorage.setItem(SOUND_KEY,m);}catch(e){}
+  applySoundIcon(); renderModeButtons();
+  if(m==='sound'){ primeAudio(); playRingtone(); }
+  else if(m==='vibrate'){try{navigator.vibrate&&navigator.vibrate(120);}catch(e){}}
+}
+function renderModeButtons(){
+  document.querySelectorAll('#modeRow .mode-btn').forEach(b=>b.classList.toggle('sel',b.getAttribute('data-mode')===_soundMode));
+}
+async function selectSound(key){
+  _ringtone=key; try{localStorage.setItem(RING_KEY,key);}catch(e){}
+  await renderSoundSheet();
+  primeAudio();
+  if(_soundMode!=='silent'){ if(_soundMode==='vibrate') setMode('vibrate'); else playRingtone(); }
+}
+async function renderSoundSheet(){
+  renderModeButtons();
+  // 커스텀 칩 상태
+  const has=await hasCustom();
+  const chip=document.getElementById('customChip');
+  chip.classList.toggle('sel',_ringtone==='custom');
+  chip.classList.toggle('disabled',!has);
+  chip.style.pointerEvents = has?'auto':'none';
+  document.getElementById('delBtn').disabled=!has;
+  // 프리셋 목록
+  const list=document.getElementById('presetList');
+  list.innerHTML=PRESETS.map(p=>
+    '<div class="snd-row'+(_ringtone===p.key?' sel':'')+'" onclick="selectSound(\''+p.key+'\')">'+
+      '<span class="em">'+p.emoji+'</span>'+
+      '<span class="nm">'+esc(p.name)+'</span>'+
+      '<span class="tag'+(p.real?' real':'')+'">'+esc(p.tag)+'</span>'+
+      '<span class="play">▶</span>'+
+    '</div>'
+  ).join('');
 }
 
-// ── 렌더링 (속도: 새 메시지는 append만, 전체 재렌더 안 함) ──
+// ══════════ 내 목소리 녹음 (MediaRecorder → IndexedDB) ══════════
+let _rec=null, _recChunks=[], _recStream=null;
+async function toggleRecord(){
+  const btn=document.getElementById('recBtn');
+  if(_rec && _rec.state==='recording'){ _rec.stop(); return; }
+  try{
+    _recStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    _recChunks=[];
+    const mime=(window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm'))?'audio/webm':'';
+    _rec=mime?new MediaRecorder(_recStream,{mimeType:mime}):new MediaRecorder(_recStream);
+    _rec.ondataavailable=e=>{if(e.data&&e.data.size)_recChunks.push(e.data);};
+    _rec.onstop=async()=>{
+      try{ if(_recStream){_recStream.getTracks().forEach(t=>t.stop());_recStream=null;} }catch(e){}
+      btn.classList.remove('recording'); btn.textContent='🎤 녹음하기';
+      const blob=new Blob(_recChunks,{type:(_rec&&_rec.mimeType)||'audio/webm'});
+      if(!blob.size){ alert('녹음된 소리가 없어요. 다시 시도해주세요.'); return; }
+      try{
+        await idbPut('custom',blob);          // ★ 영속 저장(reload 후에도 유지)
+        _ringtone='custom'; try{localStorage.setItem(RING_KEY,'custom');}catch(e){}
+        await renderSoundSheet();
+        primeAudio(); playRingtone();          // 저장 즉시 미리듣기
+        alert('내 목소리 벨소리가 저장되었어요! 💗');
+      }catch(e){ alert('저장에 실패했어요: '+(e&&e.message||e)); }
+    };
+    _rec.start();
+    btn.classList.add('recording'); btn.textContent='⏹ 녹음 중... (탭하여 종료)';
+    // 안전장치: 8초 넘으면 자동 종료(알림음은 짧게)
+    setTimeout(()=>{try{if(_rec&&_rec.state==='recording')_rec.stop();}catch(e){}},8000);
+  }catch(e){
+    alert('마이크 권한이 필요해요: '+(e&&e.message||e));
+    btn.classList.remove('recording'); btn.textContent='🎤 녹음하기';
+  }
+}
+async function deleteCustom(){
+  if(!(await hasCustom()))return;
+  if(!confirm('저장된 내 목소리 벨소리를 삭제할까요?'))return;
+  try{ await idbDel('custom'); }catch(e){}
+  if(_ringtone==='custom'){ _ringtone='stella'; try{localStorage.setItem(RING_KEY,'stella');}catch(e){} }
+  await renderSoundSheet();
+}
+
+// ══════════ 렌더링 (속도: 새 메시지는 append만) ══════════
 function msgEl(m){
   const d=document.createElement('div');
   d.className='msg '+(m.from===_user?'me':'them');
@@ -115,22 +301,9 @@ function msgEl(m){
   d.innerHTML=(m.img?`<img src="${m.img}" alt="">`:'')+(m.text?esc(m.text):'')+`<span class="time">${esc(m.from)} · ${t}</span>`;
   return d;
 }
-function appendMsg(m){
-  const box=document.getElementById('messages');
-  box.appendChild(msgEl(m));
-  box.scrollTop=box.scrollHeight;
-}
-function renderAll(){
-  const box=document.getElementById('messages');
-  box.innerHTML='';
-  _msgs.forEach(m=>box.appendChild(msgEl(m)));
-  box.scrollTop=box.scrollHeight;
-}
-
-function pushMessage(m){
-  _msgs.push(m);save();appendMsg(m);
-  if(m.from!==_user && document.hidden){_unread++;updateBadge();}
-}
+function appendMsg(m){const box=document.getElementById('messages');box.appendChild(msgEl(m));box.scrollTop=box.scrollHeight;}
+function renderAll(){const box=document.getElementById('messages');box.innerHTML='';_msgs.forEach(m=>box.appendChild(msgEl(m)));box.scrollTop=box.scrollHeight;}
+function pushMessage(m){_msgs.push(m);save();appendMsg(m);if(m.from!==_user && document.hidden){_unread++;updateBadge();}}
 
 // ── 안읽음 배지 ──
 function updateBadge(){
@@ -158,7 +331,6 @@ function onImage(input){
   reader.readAsDataURL(f);
   input.value='';
 }
-
 // 로컬 데모 응답 (백엔드 없음): 알림음/배지 동작 확인용
 function botReply(userText){
   setTimeout(()=>{
@@ -167,17 +339,9 @@ function botReply(userText){
     notify();
   },900);
 }
+function clearChat(){if(!confirm('대화를 모두 지울까요?'))return;_msgs=[];save();renderAll();}
 
-function clearChat(){
-  if(!confirm('대화를 모두 지울까요?'))return;
-  _msgs=[];save();renderAll();
-}
-
-function pickAvatar(el,a){
-  _avatar=a;
-  document.querySelectorAll('#avatarPick span').forEach(s=>s.classList.remove('sel'));
-  el.classList.add('sel');
-}
+function pickAvatar(el,a){_avatar=a;document.querySelectorAll('#avatarPick span').forEach(s=>s.classList.remove('sel'));el.classList.add('sel');}
 function doLogin(){
   const nick=document.getElementById('nickInput').value.trim();
   if(!nick){document.getElementById('nickInput').focus();return;}
@@ -185,7 +349,6 @@ function doLogin(){
   const profile={nick,avatar:_avatar,joined:Date.now()};
   try{
     localStorage.setItem(USER_KEY,JSON.stringify(profile));
-    // 회원 목록(로컬)에 등록 - 같은 닉네임은 갱신
     const users=JSON.parse(localStorage.getItem(USERS_KEY)||'[]').filter(u=>u.nick!==nick);
     users.push(profile);localStorage.setItem(USERS_KEY,JSON.stringify(users));
   }catch(e){}
@@ -206,6 +369,7 @@ try{
   const raw=localStorage.getItem(USER_KEY);
   if(raw){const p=JSON.parse(raw);_user=p.nick;_avatar=p.avatar||'🍀';}
 }catch(e){_user=localStorage.getItem(USER_KEY)||null;} // 구버전(문자열) 호환
+applySoundIcon();
 if(_user){enterChat();}
 </script>
 </body>
