@@ -108,3 +108,97 @@ API 키는 화면의 `AI 연결 설정`에서도 저장할 수 있다. ChatGPT P
   실행한다(Node가 `shell:false`로 `.cmd`를 직접 실행하는 것을 막기 때문). 실제 OCI 배포는 Linux라 셰임이
   없어 이 우회 로직 없이 바로 동작한다 — 두 환경 모두 이번 세션에서 직접 실행 검증했다(Windows는 로컬,
   Linux 동작은 Docker 이미지 구조상 표준 npm 전역 설치 shebang 스크립트라 별도 우회 불필요).
+
+## 2026-07-12 CBO Review 비동기 잡 전환 + CLI 모드 버그 수정 (`stella_clover_improvement_260712_3.md`, 무인)
+
+### 배경
+OCI 프로덕션 로그(`docker logs stella-clover`)에서 확인된 장애:
+```
+[cbo-review] API 키 형식이 올바르지 않습니다.
+[cbo-review] claude 실행이 180000ms 내 끝나지 않았습니다.
+```
+xlsx 첨부 2개 + SAP QM CBO FS 작성 같은 실사용 요청은 claude/codex CLI 실행에 5~10분이 정상 소요되는데,
+기존 구조는 **동기 HTTP 요청 + CLI 서브프로세스 180초(anthropic)/240초(openai) 하드킬**이라 성립하지 않았다.
+
+### 목표 2(버그 수정) — 먼저 처리, 별도 커밋 `6b0c5ce`
+- 원인: `lib/cbo-review/providers.js`의 `callModel()`이 provider mode가 `cli`인데 `detectCli()`가 미인증을
+  반환하면(로그인 만료·서버 CLI 미설치 등) **조용히 API 키 검증 경로로 폴백**해 키 관련 에러를 던지고
+  있었다. `saveProviderKey()`의 "API 키 형식이 올바르지 않습니다" 자체는 `action=provider-save`(사용자가
+  설정 모달에서 직접 키 저장을 누를 때만) 전용이라 이 폴백과는 별개 경로지만, 로그의 두 줄은 "cli 모드인데
+  키 관련 에러가 섞여 나온다"는 동일한 증상 계열로 판단해 함께 점검했다.
+- 수정: `callModel()`에서 mode가 `cli`이면 미인증이어도 **API 키 로직으로 절대 넘어가지 않고** cli 전용
+  에러(`CLI 설치 안 됨` / `로그인 만료`)로 즉시 종료하도록 변경. `saveProviderKey()`는 그대로 뒀다 —
+  사용자가 명시적으로 "API 키 저장"을 누르는 별개 액션이라 mode와 무관하게 형식 검증이 맞다고 판단.
+- 회귀 테스트: `test/cbo-review-providers.test.js`에 cli 모드+미인증 상태를 재현해 `callModel()` 에러 메시지에
+  "API 키" 문구가 섞이지 않는지 검증하는 케이스 추가.
+
+### 목표 1(비동기 잡 전환) — 커밋 `69295b0`
+- 기존 서버사이드 백그라운드 transcription 잡 구조(`lib/jobs-runtime.js`, `STELLA_CLOVER_TRANSCRIBE_JOBS.md`)의
+  패턴(DB 영속 상태 + 인프로세스 큐 + `kick()` + 부팅 `recover()`)을 그대로 재사용해
+  `lib/cbo-review/jobRuntime.js`를 새로 만들었다. transcribe 잡과의 핵심 차이:
+  - transcribe 잡은 청크 단위로 **재개 가능**(CAS 가드로 중단 지점부터 이어감)하지만, CBO 잡은 단발성 LLM
+    호출이라 재개 개념이 없다 — `queued → running → done|failed`만 있고 실패 시 재요청해야 한다.
+  - 동시 실행 상한을 `transcribe`처럼 환경변수(`JOBS_CONCURRENCY`)로 조절하지 않고 **1로 고정**했다 —
+    claude/codex CLI 서브프로세스가 사용자 개인 구독 로그인을 그대로 쓰므로 동시 다중 실행을 지원하지 않음
+    (지시서 요구사항).
+  - CLI 실행 자체의 하드킬 타임아웃을 `lib/cbo-review/providers.js`의 `runCli()`에서 이미 갖고 있어서
+    (`callViaCli` 호출부), 잡 레벨에서 별도 타임아웃 래퍼(`Promise.race`)를 추가하지 않았다. 리뷰 잡은 파일이
+    많으면 청크당(최대 80개) 개별 CLI 호출을 반복하므로, 잡 전체에 고정 타임아웃을 씌우면 정상적인 대용량
+    리뷰까지 중도 실패시킬 위험이 있었기 때문이다.
+- DB: `api/_db.js`에 `cbo_jobs` 테이블 추가(`ensureSchema()`에 편입, 기존 `CREATE_TABLE IF NOT EXISTS` +
+  `ADD COLUMN IF NOT EXISTS` 멱등 패턴 재사용). 컬럼: `kind/status/payload_json/result_json/error_msg/
+  created_at/updated_at/started_at/finished_at`.
+- API 계약(하위 호환 유지 — 지시서 "기존 액션명/시그니처 유지" 요건):
+  - `POST /api/cbo-review?action=generate-spec` / `review-upload` / `review-repo` — 응답이 기존
+    `{ok,title,markdown,...}` 전체 결과 대신 **`{ok,jobId,status:'queued'}`를 수 초 내 반환**하도록 바뀜(액션명·
+    HTTP 메서드·요청 바디는 동일).
+  - 신규 `GET /api/cbo-review?action=job-status&id=<jobId>` — 폴링용. `queued/running`이면
+    `{ok,status,elapsedMs}`, `done`이면 원래 동기 응답과 동일한 필드를 status와 함께 펼쳐서 반환, `failed`면
+    `{ok:true,status:'failed',message}`(HTTP 자체는 성공이므로 `ok:true` — 실패는 잡의 상태일 뿐 폴링
+    요청의 실패가 아님).
+  - `action=apply`(선택 반영)는 변경 없음 — `reviewFiles()`가 백그라운드 잡 내부에서 실행되지만 같은
+    Node 프로세스 안이라 기존 인메모리 `reviews` Map(리뷰 세션 저장)이 그대로 채워진다.
+- 동시성 1 + 대기 큐: `jobRuntime.js`의 `waiting` 배열 + `pump()`가 transcribe 잡과 동일한 방식으로 처리.
+- 서버 재시작 좀비 잡 방지: `server.mjs` 부팅 시 `lib/cbo-review/jobRuntime.recover()` 호출 —
+  `running`(재시작으로 유실된 실행 중 CLI 프로세스)은 **재개 불가이므로 즉시 `failed`** 처리,
+  `queued`(아직 CLI를 부르지 않아 유실이 없는 상태)는 안전하게 재투입(`kick`)해 이어서 완료된다.
+  transcribe 잡의 "완료된 단계는 스킵하고 이어감" 방식과 달리, CBO 잡은 애초에 재개 대상 산출물이 없어
+  "아직 시작 안 한 것만 재시도"로 단순화했다.
+- 프론트(`cbo-review/index.html`): `job_id` 발급 후 3초 간격 폴링(기존 transcribe 잡과 동일 주기).
+  진행 중에는 스펙 미리보기/리뷰 결과 영역에 "생성 중… 경과 N초" 표시. **실패 시 토스트로 사라지지 않고
+  화면에 지속 표시**(`showErr()` — `var(--danger)` 색상, 사용자가 원인을 캡처할 수 있도록). 활성 `job_id`를
+  `localStorage`(`cbo_active_spec`/`cbo_active_review`)에 남겨 **새로고침/재접속 후에도 진행 중이던 잡을
+  이어서 폴링**한다(지시서에서 "이상적이나 없으면 범위 제외" 옵션이었지만, DB 폴링만 추가하면 되는 수준이라
+  이번 세션에 포함했다).
+- `lib/cbo-review/providers.js`: `runCli()` 호출부의 CLI 하드킬 타임아웃을 `180000/240000ms` →
+  `900000ms`(15분, `CLI_TIMEOUT_MS` 상수)로 상향. 이게 두 번째 로그 라인의 진짜 원인 수정이다 — 잡 큐
+  전환으로 HTTP 응답 지연 문제는 해소됐지만, CLI 자체의 하드킬 값이 여전히 3~4분이면 정상적인 5~10분 요청도
+  똑같이 실패하기 때문.
+
+### 테스트/검증
+- `node --check`: 변경된 백엔드 파일 전부(`api/_db.js`, `api/cbo-review.js`, `lib/cbo-review/providers.js`,
+  `lib/cbo-review/jobRuntime.js`, `server.mjs`) 통과.
+- inline `<script>` 파싱: `new Function()`으로 `cbo-review/index.html` `<script>` 본문 파싱 성공, 중복 함수
+  선언 없음 확인(수작업 스캔).
+- `npm test`(DATABASE_URL 미설정, 샌드박스 기본): **107 pass / 0 fail / 12 skip**(DB 통합 테스트, 기존과 동일
+  사유로 skip — 신규 `test/cbo-jobs.test.js` 5건 포함).
+- **DB 통합 테스트 실환경 검증**: 이 세션에서는 샌드박스에 Docker가 있어, 일회용 `postgres:16-alpine` 컨테이너를
+  띄우고 `DATABASE_URL`을 설정해 스킵되던 통합 테스트까지 실제로 돌렸다 — **119/119 전부 통과**(신규
+  `test/cbo-jobs.test.js` 5건 포함: 상태전이 queued→running→done, 실행기 throw 시 failed+error_msg 기록,
+  **동시 실행 1개 제한**(두 번째 잡이 첫 번째 완료 후에만 시작함을 이벤트 순서로 검증), `recover()`의
+  running→failed 좀비 처리 + queued→재투입 후 완료까지 확인). 테스트 후 컨테이너는 정리했다(운영 DB에
+  영향 없음).
+- 실제 claude/codex CLI 호출을 통한 end-to-end(진짜 15분 대기 스펙 생성)는 이번 세션에서 수행하지 않았다 —
+  운영 자격증명이 필요하고, 잡 큐/타임아웃/폴링 로직 자체는 위 통합 테스트로 충분히 검증됐다고 판단했다.
+
+### 알려진 한계 / 남은 과제
+- **서버 재시작 시 `running` 잡은 재개 불가**(비멱등 LLM 서브프로세스 호출이라 중간 상태를 이어받을 수
+  없음) — 사용자에게 "서버 재시작으로 중단되었습니다. 다시 요청해주세요."로 명시하고 `failed` 처리한다.
+  `queued`(아직 CLI를 부르지 않음) 잡만 안전하게 자동 재투입된다.
+- 리뷰 잡(다중 파일·청크 최대 80개)은 잡 전체에 고정 타임아웃이 없어, 이론상 청크 수가 많으면 15분×청크수
+  까지 늘어질 수 있다(각 청크 호출은 15분 상한이 있지만 잡 전체 합산 상한은 없음) — 지시서의 "CLI 실행
+  자체의 타임아웃은 15분"을 문자 그대로 "개별 CLI 호출당 15분"으로 해석했다. 잡 전체 총량 상한이 필요하면
+  후속 작업으로 `jobRuntime.js`에 kind별 총 소요시간 가드를 추가할 수 있다.
+- CBO Review는 개인용 공유 비밀번호 1개(`lib/cbo-review/auth.js`)로 사용자 구분이 없어, 잡도 사용자별로
+  스코프하지 않았다(모든 잡이 전역 하나의 큐를 공유). 다중 사용자 동시 사용 시나리오가 생기면 `cbo_jobs`에
+  세션/사용자 식별 컬럼을 추가하는 확장이 필요하다.
