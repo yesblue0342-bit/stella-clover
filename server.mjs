@@ -127,6 +127,13 @@ async function bootTasks() {
     setInterval(() => { recover().catch(() => {}); }, 60 * 60 * 1000);
   } catch (e) { console.warn("[boot] 잡 복구 스킵:", e && e.message); }
 
+  // 1-b) CBO Review(스펙 생성/코드 리뷰) 잡 복구 — running으로 남은 좀비 잡은 failed 처리,
+  //      queued로 남은 잡(아직 CLI 실행 전이라 유실 없음)은 재투입. 부팅 시 1회면 충분(재개형 아님).
+  try {
+    const { recover: recoverCboJobs } = await import("./lib/cbo-review/jobRuntime.js");
+    await recoverCboJobs();
+  } catch (e) { console.warn("[boot] CBO 잡 복구 스킵:", e && e.message); }
+
   // 2) 일일 오디오 정리(과거 Vercel Cron 0 18 * * * 대체). 다음 18:00 UTC에 첫 실행 후 24h 간격.
   scheduleDailyCleanup();
 

@@ -12,6 +12,8 @@ import {
 import {
   applyToRepo, parseGitHubUrl, readRepoPath, repoInfo, restoreBackup, saveSpec,
 } from "../lib/cbo-review/repository.js";
+import { createJob, getJob, registerRunner } from "../lib/cbo-review/jobRuntime.js";
+import { hasDbConfig } from "./_db.js";
 
 const reviews = new Map();
 const loginAttempts = new Map();
@@ -77,6 +79,20 @@ async function reviewFiles({ files, provider, model, origin }) {
   return { reviewId, files: results.map(({ content, ...rest }) => rest), summary: { fileCount: results.length, findingCount: Object.values(counts).reduce((a, b) => a + b, 0), severities: counts, chunked: wasChunked } };
 }
 
+// ── 비동기 잡 실행기 등록(lib/cbo-review/jobRuntime.js) ──
+// 스펙 생성/코드 리뷰는 claude/codex CLI 실행에 5~10분이 정상 소요될 수 있어(REVIEW_LOG.md),
+// 동기 HTTP 요청+180초 타임아웃 대신 잡 큐로 처리한다. 여기 등록된 함수의 반환값이 그대로
+// cbo_jobs.result_json 에 저장되고, action=job-status 폴링 응답에 그대로 펼쳐진다.
+registerRunner("spec", async ({ prompt, extracted, provider, model, warnings }) => {
+  const markdown = cleanSpec(await callModel({ provider, model, system: SYSTEM, user: buildSpecPrompt({ prompt, attachments: extracted }) }));
+  const title = extractMainTitle({ prompt, fileNames: extracted.map((item) => item.name), generated: markdown });
+  return { title, markdown, warnings, provider, model };
+});
+registerRunner("review", async ({ files, provider, model, origin, warnings }) => {
+  const result = await reviewFiles({ files, provider, model, origin });
+  return { ...result, warnings: warnings || [] };
+});
+
 export default async function handler(req, res) {
   const action = String(req.query.action || "");
   try {
@@ -112,6 +128,7 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, providers: await providerStatus() });
     }
     if (req.method === "POST" && action === "generate-spec") {
+      if (!hasDbConfig()) return json(res, 503, { ok: false, message: "DB 환경변수가 설정되지 않아 비동기 작업 큐를 사용할 수 없습니다." });
       const { fields, extracted, warnings } = await uploadedFiles(req);
       const prompt = String(first(fields.prompt) || "").trim();
       const provider = String(first(fields.provider) || "");
@@ -119,9 +136,9 @@ export default async function handler(req, res) {
       if (!prompt && !extracted.length) return json(res, 400, { ok: false, message: "프롬프트 또는 첨부 파일이 필요합니다." });
       if (prompt.length + extracted.reduce((sum, file) => sum + file.content.length, 0) > 600000) return json(res, 400, { ok: false, message: "스펙 입력 전체 크기는 600,000자를 초과할 수 없습니다." });
       validateProviderModel(provider, model);
-      const markdown = cleanSpec(await callModel({ provider, model, system: SYSTEM, user: buildSpecPrompt({ prompt, attachments: extracted }) }));
-      const title = extractMainTitle({ prompt, fileNames: extracted.map((item) => item.name), generated: markdown });
-      return json(res, 200, { ok: true, title, markdown, warnings, provider, model });
+      // 즉시 job_id 반환(수 초 내) — 실제 CLI/API 호출은 백그라운드 잡 큐(jobRuntime)가 처리(최대 15분).
+      const jobId = await createJob({ kind: "spec", payload: { prompt, extracted, provider, model, warnings } });
+      return json(res, 200, { ok: true, jobId, status: "queued" });
     }
     if (req.method === "POST" && action === "export-xlsx") {
       const markdown = String(req.body?.markdown || "");
@@ -137,17 +154,40 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, ...(await saveSpec({ title: req.body?.title, extension, content })) });
     }
     if (req.method === "POST" && action === "review-upload") {
+      if (!hasDbConfig()) return json(res, 503, { ok: false, message: "DB 환경변수가 설정되지 않아 비동기 작업 큐를 사용할 수 없습니다." });
       const { fields, extracted, warnings } = await uploadedFiles(req);
       if (!extracted.length) return json(res, 400, { ok: false, message: warnings.join(" / ") || "리뷰할 파일이 없습니다." });
-      const result = await reviewFiles({ files: extracted, provider: String(first(fields.provider) || ""), model: String(first(fields.model) || ""), origin: { type: "upload" } });
-      return json(res, 200, { ok: true, ...result, warnings });
+      const provider = String(first(fields.provider) || "");
+      const model = String(first(fields.model) || "");
+      validateProviderModel(provider, model);
+      const jobId = await createJob({ kind: "review", payload: { files: extracted, provider, model, origin: { type: "upload" }, warnings } });
+      return json(res, 200, { ok: true, jobId, status: "queued" });
     }
     if (req.method === "POST" && action === "review-repo") {
+      if (!hasDbConfig()) return json(res, 503, { ok: false, message: "DB 환경변수가 설정되지 않아 비동기 작업 큐를 사용할 수 없습니다." });
       const relative = req.body?.githubUrl ? parseGitHubUrl(req.body.githubUrl) : String(req.body?.path || "");
       const files = await readRepoPath(relative);
       if (!files.length) return json(res, 404, { ok: false, message: "리뷰 가능한 텍스트 파일이 없습니다." });
-      const result = await reviewFiles({ files, provider: String(req.body?.provider || ""), model: String(req.body?.model || ""), origin: { type: "repo", relative } });
-      return json(res, 200, { ok: true, ...result });
+      const provider = String(req.body?.provider || "");
+      const model = String(req.body?.model || "");
+      validateProviderModel(provider, model);
+      const jobId = await createJob({ kind: "review", payload: { files, provider, model, origin: { type: "repo", relative } } });
+      return json(res, 200, { ok: true, jobId, status: "queued" });
+    }
+    if (req.method === "GET" && action === "job-status") {
+      const id = parseInt(req.query.id, 10);
+      if (!Number.isInteger(id)) return json(res, 400, { ok: false, message: "id가 필요합니다." });
+      const job = await getJob(id);
+      if (!job) return json(res, 404, { ok: false, message: "작업을 찾을 수 없습니다." });
+      if (job.status === "done") {
+        let result = {};
+        try { result = JSON.parse(job.result_json || "{}") || {}; } catch { /* 파싱 실패 시 빈 결과 */ }
+        return json(res, 200, { ok: true, status: "done", ...result });
+      }
+      if (job.status === "failed") {
+        return json(res, 200, { ok: true, status: "failed", message: job.error_msg || "작업이 실패했습니다." });
+      }
+      return json(res, 200, { ok: true, status: job.status, elapsedMs: Date.now() - new Date(job.created_at).getTime() });
     }
     if (req.method === "POST" && action === "apply") {
       const review = reviews.get(String(req.body?.reviewId || ""));

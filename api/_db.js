@@ -331,6 +331,25 @@ export const CREATE_FLOWS = `
   );
   CREATE INDEX IF NOT EXISTS idx_cl_flows_created_at ON cl_flows (created_at);`;
 
+// CBO Review(스펙 생성/코드 리뷰) 비동기 잡 테이블. transcribe_jobs와 달리 청크 재개가 없는
+// 단발성 잡 — kind별 입력(payload_json)을 그대로 보관해 워커가 1회 실행, 결과(result_json)
+// 또는 실패 사유(error_msg)만 기록한다(lib/cbo-review/jobRuntime.js 참조).
+export const CREATE_CBO_JOBS = `
+  CREATE TABLE IF NOT EXISTS cbo_jobs (
+    job_id BIGSERIAL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    payload_json TEXT,
+    result_json TEXT,
+    error_msg TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
+  );
+  CREATE INDEX IF NOT EXISTS idx_cbo_jobs_status ON cbo_jobs (status);
+  CREATE INDEX IF NOT EXISTS idx_cbo_jobs_created_at ON cbo_jobs (created_at);`;
+
 // 노트 목록 메타 캐시(Drive 원본의 읽기 전용 인덱스) + 증분 동기화 커서.
 //  목록/검색은 이 테이블만 SELECT — Drive API 를 타지 않는다(TTFB 개선, api/notes.js 참고).
 //  body: 상세 열람(action=get)도 Drive 를 타지 않도록 본문까지 캐시(Drive 는 여전히 원본,
@@ -398,6 +417,7 @@ async function ensureSchema(pgPool) {
   await pgPool.query(CREATE_TABLE);
   await pgPool.query(CREATE_JOBS);
   await pgPool.query(CREATE_FLOWS);
+  await pgPool.query(CREATE_CBO_JOBS);
   await pgPool.query(CREATE_NOTES_META);
   // 마이그레이션은 실패해도(권한/구버전 PG 등) 기동을 막지 않도록 개별 try — 신규 배포에선 no-op.
   try { await pgPool.query(MIGRATE); } catch (e) { console.warn("[db] 마이그레이션 스킵:", e && e.message); }
