@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cbo-providers-test-"));
 process.env.CBO_DATA_DIR = tmpDir;
 const {
-  getProviderKey, getProviderMode, connectCli, disconnectCli, detectCli, providerStatus,
+  getProviderKey, getProviderMode, connectCli, disconnectCli, detectCli, providerStatus, callModel,
 } = await import("../lib/cbo-review/providers.js");
 
 test.after(async () => { await fs.rm(tmpDir, { recursive: true, force: true }); });
@@ -48,6 +48,27 @@ test("connectCli/disconnectCli는 실제 detectCli 결과와 일관된 방식으
   } else {
     await assert.rejects(() => connectCli("anthropic"));
   }
+});
+
+test("[회귀] cli 모드인데 미인증이면 API 키 검증/에러 경로로 새지 않는다", async () => {
+  await fs.mkdir(tmpDir, { recursive: true });
+  // connectCli()를 거치지 않고 저장 포맷을 직접 만들어, 서버에 실제 CLI 로그인이 없는 CI 환경에서도
+  // "mode=cli, 미인증" 상태를 재현한다(API 키는 일부러 저장하지 않음 — 폴백 경로 진입 여부를 검증).
+  await fs.writeFile(path.join(tmpDir, "providers.json"), JSON.stringify({ __mode__: { anthropic: "cli" } }));
+  assert.equal(await getProviderMode("anthropic"), "cli");
+  assert.equal(await getProviderKey("anthropic"), "");
+
+  const status = await detectCli("anthropic");
+  if (status.authenticated) return; // 실제 CLI가 로그인된 환경이면 이 회귀 케이스를 재현할 수 없어 스킵.
+
+  await assert.rejects(
+    () => callModel({ provider: "anthropic", model: "claude-sonnet-5", system: "s", user: "u" }),
+    (error) => {
+      assert.ok(!/API 키/.test(error.message), `cli 모드 오류에 API 키 문구가 섞이면 안 된다: ${error.message}`);
+      assert.match(error.message, /CLI|login/);
+      return true;
+    },
+  );
 });
 
 test("providerStatus는 provider마다 mode/cli/connected 필드를 포함한다", async () => {
