@@ -822,3 +822,13 @@ Google API 왕복의 합(네트워크 상태에 따라 변동이 크지만, 이 
 | OCI Docker image build + container `/cbo-review` + `git --version` | PASS (200 / git 2.39.5) |
 
 실 provider 호출과 `0Program` write는 운영 credential을 사용하지 않고 계약·정적 검증까지만 수행했다.
+
+## [2026-07-12] CBO Review GitHub 계정 선택 팝업 방지
+
+| 검증 | 결과 |
+|---|---|
+| 로컬 `stella-clover`, `0Program` origin | SSH remote 확인 |
+| `ssh -T git@github.com` | `yesblue0342-bit` 인증 성공 |
+| CBO Git 인증 선택 | `GITHUB_TOKEN` 존재 시 HTTPS PAT, 미설정 시 SSH |
+| Git Credential Manager 대화상자 | `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=Never`로 비대화형 고정 |
+| `npm test` | 113 total / 105 pass / 8 DB skip / 0 fail |
