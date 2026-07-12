@@ -1,5 +1,20 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-12] CBO Review UI 수정 (`stellaclover_260712_prompt.md`, 무인 세션)
+
+무인 자동화 지시서 기준 목표 1~5 처리. 상세 판단 근거는 `WORK_REPORT.md`/`REVIEW_LOG.md` 2026-07-12(UI 수정
+세션) 항목 참조. 사용자에게 확인 없이 완결까지 진행하도록 지시서에 명시적으로 승인되어 있음.
+
+- 목표 2(로그인 게이트 깜빡임 제거), 목표 4(placeholder "US11 " 삭제), 목표 5(GitHub 전송→Hub 전송 라벨)
+  반영, `cbo-review/index.html` 1개 커밋.
+- 목표 3(Claude 전체 모델 라인업)은 `lib/cbo-review/core.js`/`providers.js`에 이미 구현되어 있어 변경 없음.
+- 목표 1(API 키 → OAuth 계정 연결)은 보류 — provider 공개 OAuth 플로우 부재 + "신규 라우트/키 금지" 규칙 충돌.
+- 검증: `node --check api/cbo-review.js lib/cbo-review/*.js` 통과, inline `<script>`를 `new Function()`으로
+  파싱 성공, `npm test` 99 pass / 0 fail / 8 skip(기존과 동일하게 DATABASE_URL 미설정 통합 테스트 skip).
+  이번 변경은 텍스트/CSS 클래스 수준이라 새 단위 테스트는 추가하지 않았다.
+- `sw.js` CACHE 버전은 올리지 않음 — 루트 `index.html` 미변경 + 모든 HTML이 network-first라 사용자는 항상
+  최신을 받는다(근거는 `WORK_REPORT.md` 참조).
+
 ## [2026-07-11] Stella Talk 알림 벨소리 — 내 목소리 녹음 저장·재생 + 프리셋 음성 5종
 
 ### 고친 것 (사용자 보고: "녹음해도 저장 안 되고 벨소리 알람 안 됨")
