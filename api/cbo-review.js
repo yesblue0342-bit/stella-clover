@@ -2,7 +2,9 @@ import formidable from "formidable";
 import crypto from "node:crypto";
 import { extractFile, markdownToWorkbook } from "../lib/cbo-review/extract.js";
 import { hasAccessPassword, login, requireAuth } from "../lib/cbo-review/auth.js";
-import { callModel, deleteProviderKey, providerStatus, saveProviderKey } from "../lib/cbo-review/providers.js";
+import {
+  callModel, connectCli, deleteProviderKey, disconnectCli, providerStatus, saveProviderKey,
+} from "../lib/cbo-review/providers.js";
 import {
   applyFindings, buildReviewPrompt, buildSpecPrompt, chunkSource, detectLanguage,
   extractMainTitle, normalizeFindings, parseJsonObject, sha256, validateProviderModel,
@@ -99,6 +101,14 @@ export default async function handler(req, res) {
     }
     if (req.method === "POST" && action === "provider-delete") {
       await deleteProviderKey(String(req.body?.provider || ""));
+      return json(res, 200, { ok: true, providers: await providerStatus() });
+    }
+    if (req.method === "POST" && action === "cli-connect") {
+      await connectCli(String(req.body?.provider || ""));
+      return json(res, 200, { ok: true, providers: await providerStatus() });
+    }
+    if (req.method === "POST" && action === "cli-disconnect") {
+      await disconnectCli(String(req.body?.provider || ""));
       return json(res, 200, { ok: true, providers: await providerStatus() });
     }
     if (req.method === "POST" && action === "generate-spec") {

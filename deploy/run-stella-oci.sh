@@ -48,10 +48,13 @@ $DOCKER rm -f "$NAME" 2>/dev/null || true
 echo "▶ 4/5 $NETWORK 네트워크에 컨테이너 실행 (.env 주입)"
 # 오디오 청크는 로컬 디스크(/app/data)에 저장된다(Drive 인증과 무관하게 전사 동작).
 # 명명 볼륨으로 마운트해 재빌드/재배포에도 진행 중 잡의 청크가 유지되도록 한다(부팅 복구 recover()와 짝).
+# CBO Review "계정 로그인"(claude/codex CLI) 인증 파일도 명명 볼륨에 보관 — 안 쓰면 빈 채로 남아 무해하다.
 $DOCKER run -d --name "$NAME" \
   --network "$NETWORK" \
   --env-file .env \
   -v "${NAME}-data:/app/data" \
+  -v "${NAME}-claude-home:/root/.claude" \
+  -v "${NAME}-codex-home:/root/.codex" \
   --restart unless-stopped \
   "$NAME"
 
