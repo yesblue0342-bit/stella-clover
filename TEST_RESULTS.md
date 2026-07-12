@@ -756,3 +756,18 @@ Google API 왕복의 합(네트워크 상태에 따라 변동이 크지만, 이 
 
 > 양방향 동기화(Clover↔Stella GPT)·1초 로드는 **같은 Drive 공유 폴더 + Drive 자격증명**이 설정된 라이브 서버에서 성립
 > (샌드박스는 정적/기동/파싱까지 검증). 파괴적 변경 없음 — Clover 엔 제거할 자체 노트 테이블이 애초에 없고(회의록=cl_meetings 는 별개, 유지).
+
+## [2026-07-12] CBO Spec & Code Review
+
+| 검증 | 결과 |
+|---|---|
+| `npm test` | 107 total / 99 pass / 8 DB skip / 0 fail |
+| `node --check` (`api/*.js`, `lib/*.js`, `lib/cbo-review/*.js`, `server.mjs`) | PASS |
+| HTML inline JavaScript parse (`index`, `cbo-review`, `flow`, `rate`, `note`) | PASS |
+| 서버 smoke (`/cbo-review`, login, authenticated settings, unauthenticated 401) | 200 / 200 / 200 / 401 |
+| 첨부 추출 및 Markdown→XLSX | PASS |
+| 경로 traversal/GitHub allowlist/model provider validation | PASS |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| OCI Docker image build + container `/cbo-review` + `git --version` | PASS (200 / git 2.39.5) |
+
+실 provider 호출과 `0Program` write는 운영 credential을 사용하지 않고 계약·정적 검증까지만 수행했다.
