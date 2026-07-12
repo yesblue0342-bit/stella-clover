@@ -57,3 +57,54 @@ API 키는 화면의 `AI 연결 설정`에서도 저장할 수 있다. ChatGPT P
 - `sw.js` `CACHE` 버전: 이번 변경은 `cbo-review/index.html`(별개 SPA, 서비스워커 프리캐시 목록에 없음)만
   건드렸고, `sw.js`는 모든 HTML을 network-first로 서빙(오프라인일 때만 캐시 폴백)하므로 버전을 올리지 않아도
   사용자는 항상 최신 HTML을 받는다. 루트 `index.html`은 변경하지 않았다.
+
+## 2026-07-12 계정 로그인(CLI) 연동 세션 (`stella_clover_improvement_260712_2.md`, 무인)
+
+### 반영 완료
+
+- **작업 1 — 공통 AI 모델 드롭다운**: 미연결 provider(openai/anthropic/gemini 공통)를 더 이상 목록에서
+  숨기지 않고 `<optgroup label="provider (연결 필요)">`로 회색 표시. 선택 시 직전 값으로 되돌리고 AI 연결
+  설정 모달을 자동으로 연다. Claude 전체 라인업 fallback 목록(`claude-fable-5/opus-4-8/sonnet-5/haiku-4-5`)은
+  지난 세션에 이미 구현돼 있어 추가 변경 없음(`lib/cbo-review/core.js`). 상세 진단은 `REVIEW_LOG.md` 참조.
+- **작업 2 — 계정 로그인(CLI) 방식 추가**: 조사 끝에 **경로 A(기존 CLI 인증 재사용)를 채택·구현**했다.
+  - AI 연결 설정 모달에 provider별 "계정으로 로그인 사용" / "계정 로그인 해제" 버튼을 **기존 API 키 입력
+    UI를 그대로 둔 채** 추가(둘 중 하나만 있어도 "연결됨"). 서버에 `claude`/`codex` CLI가 설치·로그인
+    되어 있으면 버튼이 나타나고, 미로그인이면 "서버에서 CLI 로그인 필요(1회)" 안내만 표시된다.
+  - 호출 우선순위는 지시서대로 계정 로그인(CLI) → 없으면 API 키.
+  - Gemini는 서드파티 앱용 공식 OAuth/CLI가 없어 이번에도 API 키 전용 유지(지난 세션과 동일 결론).
+  - 새 API 키·새 OAuth 앱·새 서버리스 라우트는 만들지 않았다 — `api/cbo-review.js`의 기존 단일 핸들러에
+    `action=cli-connect`/`action=cli-disconnect` 브랜치만 추가(기존 `action=provider-save` 등과 동일 패턴).
+
+### 사용자가 직접 해야 할 일 (계정 로그인 기능을 실제로 쓰려면)
+
+1. `main` push 후 OCI 자동 재배포가 끝나면(이미지에 `claude`/`codex` CLI가 새로 포함됨), 서버에 SSH 접속:
+   ```
+   docker exec -it stella-clover claude login
+   docker exec -it stella-clover codex login
+   ```
+   각 명령이 인증 URL(+코드)을 출력하면 본인 브라우저에서 열어 로그인한다(컨테이너 자체에 브라우저 불필요).
+2. 인증 파일은 `stella-clover-claude-home`/`stella-clover-codex-home` 명명 볼륨에 저장되며, 이후 `main` push로
+   컨테이너가 재생성돼도(`deploy/run-stella-oci.sh`가 매번 `docker rm -f`+`docker run`) 유지된다.
+3. 로그인 후 CBO Review → AI 연결 설정에서 해당 provider의 "계정으로 로그인 사용" 버튼을 눌러 활성화한다.
+   API 키를 이미 넣어뒀다면 그대로 폴백으로 남으므로 삭제할 필요 없다.
+4. 로그인하지 않으면 아무것도 바뀌지 않는다 — 기존 API 키 방식이 100% 그대로 동작한다(회귀 없음).
+
+### 알려진 한계 / 남은 과제
+
+- **codex(OpenAI) 모델 선택은 현재 advisory 수준이다.** `codex exec`에 `-m`(모델)을 강제로 넘기지 않고
+  서버측 codex 설정 기본 모델을 그대로 사용한다 — codex CLI 내부 모델 네이밍이 direct API(`gpt-5.6` 등,
+  드롭다운에 표시되는 값)와 다를 가능성이 있는데, 이 세션에서 실제 계정이 사용량 한도(usage limit)에 걸려
+  실제 `-m` 값 검증을 끝까지 하지 못했다(인증/샌드박스/비대화식 실행 자체는 실제 호출로 확인함). 사용량
+  회복 후 실제 리뷰/스펙 생성을 한 번 실행해 결과를 확인하고, 필요하면 `callViaCli()`의 codex 분기에 `-m`
+  매핑을 추가하는 후속 작업을 권장한다.
+- **claude(Anthropic) 경로는 실제 서브프로세스 호출까지 end-to-end 검증했다** — `claude -p --model
+  claude-haiku-4-5 ...`로 실제 텍스트 응답을 받았고, `/api/cbo-review?action=generate-spec`을 CLI 모드로 로컬
+  구동해 스펙 생성까지 정상 동작 확인(TEST_RESULTS.md 참조).
+- CLI 경로는 방어적으로 `Bash/Edit/Write/Read/WebFetch/WebSearch/...` 전체 도구 차단 + codex는 `-s
+  read-only` 샌드박스로 실행한다(첨부 소스코드에 프롬프트 인젝션이 섞여도 서버 파일/셸에 접근 못하도록).
+  다만 이 도구 차단 옵션은 각 CLI의 공식 플래그(`--disallowedTools`, `--disable-slash-commands`, `-s
+  read-only`)에 의존하므로, CLI 자체 업데이트로 플래그가 바뀌면 재확인이 필요하다.
+- Windows 로컬 개발 환경에서는 npm이 만드는 `.cmd` 셰임을 파싱해 실제 `.exe`/`node.exe+.js` 경로로 우회
+  실행한다(Node가 `shell:false`로 `.cmd`를 직접 실행하는 것을 막기 때문). 실제 OCI 배포는 Linux라 셰임이
+  없어 이 우회 로직 없이 바로 동작한다 — 두 환경 모두 이번 세션에서 직접 실행 검증했다(Windows는 로컬,
+  Linux 동작은 Docker 이미지 구조상 표준 npm 전역 설치 shebang 스크립트라 별도 우회 불필요).

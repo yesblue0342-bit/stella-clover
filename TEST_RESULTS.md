@@ -1,5 +1,41 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-12] CBO Review 계정 로그인(CLI) 연동 (`stella_clover_improvement_260712_2.md`, 무인 세션)
+
+무인 자동화 지시서 기준 작업 1(공통 AI 모델 드롭다운 미연결 표시)·작업 2(계정 로그인 CLI 재사용, 경로 A)
+처리. 상세 판단 근거는 `WORK_REPORT.md`/`REVIEW_LOG.md` 2026-07-12(계정 로그인 세션) 항목 참조.
+
+- **정적 검증**: `node --check api/cbo-review.js lib/cbo-review/providers.js lib/cbo-review/core.js
+  test/cbo-review-providers.test.js` 전부 통과. `cbo-review/index.html` inline `<script>`를 `new Function()`으로
+  파싱 성공. `deploy/run-stella-oci.sh`는 `bash -n` 통과.
+- **단위 테스트**: 신규 `test/cbo-review-providers.test.js` 6개 추가(mode 기본값, 지원하지 않는 provider
+  거부, 레거시 `providers.json` 포맷 호환, `detectCli` 반환 형태, `connectCli`/`disconnectCli` 실제 환경
+  일관성, `providerStatus` 필드 shape) — `npm test`: **113 tests / 105 pass / 0 fail / 8 skip**(기존과 동일,
+  DATABASE_URL 미설정 통합 테스트만 skip). 이전 세션 대비 +6 pass, 회귀 없음.
+- **실서브프로세스 E2E(이 세션에서 직접 실행, mock 아님)**: 로컬 Windows 개발 환경에 이미 `claude`
+  (`@anthropic-ai/claude-code`)·`codex`(`@openai/codex`) CLI가 로그인돼 있어 실제로 호출까지 검증했다.
+  - `detectCli('anthropic')`/`detectCli('openai')` → `{available:true, authenticated:true}` (토큰 내용은
+    읽지 않고 CLI 바이너리 존재 + 인증 파일 존재만 확인).
+  - `callModel({provider:'anthropic', mode:'cli', model:'claude-haiku-4-5', ...})` → 실제 `claude -p
+    --output-format json` subprocess 호출 → `"PONG"` 정상 왕복.
+  - `codex exec -s read-only --skip-git-repo-check -o <file> "..."` → 인증/샌드박스까지 정상 도달, 계정
+    사용량 한도(usage limit)로 생성 자체는 막혔지만 subprocess 호출 메커니즘은 정상 확인(오류 메시지가
+    `ERROR: You've hit your usage limit...`로 명확히 propagate).
+  - 로컬 서버(`node server.mjs`, 격리된 `CBO_DATA_DIR`)를 띄워 실제 HTTP 엔드포인트 검증:
+    `GET action=settings`, `POST action=cli-connect`(anthropic) → `connected:true, mode:"cli"` 응답 확인,
+    `POST action=generate-spec`(anthropic CLI 모드, multipart) → `ok:true`로 실제 스펙 Markdown 생성 확인.
+- **Windows npm `.cmd` 셰임 우회**: Node가 `shell:false`로 `.cmd` 파일을 직접 실행하면 `EINVAL`을 던지는
+  것을 확인(재현 로그 확보) → 셰임 파일을 파싱해 실제 `.exe`(claude)/`node.exe + .js`(codex) 대상을 찾아
+  셸 없이 직접 spawn하도록 수정 후 위 E2E가 통과함. 실제 OCI 배포(Linux)는 이 우회 분기를 타지 않고 npm
+  전역 설치 shebang 스크립트를 바로 실행하므로 더 단순하게 동작할 것으로 예상(Linux 환경 자체는 이
+  샌드박스에 없어 직접 실행 검증은 못함 — Dockerfile/배포 스크립트 문법만 정적 검증).
+- **미실행(불가)**: 실제 OCI 프로덕션 컨테이너에서의 `claude login`/`codex login` 1회 수동 실행 및 이후
+  재배포 시 명명 볼륨(`stella-clover-claude-home`/`stella-clover-codex-home`)을 통한 인증 유지 여부는
+  샌드박스에 프로덕션 OCI 접근이 없어 실측 불가(CLAUDE.md 개발 워크플로 7). `WORK_REPORT.md`에 사용자가
+  직접 실행할 정확한 명령을 남겼다.
+- `sw.js` CACHE 버전은 올리지 않음 — 루트 `index.html` 미변경 + `cbo-review/index.html`은 서비스워커 프리캐시
+  대상이 아니고 모든 HTML이 network-first라 사용자는 항상 최신을 받는다.
+
 ## [2026-07-12] CBO Review UI 수정 (`stellaclover_260712_prompt.md`, 무인 세션)
 
 무인 자동화 지시서 기준 목표 1~5 처리. 상세 판단 근거는 `WORK_REPORT.md`/`REVIEW_LOG.md` 2026-07-12(UI 수정
