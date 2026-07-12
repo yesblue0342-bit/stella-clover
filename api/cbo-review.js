@@ -1,7 +1,7 @@
 import formidable from "formidable";
 import crypto from "node:crypto";
 import { extractFile, markdownToWorkbook } from "../lib/cbo-review/extract.js";
-import { login, requireAuth } from "../lib/cbo-review/auth.js";
+import { hasAccessPassword, login, requireAuth } from "../lib/cbo-review/auth.js";
 import { callModel, deleteProviderKey, providerStatus, saveProviderKey } from "../lib/cbo-review/providers.js";
 import {
   applyFindings, buildReviewPrompt, buildSpecPrompt, chunkSource, detectLanguage,
@@ -81,6 +81,7 @@ export default async function handler(req, res) {
     if (req.method === "POST" && action === "login") {
       const origin = String(req.headers.origin || "");
       if (origin && new URL(origin).host !== req.headers.host) return json(res, 403, { ok: false, message: "허용되지 않은 요청 출처입니다." });
+      if (!hasAccessPassword()) return json(res, 200, { ok: true, token: null });
       const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
       const recent = (loginAttempts.get(ip) || []).filter((time) => Date.now() - time < 10 * 60 * 1000);
       if (recent.length >= 5) return json(res, 429, { ok: false, message: "로그인 시도가 많습니다. 10분 후 다시 시도하세요." });
