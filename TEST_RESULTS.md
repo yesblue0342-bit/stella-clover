@@ -896,3 +896,19 @@ fixture 기반 유닛 테스트로 완전 검증했고, clone 관련 코드(`lib
 브라우저 자동화 도구가 이 세션에 없어 실제 시각적 렌더링(색상/레이아웃)은 Node `vm` 기반 HTML 문자열
 검증으로 대체했다 — 실제 브라우저에서의 최종 시각 확인은 사용자 몫으로 남는다(README_CBO_PRECHECK.md에
 명시 예정, Phase 4).
+
+## [2026-07-14] CBO Pre-Check Phase 4 — 통합·마감·FINAL GATE (`PROMPT_CBO_PRECHECK_260714.md`, 무인 autopilot)
+
+| 검증 | 결과 |
+|---|---|
+| `node --check` — 신규/수정 api/*.js, lib/cbo-precheck/*.js, server.mjs, sw.js 전체 | 전부 OK |
+| 인라인 JS 파싱(`new Function`) — cbo-precheck/index.html, index.html | 전부 OK |
+| `npm test`(전체) | **140 pass / 0 fail / 12 skip**(기존 107 대비 CBO Pre-Check 신규 33건 순증, skip 12는 기준선과 동일) |
+| 시크릿 grep(`git grep`, 전체 추적 파일) | 0건 |
+| 서버 기동 스모크: `/`, `/cbo-precheck`, `/cbo-review`, `/flow` | 200/200/200/200 |
+| `sw.js` 캐시 버전 | v31 → v32 |
+| 메인 메뉴에 "CBO Pre-Check" 링크 노출 | 확인 |
+| 문서 존재: WORK_REPORT.md / TEST_RESULTS.md / README_CBO_PRECHECK.md / LESSONS.md | 전부 존재 |
+
+CBO Pre-Check 모듈(Phase 0~4) 완료. 미실행 항목(운영 자격증명 필요, README_CBO_PRECHECK.md에 절차 기록):
+실제 GitHub PR 1건 생성 후 close 수동 확인.
