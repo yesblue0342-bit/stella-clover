@@ -35,7 +35,7 @@ async function handleScan(req, res) {
   }
   if (!files.length) return json(res, 200, { ok: true, scanId: null, issues: [], fileCount: 0, message: "ABAP 소스 또는 DDIC 파일을 찾지 못했습니다." });
 
-  const hasDdic = files.some((f) => f.isDdic);
+  const hasDdic = files.some((f) => f.isDdic || f.isDict);
   const config = buildConfig({ rules: { ...buildConfig().rules, check_ddic: hasDdic } });
   const { issues, fileCount } = scanFiles({ files, config });
   const scannable = files.filter((f) => isScannable(f.name));

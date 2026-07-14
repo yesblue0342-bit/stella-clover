@@ -878,6 +878,123 @@ architect(Opus) 서브에이전트에 독립 재검증을 위임했다 — `@aba
 **167 pass / 0 fail / 12 skip**(정정·가드·디슬롭 후 회귀 없음, 신규 충돌 가드 테스트 1건 포함), 시크릿
 grep 0건. 이 수정들을 별도 커밋으로 push했다(FINAL GATE 재통과 확인 후).
 
+## 2026-07-14 CBO Pre-Check — dictionary 문서 → 합성 DDIC 타입 변환 (`stella_clover_260714_6.md`, 무인 ralph autopilot)
+
+**결론 요약**: (1) 실제 `0Program` 저장소는 커스텀 DDIC 테이블(예: `ZAQMT0130`/`0131`/`0132`)을 abapGit
+TABL XML이 아니라 사람이 읽는 `dictionary/*.md`(마크다운 표) 또는 `dictionary/*.html`(HTML 표) 문서로만
+정의해 두는 프로그램 폴더가 있고, 이 때문에 abaplint가 해당 테이블 필드 참조를 전부 `unknown_types`로
+오탐하고 있었다(직전 세션 실측: `260707_QM023_ZAQMR0130`에서 64건 중 상당수). (2) 두 문서 포맷을 파싱해
+필드/타입/키 구조로 변환하는 파서(`lib/cbo-precheck/dictParser.js`)와 abapGit TABL XML로 합성하는
+생성기(`lib/cbo-precheck/dictToTabl.js`)를 만들고, 스캔 직전 `scan.js`에서 기존 include 가상 XML과 같은
+인메모리 패턴으로 Registry에 추가했다(실제 `ddic/` 폴더에 파일을 쓰지 않음, 원본 `dictionary/` 문서는
+전혀 수정하지 않음). (3) 실제 저장소 재스캔으로 `unknown_types`가 44건 → 2건(문서가 없는 `ZACMS0005`만
+잔존, 기대된 한계)으로 감소함을 실측 확인했다. (4) 화면(Preview) 탭의 "스캔 없이 바로 미리보기" GitHub
+SSH URL 입력란에 실제 기본값을 채워 넣었다(기존에는 메인 스캔 입력만 값이 있고 이 입력은 placeholder만
+있던 GAP).
+
+### Phase 0 — dictionary 문서 포맷 실측
+
+실제 `git@github.com:yesblue0342-bit/0Program.git`을 clone해 두 포맷을 직접 확인했다(추측 금지 원칙).
+
+- **마크다운**(`260707_QM023_ZAQMR0130/dictionary/ZAQMT0130.md` 등): `# DDIC Table: <이름> — <설명>` 헤더,
+  `**Type:**/**Package:**/**Delivery Class:**` 메타 줄, `| # | Field | Key | Data Element | Type | Len |
+  Description |` 표(키 필드는 `X`로 표시), 하단에 `Key: ...` 요약 줄.
+- **HTML**(`260701_QM004_Inspection Group Upload/dictionary/zaqmt0100.html` 등): `<title>` 에 테이블명,
+  "항목/값" 메타 표(테이블명/Short Description/Delivery Class), 별도 "테이블 필드" 섹션의
+  `<table>`(`Pos/Field/Key/Data Element/Type/Len/설명` 헤더, 키 필드는 `✔`로 표시).
+- **같은 폴더의 비-테이블 문서**(`EZAQM0130.md`=Lock Object, `ZCQMM1.md`=Message Class)는 필드 표 구조가
+  없어 `unknown_types`와 무관 — 파서가 "DDIC Table" 헤더/구조를 못 찾으면 `null`을 반환해 자연히 건너뛴다.
+- 실제 ABAP 소스(`ZAQMR0130_F01.abap`/`ZAQMR0131.abap` 등)에서 `TYPE zaqmt0132-werks`,
+  `TYPE STANDARD TABLE OF zaqmt0132` 같은 참조를 다수 확인 — 이 참조들이 오탐의 실체다.
+- **핵심 실측(구현 전 검증)**: DD03P에 `ROLLNAME`이 실제 SAP 데이터 엘리먼트로 해석되지 않아도(예:
+  `WERKS_D`가 abaplint 내장 타입 목록에 없어도), `DATATYPE`/`LENG`을 직접 채운 합성 TABL XML만으로
+  `TYPE <table>-<field>` 참조가 정상 해석됨을 최소 재현 스크립트로 먼저 확인했다(존재하지 않는 필드는
+  여전히 `unknown_types`로 정확히 잡힘) — 이 결과가 Phase 1 설계의 전제가 되었다.
+
+### Phase 1 — 파서·합성·통합
+
+- `lib/cbo-precheck/dictParser.js`(신규): `parseMarkdownDict()`/`parseHtmlDict()`가 각각 표를 파싱해
+  공통 구조 `{tableName, ddtext, deliveryClass, fields:[{name,key,rollname,type,len,desc}]}`로 반환.
+  `parseDictDoc(name, content)`가 확장자로 분기하고, `isDictionaryDoc(name)`이 `dictionary/` 폴더 아래의
+  `.md`/`.html(.htm)`만 대상으로 인식한다. 데이터 엘리먼트의 괄호 폴백 표기(`ZDE_QM_FLAG(XFELD)`)는 주
+  엘리먼트명만 취한다. "DDIC Table" 헤더/구조가 없는 문서는 `null`(Lock Object/Message Class 문서가
+  자연히 걸러지는 근거).
+- `lib/cbo-precheck/dictToTabl.js`(신규): 공통 구조를 `fixtures/ddic/qals.tabl.xml`과 동일한 스키마
+  (`DD02V`/`DD09L`/`DD03P_TABLE`)의 abapGit TABL XML 문자열로 합성한다.
+- `lib/cbo-precheck/scan.js`: `synthesizeDictXml()`(신규)이 스캔 대상 파일 목록에서 `dictionary/*.md|*.html`
+  문서를 찾아 파싱·합성하고, **이미 같은 테이블명의 실제 `ddic/*.tabl.xml`이 있으면 건너뛴다**(충돌 방지 —
+  실제 export가 항상 우선). `scanFiles()`가 이 합성 XML을 기존 include 가상 XML과 같은 방식으로
+  Registry에만 추가하고(디스크 사본 없음), dictionary 문서 원본은 `list`에서 제외해 스캔 대상(issue
+  file)으로도, Registry의 raw 항목으로도 등록하지 않는다(파싱 실패 시에도 스캔 전체가 막히지 않도록
+  개별 문서 단위로 try/catch).
+- `lib/cbo-precheck/repoFetch.js`: `collectAbapFiles()`가 `dictionary/*.md|*.html`도 수집하도록
+  `isTargetFile()`을 확장(`isDict` 플래그 추가). **실제 발견한 버그**: 재귀 `walk()`에서 `isTargetFile()`을
+  `entry.name`(베이스네임)으로 호출하고 있어 `isDictionaryDoc()`의 `dictionary/` 디렉토리 세그먼트 검사가
+  항상 실패했다(합성 로직 자체는 맞았는데 파일 수집 단계에서 dictionary 문서가 아예 들어오지 않는 조용한
+  실패) — 실제 저장소로 통합 테스트를 돌려서 발견했고, 상대경로(`relName`)로 판별하도록 수정했다(이
+  버그가 남아있었다면 GATE 1(e) 실측에서 감소가 전혀 나타나지 않았을 것 — "실제 실행으로 검증"의 필요성을
+  다시 확인).
+- `api/cbo-precheck.js`: `handleScan()`의 `hasDdic`(→ `check_ddic` 룰 on/off) 판정에 `f.isDict`도
+  포함시켰다(dictionary 문서만 있어도 DDIC 컨텍스트가 있는 것으로 취급).
+
+### GATE 1 검증 — 실제 저장소 before/after 실측
+
+`test/cbo-precheck-dict.test.js`(13건): 마크다운/HTML 파서 단위 테스트, Lock Object 문서 `null` 반환,
+`dictToTablXml` 스키마 검증, `scanFiles()` 통합(합성 XML만으로 필드 참조 해석 + 존재하지 않는 필드는
+여전히 오류), 실제 `ddic/*.tabl.xml`이 있으면 합성을 건너뛰는 충돌 방지 케이스, `collectAbapFiles()`의
+`isDict` 플래그, 그리고 **실제 `260707_QM023_ZAQMR0130` 통합(GATE 1(e))**:
+
+- **합성 적용 전**(dictionary 문서를 스캔 입력에서 제외): `fileCount 8`, `unknown_types 44`건
+  (`ZACMS0005`/`ZAQMT0130`/`0131`/`0132` 참조 전부 오탐).
+- **합성 적용 후**(dictionary 문서 포함): `fileCount 8`(불변 — dictionary 문서는 fileCount에 안 잡힘),
+  `unknown_types 2`건(전부 `ZACMS0005` — 이 테이블은 `dictionary/`에도 문서가 없어 기대된 잔여 한계).
+  `ZAQMT0130`/`0131`/`0132` 관련 오탐은 **전부 해소**.
+- 전체 이슈 수: 70건 → 26건(`check_syntax` 9→5, `sql_escape_host_variables` 16(불변),
+  `obsolete_statement` 1(불변), `unused_variables` 0→2 — unknown_types 해소로 일부 파일의 syntax 오류가
+  줄어들며 `unused_variables` 룰이 그제서야 보고를 시작함, 기존 LESSONS.md 기록과 일치하는 abaplint 설계).
+- 원본 `dictionary/*.md`/`*.html` 파일은 이 세션에서 전혀 수정하지 않았다(git 진단상 read-only clone만
+  사용, 파서는 clone된 임시 디렉토리의 내용을 메모리로만 읽는다).
+
+### Phase 2 — 화면(Preview) 탭 GitHub SSH URL 기본값
+
+- `cbo-precheck/index.html`의 메인 "스캔 대상"(`#repoUrl`) 입력은 이전 세션에서 이미 실제 값
+  (`git@github.com:yesblue0342-bit/0Program.git`)이 채워져 있었다. 하지만 ③ 화면(Preview) 탭의 별도
+  "스캔 없이 바로 미리보기" 카드의 `#directRepoUrl`은 여전히 placeholder만 있고 실제 `value`가 비어
+  있었다 — 미션이 지적한 GAP과 정확히 일치. `value="git@github.com:yesblue0342-bit/0Program.git"`을
+  추가했다(브랜치 `#directBranch`는 이미 `value="main"`). 서버 측 강제는 없으며, 사용자가 값을 지우고
+  다른 저장소를 입력하면 그대로 사용된다.
+- `test/cbo-precheck-ui.test.js`에 회귀 테스트 1건 추가(raw HTML에서 `value` 속성이 비어있지 않은지,
+  placeholder가 아닌 실제 값인지 확인).
+
+### FINAL GATE 검증
+
+- `node --check`: 신규/수정 `lib/cbo-precheck/{dictParser,dictToTabl,scan,repoFetch}.js`,
+  `api/cbo-precheck.js`, 신규/수정 테스트 파일 전부 통과. 인라인 `<script>` `new Function` 파싱 통과.
+- `npm test`: **181 pass / 0 fail / 12 skip**(직전 세션 종료 시점 167 pass에서 dictionary 관련 신규 13건
+  + UI 신규 1건 = +14건 순증, skip 12건은 DB 미설정 기존 skip과 동일 — 회귀 없음).
+- 시크릿 grep(`sk-`/`ghp_`/`github_pat_`) 0건.
+- 서버 기동 스모크(`PORT=8974`): `/`, `/cbo-precheck`, `/cbo-review` 전부 200 — 회귀 없음.
+- `sw.js` 캐시 버전은 올리지 않았다 — `cbo-precheck/index.html`은 서비스워커 프리캐시 목록에 없고
+  (`sw.js`에 `cbo-precheck` 문자열 자체가 없음), 모든 HTML 네비게이션은 network-first로 서빙되므로
+  (`sw.js` 상단 주석 참고) 버전을 안 올려도 사용자는 항상 최신 HTML을 받는다(2026-07-12/07-14 이전
+  세션들과 동일한 판단 근거).
+- 원본 `dictionary/*.md`/`*.html` 파일 미변경: 이 세션은 읽기 전용 clone(`/tmp/0Program_inspect`, 조사
+  전용 — 스캔 코드 자체는 별도 `withClonedRepo()`가 매 스캔마다 임시 clone/삭제)만 사용했고, 어떤
+  write/push도 `0Program` 저장소에 하지 않았다(git 명령 이력상 clone/ls-remote만 실행).
+
+**남은 리스크**:
+1. `dictParser.js`의 마크다운/HTML 표 파서는 이번에 실측한 두 저장소의 표기 관례(표 헤더 열 이름의
+   대소문자·띄어쓰기 변형은 소문자/부분일치로 흡수)를 기준으로 만들어졌다 — 크게 다른 표 레이아웃(예:
+   다단 병합 셀, 필드가 표가 아닌 목록으로 표현되는 문서)은 파싱에 실패하고 `null`을 반환해 해당 테이블만
+   `unknown_types`가 계속 남는다(스캔 전체를 막지 않음 — 우아한 실패).
+2. `ZACMS0005`는 `dictionary/`에도 문서가 없어 이번 세션 범위에서 해소하지 못했다 — 방법 1(abapGit
+   export)이나 방법 2(`dictionary/` 문서 추가)로 정의를 추가해야 한다(README에 명시).
+3. 합성 TABL XML의 `TABART`(데이터 클래스)는 문서에 명시되어 있어도(`APPL0`/`APPL1`) 현재 고정값
+   `APPL0`을 사용한다 — abaplint의 `unknown_types`/`check_ddic` 판정에는 영향이 없어(실측 확인) 범위
+   밖으로 판단했다(정확한 값이 필요하면 후속 작업으로 `dictParser.js`가 이 값도 추출하도록 확장 가능).
+
+RALPH_DONE
+
 ## 2026-07-14 CBO Pre-Check — 스캔 대상 재귀 탐색으로 수정 (`stella_clover_260714_3.md`, 무인 ralph autopilot)
 
 **결론 요약**: (1) 원인 — `collectAbapFiles()`(`lib/cbo-precheck/repoFetch.js`)의 폴더 재귀 탐색 자체는

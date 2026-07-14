@@ -1010,3 +1010,35 @@ fixture 기반 유닛 테스트로 완전 검증했고, clone 관련 코드(`lib
 
 CBO Pre-Check 모듈(Phase 0~4) 완료. 미실행 항목(운영 자격증명 필요, README_CBO_PRECHECK.md에 절차 기록):
 실제 GitHub PR 1건 생성 후 close 수동 확인.
+
+## [2026-07-14] CBO Pre-Check — dictionary 문서 → 합성 DDIC 타입 변환 (`stella_clover_260714_6.md`, 무인 ralph autopilot)
+
+| 검증 | 결과 |
+|---|---|
+| `parseMarkdownDict`/`parseHtmlDict` 단위 테스트(fixtures/dictionary/*) | 필드/키/타입/길이 정확히 파싱 |
+| `parseDictDoc`: Lock Object 문서(필드 표 없음)는 `null` | 확인 |
+| `dictToTablXml`: DD02V/DD09L/DD03P_TABLE 스키마 생성 | 확인, `fields` 없으면 오류 |
+| `scanFiles()`: dictionary/*.md만으로 필드 참조 해석(존재 필드 OK, 존재하지 않는 필드는 여전히 `unknown_types`) | 확인 |
+| `scanFiles()`: dictionary/*.html도 동일하게 해석 | 확인 |
+| `scanFiles()`: dictionary 문서는 issues/fileCount에 노출되지 않음 | 확인 |
+| `scanFiles()`: 실제 `ddic/*.tabl.xml`이 있으면 dictionary 합성을 건너뜀(충돌 방지) | 확인 |
+| `collectAbapFiles()`: dictionary/*.md·*.html을 `isDict:true`로 수집 | 확인(상대경로 버그 발견·수정 후) |
+| **GATE 1(e) 실제 저장소 before/after**(`260707_QM023_ZAQMR0130`) | `unknown_types` 44건 → 2건(잔존 2건은 `dictionary/` 문서도 없는 `ZACMS0005`만, 기대된 한계). 전체 이슈 70건 → 26건 |
+| Phase 2: `#directRepoUrl` 실제 value(placeholder 아님) 확인 | 확인, 브랜치 기본값 `main` 유지 |
+| `node --check`(신규/수정 lib·api·test 전체) | 전부 OK |
+| 인라인 `<script>` `new Function` 파싱(cbo-precheck/index.html) | OK |
+| `npm test`(전체) | **181 pass / 0 fail / 12 skip**(직전 167 pass에서 dictionary 14건 순증, skip 12는 기존과 동일 — 회귀 없음) |
+| 시크릿 grep(`sk-`/`ghp_`/`github_pat_`) | 0건 |
+| 서버 기동 스모크: `/`, `/cbo-precheck`, `/cbo-review` | 200/200/200 |
+| 원본 `dictionary/*.md`/`*.html` 파일 수정 여부 | 미수정(읽기 전용 clone만 사용, git diff 없음) |
+
+**발견·수정한 버그**: `lib/cbo-precheck/repoFetch.js`의 재귀 `walk()`가 `isTargetFile()`을 `entry.name`
+(베이스네임)으로 호출해 `dictionary/` 디렉토리 세그먼트가 필요한 `isDictionaryDoc()` 판별이 항상 실패하고
+있었다 — 상대경로(`relName`)로 판별하도록 수정. 실제 저장소로 GATE 1(e)를 돌리기 전까지는 드러나지 않는
+조용한 실패였다(파서/합성 로직 자체는 유닛 테스트로 미리 검증했지만, 파일 수집 단계의 버그는 실제
+end-to-end 실행에서만 드러났다).
+
+`sw.js` 캐시 버전은 올리지 않았다(cbo-precheck/index.html은 서비스워커 프리캐시 목록에 없고 모든 HTML
+네비게이션이 network-first이므로 — 이전 세션들과 동일한 판단 근거, README_CBO_PRECHECK.md 참고).
+
+RALPH_DONE
