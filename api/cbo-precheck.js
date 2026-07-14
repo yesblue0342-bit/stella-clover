@@ -186,6 +186,34 @@ async function handlePreview(req, res) {
   }
 }
 
+// [화면 미리보기 독립 실행 — Phase 3] 사전 스캔 없이 GitHub SSH URL/브랜치/단일 파일 경로만으로 즉시
+// 미리보기를 생성한다. `path`는 폴더가 아니라 파일 하나를 가리켜야 한다(repoFetch.collectAbapFiles가
+// 이미 단일 파일 path를 지원 — Phase 1 세션에서 추가된 엣지케이스 재사용, 신규 clone 방식 도입 없음).
+// GITHUB_TOKEN 불필요(SSH 배포키 clone만 사용 — action=scan과 동일한 전제).
+async function handlePreviewDirect(req, res) {
+  const repoUrl = String(req.body?.repoUrl || "").trim();
+  const branch = String(req.body?.branch || "main").trim();
+  const filePath = String(req.body?.path || "").trim();
+  if (!repoUrl) return json(res, 400, { ok: false, message: "repoUrl이 필요합니다." });
+  if (!filePath) return json(res, 400, { ok: false, message: "미리볼 파일 경로가 필요합니다(단일 파일)." });
+
+  let files;
+  try {
+    files = await withClonedRepo({ repoUrl, branch, path: filePath }, (root) => collectAbapFiles(root));
+  } catch (e) {
+    return json(res, 400, { ok: false, message: String(e?.message || e) });
+  }
+  const file = files.find((f) => !f.isDdic);
+  if (!file) return json(res, 404, { ok: false, message: "ABAP 소스 파일을 찾지 못했습니다(경로를 확인하세요)." });
+
+  try {
+    const result = parsePreview(file.content, file.name);
+    return json(res, 200, { ok: true, ...result });
+  } catch (e) {
+    return json(res, 500, { ok: false, message: String(e?.message || e) });
+  }
+}
+
 export default async function handler(req, res) {
   const action = String(req.query.action || "scan");
   try {
@@ -233,6 +261,7 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true, ...safe });
     }
     if (req.method === "POST" && action === "preview") return await handlePreview(req, res);
+    if (req.method === "POST" && action === "preview-direct") return await handlePreviewDirect(req, res);
     return json(res, 404, { ok: false, message: `알 수 없는 action: ${action}` });
   } catch (e) {
     console.error("[api/cbo-precheck]", e);

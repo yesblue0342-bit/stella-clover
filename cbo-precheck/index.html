@@ -154,7 +154,20 @@ tr.held{opacity:.55}
         <select class="select" id="previewFile" style="width:auto" onchange="$('previewBtn').disabled=!this.value"><option value="">파일 선택</option></select>
         <button class="btn" id="previewBtn" onclick="runPreview()" disabled>미리보기 생성</button>
       </div>
-      <div id="previewRoot" class="empty">스캔 후 파일을 선택하고 미리보기를 생성하세요.</div>
+    </div>
+    <div class="card">
+      <h3>스캔 없이 바로 미리보기</h3>
+      <p class="muted">검증(Lint) 스캔을 먼저 돌리지 않아도, 저장소/브랜치/단일 파일 경로만 입력하면 그 파일 하나만 즉시 가져와 렌더링합니다.</p>
+      <div class="repo-grid">
+        <div><label>GitHub SSH URL</label><input id="directRepoUrl" placeholder="git@github.com:owner/repo.git"></div>
+        <div><label>브랜치</label><input id="directBranch" value="main"></div>
+        <div><label>파일 경로(단일 파일)</label><input id="directPath" placeholder="예: 260707_QM023_ZAQMR0130/_abap/ZAQMR0130_S01.abap"></div>
+        <div><button class="btn" id="directPreviewBtn" onclick="runPreviewDirect()">미리보기 생성</button></div>
+      </div>
+      <div class="muted" id="directPreviewStatus" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <div id="previewRoot" class="empty">스캔 후 파일을 선택하거나, 위에서 바로 미리보기를 생성하세요.</div>
     </div>
   </section>
 </main>
@@ -298,7 +311,8 @@ async function runScan(){
 }
 
 function renderLint(){
-  if(!scan||!scan.issues.length){$('lintEmpty').hidden=false;$('lintBody').hidden=true;return}
+  if(!scan){$('lintEmpty').textContent='아직 스캔 결과가 없습니다. 위에서 저장소를 스캔하세요.';$('lintEmpty').hidden=false;$('lintBody').hidden=true;return}
+  if(!scan.issues.length){$('lintEmpty').textContent='스캔 완료 — 발견된 이슈가 없습니다. 🎉';$('lintEmpty').hidden=false;$('lintBody').hidden=true;return}
   $('lintEmpty').hidden=true;$('lintBody').hidden=false;
   const counts={Error:0,Warning:0,Info:0};
   const rules=new Set();
@@ -324,7 +338,8 @@ async function exportScan(format){
 }
 
 function renderReview(){
-  if(!scan||!scan.issues.length){$('reviewEmpty').hidden=false;$('reviewTable').hidden=true;return}
+  if(!scan){$('reviewEmpty').textContent='아직 스캔 결과가 없습니다.';$('reviewEmpty').hidden=false;$('reviewTable').hidden=true;return}
+  if(!scan.issues.length){$('reviewEmpty').textContent='처리할 항목이 없습니다 — 발견된 이슈가 없습니다.';$('reviewEmpty').hidden=false;$('reviewTable').hidden=true;return}
   $('reviewEmpty').hidden=true;$('reviewTable').hidden=false;
   $('reviewRows').innerHTML=scan.issues.map(i=>{
     const statusLabel=i.status==='resolved'?`해결 ${esc(i.note||'')}`:i.status==='held'?'보류':'미처리';
@@ -411,6 +426,22 @@ async function runPreview(){
     renderPreviewElements(d.elements,d.coverage);
   }catch(e){toast(e.message)}
   finally{busy(b,false)}
+}
+
+async function runPreviewDirect(){
+  const repoUrl=$('directRepoUrl').value.trim(), branch=$('directBranch').value.trim()||'main', path=$('directPath').value.trim();
+  if(!repoUrl||!path){toast('GitHub SSH URL과 파일 경로를 입력하세요');return}
+  const b=$('directPreviewBtn');
+  try{
+    busy(b,true,'생성 중');
+    $('directPreviewStatus').textContent='저장소에서 해당 파일만 clone하는 중입니다…';
+    const d=await safeJson(await fetch('/api/cbo-precheck?action=preview-direct',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({repoUrl,branch,path})}));
+    $('directPreviewStatus').textContent=`미리보기 생성 완료 — ${d.file}`;
+    renderPreviewElements(d.elements,d.coverage);
+  }catch(e){
+    $('directPreviewStatus').textContent='';
+    toast(e.message);
+  }finally{busy(b,false)}
 }
 
 function renderParameterEl(el){

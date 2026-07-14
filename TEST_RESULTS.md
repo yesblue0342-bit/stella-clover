@@ -1,5 +1,41 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-14] CBO Pre-Check — 근본 원인 조사·네이밍 어댑터 + UI 버그 + 미리보기 독립 기능 (`stella_clover_260714_5.md`, 무인 ralph autopilot)
+
+`260707_QM023_ZAQMR0130` 스캔이 "파일 8개, 이슈 0건"을 반환하던 것이 실제로 코드가 깨끗해서인지, 타입
+인식 실패로 조용히 스킵된 것인지 조사 후 수정. UI 문구 버그 2건 확인/수정, 스캔 없이 화면 미리보기를
+바로 만드는 신규 기능 추가. 상세 판단 근거는 `WORK_REPORT.md`의 동일 제목 섹션 참고.
+
+- **Phase 0 실측(수정 전 재현)**: 실제 `git@github.com:yesblue0342-bit/0Program.git`(SSH)의
+  `260707_QM023_ZAQMR0130/_abap/` 8개 파일을 원본 이름 그대로 스캔 → `fileCount:8, issues:0`. 같은
+  내용을 abapGit 정식 네이밍으로만 바꿔 재스캔 → **440건 검출**. abaplint 소스(`_abstract_file.js`
+  `getObjectType()`, `registry.js` `findOrCreate()`, `objects/_unknown_object.js`)를 직접 읽어
+  "타입 미인식 → UnknownObject → 사실상 검사 안 됨"이 원인임을 코드 레벨로 확인(추측 아님).
+- **Phase 1 어댑터 + 회귀 테스트**(신규 `test/cbo-precheck-scan-naming.test.js` 6건, GATE 1 a~e 전부):
+  plain 네이밍 fixture 실결함 검출, 결과 file 필드 원본 이름 확인, 기존 abapGit fixture 회귀 없음(bad/
+  good 둘 다), 임시 디렉토리 미생성 확인, 실제 저장소 통합 재확인. **cross-include 교차참조 오탐도
+  함께 발견해 수정**(가상 `.prog.xml` `<SUBC>I</SUBC>` 메타 추가) — 최종 실측 결과 실제 결함 **64건**
+  (check_syntax 9/unknown_types 38/sql_escape_host_variables 16/obsolete_statement 1, 나머지는
+  SAP 표준 type-pool·저장소 미포함 커스텀 테이블 참조로 인한 기대된 한계).
+- **Phase 2 UI 버그**(신규 `test/cbo-precheck-ui.test.js`): ①②탭의 "스캔 전"/"스캔완료+이슈0건" 문구
+  분리 수정 확인(`new Function` 샌드박스로 실제 인라인 `<script>` 함수 직접 호출). ③탭 드롭다운 미채움은
+  코드 추적 결과 **이전 세션(`stella_clover_260714_3.md`, 커밋 `cf7dff4`)에서 이미 해결되어 있었음**을
+  헤드리스 테스트로 재확인(추가 수정 없음 — 이중 수정 방지).
+- **Phase 3 미리보기 독립 실행**(신규 `test/cbo-precheck-preview-direct.test.js` 5건):
+  `action=preview-direct` 추가(기존 `withClonedRepo`/`collectAbapFiles` 재사용, 신규 clone 방식 없음,
+  `GITHUB_TOKEN` 불필요). **`lib/cbo-precheck/preview.js`에서도 동일한 네이밍 버그를 추가로 발견해
+  수정**(plain 네이밍 단일 파일은 Selection Screen 요소가 0개로 조용히 실패하던 것을 확인 → 가상
+  네이밍 적용 후 실제 `ZAQMR0130_S01.abap`으로 Selection Screen 요소가 정상 렌더링됨을 실제 SSH clone
+  으로 확인).
+- **정적 검증**: `node --check lib/cbo-precheck/scan.js lib/cbo-precheck/repoFetch.js
+  lib/cbo-precheck/preview.js api/cbo-precheck.js test/cbo-precheck-scan-naming.test.js
+  test/cbo-precheck-ui.test.js test/cbo-precheck-preview-direct.test.js` 전부 통과. 인라인
+  `<script>`(`cbo-precheck/index.html`) `new Function()` 파싱 통과.
+- **전체 스위트**: `npm test` **166 pass / 0 fail / 12 skip**(세션 시작 시점 149에서 +17, 회귀 없음).
+- **시크릿 grep**: `sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}` 0건.
+- **범위 확인**: `/cbo-review` 등 다른 모듈은 이번 세션에서 전혀 수정하지 않았다. 실제 GitHub 소스
+  파일명은 항상 원본 그대로 유지됨(네이밍 어댑터는 인메모리 스캔 파이프라인 내부 전용).
+
 ## [2026-07-14] CBO Pre-Check — 스캔 대상 재귀 탐색으로 수정 (`stella_clover_260714_3.md`, 무인 ralph autopilot)
 
 `/cbo-precheck` 스캔이 `260707_QM023_ZAQMR0130`처럼 실소스가 `_abap/` 하위 폴더에 있는 저장소에서

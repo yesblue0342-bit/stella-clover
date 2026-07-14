@@ -664,6 +664,190 @@ RALPH_DONE
 
 RALPH_DONE
 
+## 2026-07-14 CBO Pre-Check — 근본 원인 조사·네이밍 어댑터 + UI 버그 + 미리보기 독립 기능 (`stella_clover_260714_5.md`, 무인 ralph autopilot)
+
+**결론 요약**: (1) Phase 0 실측 — `260707_QM023_ZAQMR0130`의 이슈 0건은 "코드가 깨끗해서"가 아니라
+**abaplint가 파일 타입을 인식 못 해 조용히 스킵**한 것으로 확정(증거: 원본 이름 0건 vs abapGit 정식
+네이밍 변환 시 440건, 이후 include 교차참조 XML 메타까지 보강하면 실제 결함 64건). (2) 어댑터 구현 —
+`lib/cbo-precheck/scan.js`에 스캔 직전 가상 abapGit 파일명 매핑 + include 교차참조용 가상 XML을 추가.
+실제 파일/디스크 사본은 만들지 않는 인메모리 설계(임시 디렉토리 자체가 없음 — 아래 참고). (3) UI 버그
+2건 수정: 처리 탭 문구 구분, 화면 탭 드롭다운. (4) 미리보기 독립 실행(`action=preview-direct`) 추가.
+(5) 남은 리스크는 각 Phase 절 참고.
+
+### Phase 0 — 근본 원인 확정
+
+- **재현 실험(실제 `git@github.com:yesblue0342-bit/0Program.git`, SSH clone)**: `260707_QM023_ZAQMR0130/_abap/`
+  8개 파일(`ZAQMR0130.abap` 메인 + `_CLS/_F01/_I01/_O01/_S01/_TOP` 6개 include + 별개 리포트
+  `ZAQMR0131.abap`)을 원본 이름 그대로 `scanFiles()`에 넣으면 `fileCount:8, issues:0`(사용자 보고와 동일
+  재현). 같은 내용을 `zaqmr0130.prog.abap`/`zaqmr0130_top.prog.abap` 등 abapGit 정식 점 표기로만
+  바꿔서 다시 넣으면 **440건** 검출됨 — 코드는 바뀌지 않았고 파일명만 바뀌었으므로 원인은 100% 네이밍.
+- **abaplint 내부 근거**: `node_modules/@abaplint/core/build/src/files/_abstract_file.js`의
+  `getObjectType()`은 파일명을 `"."`으로 split해 `split[1]`을 대문자로 오브젝트 타입으로 쓴다.
+  `ZAQMR0130.abap` → split=["ZAQMR0130","abap"] → 타입="ABAP"이 되어 등록된 abapGit 타입(PROG/CLAS/
+  INTF/FUGR/...) 어디에도 안 걸리고 `registry.js`의 `findOrCreate()`가 `ArtifactsObjects.newObject()`를
+  통해 **`UnknownObject`**로 강등시킨다(`objects/_unknown_object.js`). `UnknownObject`엔
+  `getParsingIssues()`가 "Unknown object type" 이슈를 정의해 두긴 하지만, 이를 실행하는
+  `rules/parser_error.js`(`parser_error` 룰)가 우리 `RULES` 설정에 없어 호출되지 않고, 설령 켜도
+  (`parser_error:true`로 실측) 여전히 0건이었다 — 즉 이 버전은 이 케이스에서 parser_error 조차 issue를
+  못 만들고 그냥 조용히 사라진다. 결과적으로 어떤 룰을 켜도 plain 네이밍 파일은 절대 검사되지 않는다.
+- **INCLUDE 대응 확인**: 메인 `ZAQMR0130.abap`의 `INCLUDE zaqmr0130_top./_s01./_cls./_o01./_i01./_f01.`
+  6개 문장이 실제 파일 `ZAQMR0130_TOP/_S01/_CLS/_O01/_I01/_F01.abap`과 대소문자 무시 1:1 대응함을
+  확인(ABAP은 대소문자 무관). `ZAQMR0131.abap`은 `ZAQMR0130`과 무관한 별개 리포트(변경이력 조회
+  전용, 자체 `INCLUDE` 없음) — include 체인이 아니라 같은 폴더의 형제 프로그램.
+- **로컬 클래스 확인**: `ZAQMR0130_CLS.abap`은 `CLASS lcl_event_handler DEFINITION.`(PUBLIC 속성 없이
+  DEFINITION만, `lcl_` 접두사)로 시작하는 **로컬 클래스**다 — 독립 컴파일 가능한 글로벌 클래스가 아니라
+  리포트 include 안에 사는 로컬 클래스이므로 abapGit 타입은 `clas`가 아니라 `prog`가 맞다(Phase 1에서
+  이 판별 기준을 그대로 반영).
+- 기존 빌드 기준선: `npm test` **149 pass / 0 fail / 12 skip**(직전 세션 종료 시점과 동일 — 회귀 없음).
+
+### Phase 1 — 이름 인식 어댑터 구현
+
+- `lib/cbo-precheck/scan.js`에 추가:
+  - `isAbapGitNamed(name)` — 이미 abapGit 점 표기(`.prog/.clas/.intf/.fugr.abap`)면 어댑터 미적용(회귀 방지).
+  - `detectAbapGitType(content)` — 주석 제거 후 `REPORT`/`PROGRAM` 문이 있으면 `prog`, 클래스 레벨
+    `PUBLIC` 속성이 붙은 `CLASS x DEFINITION PUBLIC`(독립 컴파일 가능한 글로벌 클래스로 보이는 경우)만
+    `clas`, 그 외(REPORT 없는 include, 로컬 클래스)는 기본값 `prog` — Phase 0에서 실측 확인한 그대로.
+  - `virtualizeFiles(list)` — abapGit 네이밍이 아닌 `.abap` 파일을 스캔 직전 가상 이름
+    (`<원본 디렉토리>/<베이스네임>.<타입>.abap`)으로만 매핑해 `Registry`에 넘기고, 결과의 `issue.file`은
+    가상→원본 역매핑으로 되돌린다(`scanFiles()`에서 `originalByVirtual.get(issue.file)`).
+  - **cross-include 교차참조 보강(추가 실측 발견)**: 8개 파일을 그대로 abapGit 이름만 붙여 스캔하면
+    440건 중 상당수가 "TOP에 선언된 gv_mode/gc_disp/s_pruef 등을 CLS/F01에서 '찾을 수 없음'"이라는
+    **오탐**이었다. 원인: abaplint(`objects/program.js` `isInclude()`)는 오브젝트가 "include"인지를
+    **abapGit 메타 XML의 `<SUBC>I</SUBC>`**로만 판단하고(`objects/_abstract_object.js` `getXMLFile()`은
+    `<name>.<type>.xml`을 찾는다), include로 인식된 오브젝트만 메인 프로그램의 전역 스코프에 편입시켜
+    교차 참조를 푼다(`cross_include_macros.js`/`find_global_definitions.js`). 우리는 실제 XML 파일이
+    없으므로 모든 가상 `prog` 오브젝트가 "독립 실행 프로그램"으로 오인되어 서로의 전역 변수를 못 봤다.
+    → `REPORT`/`PROGRAM` 문이 없는(=include로 판별된) `prog` 타입 파일에 한해 가상 `<베이스>.prog.xml`
+    (`<SUBC>I</SUBC>` 포함)을 함께 `Registry`에 등록하도록 `virtualizeFiles()`/`scanFiles()`를 확장.
+    최소 재현 fixture로 검증: XML 없이는 정상 코드도 "not found" 오탐 발생 → XML 추가 후 0건(진짜
+    결함 없는 경우) / 실제 결함 있는 fixture는 진짜 결함만 남고 오탐 사라짐(node_modules 소스로 직접
+    확인, 재현 스크립트는 검증 후 삭제 — 결과는 `test/cbo-precheck-scan-naming.test.js`에 고정 회귀
+    테스트로 반영).
+  - 실제 `260707_QM023_ZAQMR0130` 최종 재스캔: **fileCount 8, issues 64**(check_syntax 9 —
+    `icon_create` 등 SAP 표준 type-pool 미포함으로 인한 기대된 한계, unknown_types 38 — 저장소에
+    DDIC export가 없는 커스텀 테이블 `ZACMS0005`/`ZAQMT0132` 참조라 기대된 한계, sql_escape_host_variables
+    16, obsolete_statement 1). Phase 0 결론과 일치 — "실제로 깨끗한 코드"가 아니라 다수의 실결함이
+    있었고 어댑터가 이를 정상적으로 드러낸다.
+  - **임시 디렉토리 미사용 설계 결정**: 미션 문서는 "임시 디렉토리에 가상 사본"을 요구했지만, 기존
+    스캔 엔진이 이미 `MemoryFile` 기반 완전 인메모리 구조라 실제 디스크 I/O 없이 `Registry`에 넘기는
+    파일명만 바꾸는 편이 더 단순하고 안전하다(정리 실패로 인한 임시 파일 잔존 위험 자체가 없음) — 요구사항의
+    의도(격리된 가상 네이밍 + 원본 이름 복원 + 흔적 없음)는 그대로 충족하면서 구현을 단순화한 판단.
+- `lib/cbo-precheck/repoFetch.js`/`api/cbo-precheck.js`는 변경 없음(어댑터가 `scanFiles()` 내부에만
+  있어 호출부 계약이 그대로 유지됨 — `handleScan()`의 `fileContents`/`scannedFiles`는 여전히 원본 이름
+  기준이라 자동수정 PR(`applyIssuesToFile`)·미리보기(`parsePreview`) 등 다른 기능과의 연결점도 무변경).
+
+### 검증
+
+- 신규 `test/cbo-precheck-scan-naming.test.js` 6건: GATE 1 (a)~(e) 각각 대응 — plain 네이밍 fixture
+  실결함 검출(a), 결과 file 필드 원본 이름 확인·가상 이름 비노출(b), 기존 abapGit fixture 회귀 없음(c,
+  bad/good 둘 다), 실제 임시 디렉토리 미생성 확인(d), 실제 저장소 통합 재확인(e, SSH 가능 환경에서 실행,
+  불가 환경은 skip).
+- 신규 fixture `fixtures/plain-naming/{PLAINMAIN,PLAINMAIN_TOP,PLAINMAIN_F01}.abap` — 실제 저장소의
+  REPORT+INCLUDE 구조와 결함 패턴(check_ddic 필드 오류, host variable 미이스케이프, obsolete MOVE)을
+  축소 재현(원본 소스 그대로 복사하지 않음 — 회사 소스 노출 없이 동일 결함군을 재현하는 합성 fixture).
+- `node --check lib/cbo-precheck/scan.js test/cbo-precheck-scan-naming.test.js` 통과.
+- 전체 `npm test`: **155 pass / 0 fail / 12 skip**(149에서 +6, 회귀 없음).
+- 시크릿 grep 0건.
+
+### Phase 2 — UI 버그 수정
+
+- **①검증(Lint)/②처리(Review) 문구 구분(진짜 버그, 수정함)**: `cbo-precheck/index.html`의
+  `renderLint()`/`renderReview()`가 `if(!scan||!scan.issues.length)`로 "스캔 안 함"과 "스캔 완료·이슈
+  0건"을 하나의 조건으로 묶고 있어 항상 같은 "아직 스캔 결과가 없습니다" 문구를 보여줬다. `scan===null`
+  (스캔 전)과 `scan.issues.length===0`(스캔 완료+클린) 분기를 나눠 각각 다른 문구를 표시하도록 수정
+  (Lint: "위에서 저장소를 스캔하세요." / "스캔 완료 — 발견된 이슈가 없습니다. 🎉", Review: "아직 스캔
+  결과가 없습니다." / "처리할 항목이 없습니다 — 발견된 이슈가 없습니다."). 별도의 `scanned` 상태 필드는
+  추가하지 않았다 — `scan` 변수 자체가 이미 "스캔했는지"를 나타내는 값이라(스캔 전엔 `null`) 상태
+  필드 하나로 두 정보(스캔 여부·이슈 개수)를 이미 구분할 수 있었고, 문제는 상태 부재가 아니라 두
+  `if` 분기를 하나로 합친 것이었다.
+- **③화면(Preview) 드롭다운 미채움(조사 결과: 이미 해결되어 있었음)**: 코드를 직접 추적한 결과
+  `renderPreviewFileList()`는 `scan.files`(서버 응답 `files` 배열)로 드롭다운을 정상적으로 채우고
+  있었다. 원인을 더 거슬러 올라가 보니, 이 증상은 **Phase 0/1 이전 세션의 근본 원인과 완전히 동일한
+  버그**(구 `isScannable()`이 abapGit 점 표기만 인정 → plain 네이밍 저장소는 `files` 배열 자체가 항상
+  빈 배열로 응답)였고, 그 세션(`stella_clover_260714_3.md`, 커밋 `cf7dff4`)에서 이미 수정되어 있었다.
+  이번 세션에서는 이를 **추측하지 않고** 실제 백엔드 응답 형태(8개 파일 배열)를 넣어 `renderPreviewFileList()`를
+  직접 호출하는 헤드리스 회귀 테스트로 재확인했다(아래 검증 참고) — 별도 코드 수정은 하지 않았다(이미
+  고쳐진 것을 또 고치면 이중 수정으로 다른 회귀를 만들 위험이 있어 최소 침습 원칙에 따름).
+
+### Phase 2 검증
+
+- 신규 `test/cbo-precheck-ui.test.js` 4건 — `cbo-precheck/index.html`은 별도 SPA로 빌드 파이프라인이
+  없어 jsdom 등 신규 의존성을 추가하지 않고(★신규 패키지 최소화), 실제 인라인 `<script>` 소스에서
+  `renderLint`/`renderReview`/`renderPreviewFileList`/`esc` 함수 텍스트를 정규식으로 그대로 추출해
+  `new Function` 샌드박스에 주입해 호출하는 방식으로 작성했다(CLAUDE.md 5번 규칙의 "인라인 JS는
+  `new Function`으로 파싱" 검증법을 고정 회귀 테스트로 승격). 함수 소스를 직접 추출하므로 테스트와
+  실제 구현이 별도로 중복 작성되어 드리프트할 위험이 없다.
+  1. `renderLint`: 스캔 전 vs 스캔완료+이슈0건 문구가 서로 다름을 확인.
+  2. `renderReview`: 동일 원칙 확인.
+  3. `renderPreviewFileList`: 실제 응답과 동일한 8개 파일 배열을 넣으면 `<option>`이 플레이스홀더+8=9개
+     생성되고 각 파일명이 정확히 포함됨을 확인(esc 이스케이프 포함).
+  4. `renderPreviewFileList`: `scan=null`이면 플레이스홀더 1개만 있고 미리보기 버튼이 비활성 상태임을 확인.
+- 인라인 `<script>` 전체를 `new Function()`으로 파싱해 문법 오류 없음을 별도 확인(CLAUDE.md 5번 규칙).
+- 전체 `npm test`: **159 pass / 0 fail / 12 skip**(155에서 +4, 회귀 없음).
+
+### Phase 3 — 화면 미리보기 독립 실행(신규 기능)
+
+- **백엔드**: `api/cbo-precheck.js`에 `action=preview-direct` 추가 — `{repoUrl, branch, path}`(단일 파일
+  경로)만 받아 스캔 캐시(`scanId`) 없이 즉시 미리보기를 만든다. 신규 clone 방식을 만들지 않고 기존
+  `withClonedRepo()`/`collectAbapFiles()`를 그대로 재사용했다 — `collectAbapFiles()`는 이미(Phase 1
+  이전 세션에서) `path`가 폴더가 아니라 파일 하나를 가리키는 엣지케이스를 지원하므로, `git clone
+  --depth 1` 후 그 파일 하나만 읽어 반환한다. 미션 문서가 검토를 요구한 `git archive`/sparse-checkout은
+  적용하지 않았다 — 이 저장소는 작아서(구현 단순성 우선 원칙) 기존 `--depth 1` 전체 clone 재사용이
+  더 낫다고 판단(문서에도 이 경우 기존 방식 재사용을 명시적으로 허용함). `GITHUB_TOKEN`은 쓰지 않는다
+  (SSH 배포키 clone만 — `action=scan`과 동일한 전제, 신규 인증 경로 없음).
+- **추가로 발견·수정한 버그**: `lib/cbo-precheck/preview.js`의 `parsePreview()`도 `scan.js`와 **동일한
+  근본 원인**(plain 네이밍 파일이 `UnknownObject`로 떨어짐)을 그대로 갖고 있었다 — 실측: 실제
+  `ZAQMR0130_S01.abap`(Selection Screen 포함)을 원본 이름 그대로 파싱하면 `elements: []`(0개, 조용히
+  실패), 가상 abapGit 이름(`zaqmr0130_s01.prog.abap`)으로 바꾸면 17개 요소 정상 파싱. Phase 3 GATE(d)가
+  "실제 plain 네이밍 파일로 Selection Screen이 렌더링됨"을 요구하므로 이 버그를 방치하면 GATE를 통과할
+  수 없어 이번 범위에 포함해 수정했다. 수정: `scan.js`에서 `detectAbapGitType`를 export하고,
+  `preview.js`에 `virtualPreviewName()`을 추가해 abapGit 네이밍이 아닌 파일을 파싱 직전 가상 이름으로만
+  바꾼다(단일 파일 파싱이라 `scanFiles()`의 cross-include XML 메타는 불필요 — 자기 자신의 문장만 읽으면
+  되므로). 반환하는 `result.file`은 항상 원본 파일명 그대로(가상 이름 비노출).
+- **프론트**: `cbo-precheck/index.html` 화면(Preview) 탭에 "스캔 없이 바로 미리보기" 카드를 기존
+  "스캔 후 파일 선택" 드롭다운과 별도로 추가(GitHub SSH URL/브랜치/파일 경로 입력 + 버튼). 기존 스캔
+  기반 드롭다운·`previewRoot` 렌더링 영역은 그대로 공유·재사용(`renderPreviewElements()` 무변경) —
+  두 경로 모두 같은 렌더러로 그려지므로 화면 표현 회귀가 없다.
+- 다른 모듈(`/cbo-review` 등)은 이번 세션에서 전혀 건드리지 않았다.
+
+### Phase 3 검증
+
+- 신규 `test/cbo-precheck-preview-direct.test.js` 5건 — GATE 3 (a) repoUrl/path 누락 400 2건, (b) 존재
+  하지 않는 repo 명확한 오류, (c) 존재하지 않는 파일 경로 404류 오류(기존 scan 경로 회귀 없음), (d) 실제
+  `260707_QM023_ZAQMR0130/_abap/ZAQMR0130_S01.abap`을 스캔 없이 독립 미리보기 → Selection Screen 요소
+  (PARAMETERS/SELECT-OPTIONS)가 실제로 파싱됨 + 결과 `file`이 원본 파일명임을 확인(SSH 가능 환경에서
+  실제 clone으로 실행, 불가 환경은 skip).
+- `test/cbo-precheck-ui.test.js`에 `runPreviewDirect` 배선 테스트 2건 추가 — 입력값 검증(빈 값이면
+  fetch 미호출) + `action=preview-direct` 호출·응답 렌더링 배선 확인.
+- `node --check api/cbo-precheck.js lib/cbo-precheck/preview.js` 통과, 인라인 `<script>` `new Function`
+  파싱 통과.
+- 전체 `npm test`: **166 pass / 0 fail / 12 skip**(159에서 +7, 회귀 없음).
+- 시크릿 grep 0건.
+
+### Phase 4 — 마감
+
+- `README_CBO_PRECHECK.md` 갱신: 비abapGit 네이밍 처리 방식(사용 방법 절에 요약 + 별도 소절), "스캔
+  없이 화면 미리보기(독립 실행)" 사용법 절 추가, "알려진 한계"에 DDIC/타입풀 미포함으로 인한 기대된
+  오탐 항목 추가.
+- `sw.js` 캐시 버전은 올리지 않았다 — `cbo-precheck/index.html`은 서비스워커 프리캐시 목록에 없고
+  (grep 확인), HTML 네비게이션은 전부 network-first로 서빙되므로(회귀 방지 주석 참고) 버전을 안 올려도
+  사용자는 항상 최신 HTML을 받는다(2026-07-12 세션에서 `cbo-review/index.html`에 적용한 것과 동일한
+  판단 근거 — 루트 `index.html`은 이번 세션에서 변경하지 않았다).
+- 전체 GATE 재실행: 빌드/유닛 테스트, 정적 문법 검사, 시크릿 grep, 원본 GitHub 파일명 불변 확인(아래
+  FINAL GATE 참고) — 전부 통과 확인 후 `RALPH_DONE` 포함 최종 commit.
+
+**남은 리스크**:
+1. `check_syntax`/`unknown_types` 중 일부(`icon_create` 등 SAP 표준 type-pool, 저장소에 export되지
+   않은 커스텀 테이블 `ZACMS0005`/`ZAQMT0132` 참조)는 이 도구의 구조적 한계로 계속 "오탐성" 결과로
+   남는다 — 실제 결함이 아니라 "이 스캔 환경에 없는 의존성" 신호이므로, 필요하면 해당 DDIC/타입풀을
+   저장소에 export해 넣으면 해소된다(README "DDIC 정의 넣는 법" 절 참고).
+2. `preview-direct`는 매 요청마다 `git clone --depth 1` 전체를 수행한다(파일 하나만 필요해도) — 이
+   저장소 규모에서는 무시할 수준이지만, 매우 큰 저장소를 대상으로 자주 호출하면 느려질 수 있다(문서에
+   명시한 대로 구현 단순성을 우선한 의도적 선택 — sparse-checkout/git archive로 최적화하는 건 후속 과제).
+3. Selection Screen/ALV 미리보기는 v1 파서 범위(PARAMETERS/SELECT-OPTIONS/BLOCK/COMMENT/PUSHBUTTON/
+   두 가지 ALV 패턴)만 지원 — README "알려진 한계"에 이미 기록된 기존 제약이며 이번 세션에서 확장하지
+   않았다(범위 밖).
+
 ## 2026-07-14 CBO Pre-Check — 스캔 대상 재귀 탐색으로 수정 (`stella_clover_260714_3.md`, 무인 ralph autopilot)
 
 **결론 요약**: (1) 원인 — `collectAbapFiles()`(`lib/cbo-precheck/repoFetch.js`)의 폴더 재귀 탐색 자체는
