@@ -1087,3 +1087,129 @@ abapGit 점 표기 네이밍(`.prog.abap`/`.clas.abap`/`.intf.abap`/`.fugr.*.aba
 
 RALPH_DONE
 
+## 2026-07-14 CBO Pre-Check — 화면 미리보기 라벨 치환 + INCLUDE 자동 병합 (`stella_clover_260714_7.md`, 무인 ralph autopilot)
+
+**결론 요약**:
+1. **TEXTS 파일 실제 형식** — 실측한 3개 프로그램의 `_TEXTS.txt` 형식이 전부 달랐다(아래 Phase 0 참고).
+   그중 2개(ZAQMR0130 asterisk 스타일, ZAQMR0100 bracket 스타일)는 장식 문자만 다를 뿐 "섹션 헤더(Text
+   Symbol/Selection Text 키워드) + 줄마다 `KEY  값`(2칸 이상 간격)" 구조가 동일해 `lib/cbo-precheck/textSymbols.js`
+   하나의 파서로 처리한다. 3번째(ZAQMR0110)는 `EN:`/`KO:` 인용부호·콜론 기반 산문형이라 이번 범위 밖(README
+   참고) — 매핑 없이 조용히 심볼 표시로 폴백한다.
+2. **INCLUDE 병합 방식** — abaplint Registry의 cross-include 메커니즘(별도 오브젝트 조합)을 쓰지 않고,
+   메인 소스의 `INCLUDE name.` 줄을 같은 폴더 형제 파일의 원문으로 치환한 뒤 **하나의 문자열**로
+   기존 단일 파일 파서(`parsePreview`)에 그대로 넘긴다 — 문장 단위 토큰 스트림 파싱이라 파일 경계가 의미
+   없다는 점을 이용한 단순화(아키텍트 리뷰로 "합리적인 단순화"로 확인됨).
+3. **실측 개선 결과** — 실제 `ZAQMR0130.abap`(메인)만 지정 시: 병합 전 `해석됨 0개` → 병합 후 **18개**
+   (`_S01`의 select-options 3 + parameters 8 + block 4쌍 등), `Plant`/`Selection Criteria`/`Display`/
+   `Preferred Inspection Type` 등 미션 표의 라벨이 전부 실제 텍스트로 렌더됨을 실제 clone으로 확인.
+4. **남은 리스크** — INCLUDE 병합은 1단계까지만 따라간다(형제 파일 안의 재귀 INCLUDE는 미추적, 0Program의
+   평면 구조엔 충분). `_TEXTS.txt`가 없거나 3번째 산문형이면 라벨은 심볼/변수명 그대로(의도된 폴백).
+
+### Phase 0 — 정찰(실측, 추측 금지)
+
+- `git@github.com:yesblue0342-bit/0Program.git`을 실제 SSH clone해 아래를 직접 읽었다(원문은 이 세션의
+  조사 로그에 전량 인용 — 요지만 기록):
+  - **`260707_QM023_ZAQMR0130/_abap/ZAQMR0130_TEXTS.txt`**: `*===` 장식 섹션 헤더(`Text Symbols`,
+    `Selection Texts`, `GUI Title`, `GUI Status`, `CBO Transaction`) + `* KEY   값` 줄. 텍스트 심볼은
+    숫자(`001`→"Selection Criteria", `004`→"Processing Mode") 또는 영숫자(`M01`→"Display") 키. 선택화면
+    텍스트는 `S_WERKS`→"Plant", `P_DISP`→"Display", `P_APA`→"Preferred Inspection Type" 등 — 미션 표와
+    정확히 일치함을 확인. 일부 줄은 `★` 강조표시 뒤에 부가설명이 붙고(예: `P_DISP    Display
+    ★미입력 시 화면에 "P_DISP" 로 노출됨`), 그 설명 안에 다시 ABAP 인라인 주석(`"`)이 있어 파서가 반드시
+    `★`를 먼저 자르고 그 다음 `"`를 잘라야 값이 오염되지 않음(순서를 바꾸면 "Display"가 아니라 빈 문자열이
+    남는 것을 실측 확인).
+  - **`ZAQMR0130.abap`(메인)**: `REPORT zaqmr0130.` 뒤에 `INCLUDE zaqmr0130_top.`/`_s01`/`_cls`/`_o01`/
+    `_i01`/`_f01` 6개(전부 소문자, 뒤에 ABAP 인라인 주석 `"  ...` 포함). INCLUDE 이름(대소문자 무관) →
+    `<INCLUDE이름 대문자>.abap` 파일명 대응 확인(예: `zaqmr0130_s01` → `ZAQMR0130_S01.abap`).
+  - **`ZAQMR0130_S01.abap`**: 실제 선택화면 정의 — 블록 3개(`b1`=조회조건/`b4`=Processing Mode/`b2`=기본
+    플래그), select-options 3개(`s_werks OBLIGATORY`/`s_matnr`/`s_art`), 라디오 3개(`p_disp`/`p_chng`/
+    `p_crea`, `GROUP grp`), 체크박스 5개(`p_apa`~`p_bc`, 전부 `TYPE c ... AS CHECKBOX`). **Plant 기본값
+    "US11"은 SELECT-OPTIONS의 `DEFAULT` 문법이 아니라(SELECT-OPTIONS 자체가 이 문법을 지원하지 않음)
+    `f_init`(F01) 런타임 코드로 채워진다** — 이번 범위(정적 파싱)에서는 표현 불가로 판단, README에 명시.
+  - **`ZAQMR0130_TOP.abap`**: 전역 TYPES/DATA 선언 위치(선택화면 요소 없음).
+  - **다른 3개 프로그램 폴더 비교**(`260701_QM004_Inspection Group Upload`, `260705_QM008_Q Info Record
+    Upload`, `260625_QM005_ZAQMR0080V03`): `ZAQMR0100_TEXTS.txt`(bracket `[N] ------` 장식, 텍스트 심볼
+    키가 `b01`/`f01`/`m01`/`t01`/`s01`/`w01`/`e01`/`p01`/`i01` 등 알파벳 카테고리 접두라 ZAQMR0130과 다름)와
+    `ZAQMR0110_TEXTS.txt`(`Block Title (Text-101): EN: "..." KO: "..."` 산문형, 완전히 다른 구조)를 확인.
+    `260625_QM005_ZAQMR0080V03`는 `_TEXTS.txt` 자체가 없음(TEXTS 없는 프로그램의 실측 사례 — 폴백 대상).
+  - 미리보기 파이프라인(`lib/cbo-precheck/preview.js` `parsePreview`, `api/cbo-precheck.js`
+    `handlePreview`/`handlePreviewDirect`)을 추적 — `handlePreview`는 캐시된 `scan.fileContents`(스캔
+    대상 `.abap`만, TEXTS/INCLUDE 형제 접근 불가)를, `handlePreviewDirect`는 지정 파일 하나만 clone(형제
+    접근 불가)하는 구조라 라벨 치환·INCLUDE 병합 둘 다 이 지점에서 저장/clone 범위를 넓혀야 함을 확인.
+
+### Phase 1 — 텍스트 심볼 파서 + 라벨 치환
+
+- **`lib/cbo-precheck/textSymbols.js`(신규)**: `isTextsDoc(name)`(`*_TEXTS.txt` 인식) +
+  `parseTextsDoc(content)`. 섹션 헤더는 장식 문자 무관하게 키워드(`text symbols?`/`selection texts?`/
+  `gui title`, 그 외 `gui status`/`cbo transaction`/`screen \d`는 "섹션 리셋"만)로 인식하고, 항목 줄은
+  `^\*?\s*(KEY)(?:\s{2,}|\t+)(값)$` 정규식(2칸 이상 공백 또는 탭)으로 추출한다. `★`를 먼저 자르고 그 다음
+  `"`를 잘라 값을 정제하며, `/`, `-`, `—`로 시작하는 값(산문 주석 continuation이 우연히 2칸 간격을
+  만족하는 오탐, 예: `P_ALL  / P_RANGE — ...`)은 버린다. 인식 못하는 형식/빈 문서는 빈 매핑을 반환(조용한
+  폴백, `EMPTY_TEXTS_MAP` export).
+- **`lib/cbo-precheck/preview.js`**: `parseParameter`/`parseSelectOption`/`parseSelectionScreen`이
+  `textsMap`을 받아 `TEXT-xxx` 참조(블록 제목/코멘트/푸시버튼)와 변수명(파라미터/select-options)을 실제
+  텍스트로 치환한다(매핑 없으면 원본 그대로 — `|| symbol`/`|| null` 폴백). 원본 심볼/변수명은
+  `titleSymbol`/`name` 필드로 계속 남겨(완전히 숨기지 않음) 개발자가 실제 필드명도 알 수 있게 했다.
+  SELECT-OPTIONS의 `OBLIGATORY` 추출을 추가(기존에는 PARAMETERS만 추출됨 — 미션 요구사항). 프로그램
+  제목(`GUI Title`)은 `programTitle`로 반환값에 추가.
+- **`lib/cbo-precheck/repoFetch.js`/`scan.js`**: `isTargetFile()`이 `*_TEXTS.txt`도 수집 대상(`isTexts`
+  플래그)으로 인식하되, `scanFiles()`의 abaplint Registry에는 dictionary 문서와 동일하게 제외해 린트
+  결과에 영향 없음(실제 clone으로 `fileCount`/`issues` 불변 확인).
+- **`lib/cbo-precheck/store.js`/`api/cbo-precheck.js`**: `saveScan()`에 `collectedFiles`(스캔 시 수집된
+  전체 파일 목록 — TEXTS/INCLUDE 형제 포함) 필드 추가, `scan-get`에서는 기존 `fileContents`와 동일하게
+  응답에서 제외(불필요한 원본 노출 방지).
+- **UI(`cbo-precheck/index.html`)**: 라벨 있으면 주 텍스트 + 변수명은 작은 보조 텍스트로, 체크박스는
+  `TYPE` 배지("c" 잡음) 미표시, 같은 `radioGroup` 연속 파라미터는 "그룹 X" 텍스트 없이 한 행으로 그룹핑,
+  `programTitle` 있으면 SAP GUI 타이틀바 표시.
+
+### Phase 2 — INCLUDE 병합
+
+- **`mergeIncludes(mainName, mainContent, siblingFiles)`**(`preview.js` 신규): `REPORT`/`PROGRAM` 문이
+  없으면(=이 파일 자체가 include) 손대지 않고 그대로 반환(회귀 없음). 있으면 `INCLUDE name.`과 ABAP
+  문법상 유효한 `INCLUDE name IF FOUND.`(뒤에 ABAP 인라인 주석 `" ...`까지 허용)를 인식해 같은 폴더 형제의
+  원문으로 치환한다. `INCLUDE STRUCTURE`/`INCLUDE TYPE`(DDIC 구조 병합 문법, 프로그램 INCLUDE 아님)은
+  제외. 대응 파일이 없거나 인식 못하는 INCLUDE 형태는 **반드시 경고를 남긴다**(조용히 건너뛰면 "선택화면
+  자체가 없는 프로그램"과 구별이 안 됨 — 아키텍트 리뷰 지적 반영).
+  - ⚠ **이 세션 중 실제로 겪은 회귀**: 처음엔 종결자(`.`) 뒤에 아무 내용도 허용하지 않는 엄격한
+    정규식으로 "고쳤다가", 실제 0Program의 INCLUDE 문은 전부 뒤에 ABAP 인라인 주석이 붙어 있어(`INCLUDE
+    zaqmr0130_top.   " 전역 데이터/타입/상수 선언`) 실사용 100% 케이스가 전부 "인식 못함" 경고로
+    되돌아가는 회귀를 만들었다. 실제 clone으로 재검증하다가 발견해 종결자 뒤 `"` 주석만 허용하도록
+    수정하고, 이 케이스를 회귀 테스트(`GATE 2 (d-2)`)로 고정했다.
+- **`buildPreview(fileName, source, siblingFiles)`**(`preview.js` 신규): 같은 폴더의 TEXTS 형제를 찾아
+  `parseTextsDoc`, `mergeIncludes`로 병합, `parsePreview`로 파싱하는 3단계를 하나로 묶어
+  `handlePreview`/`handlePreviewDirect` 양쪽이 동일 로직을 공유하게 했다(중복 구현 없음).
+- **`api/cbo-precheck.js`**: `handlePreview`는 `scan.collectedFiles`를 형제 탐색에 사용. `handlePreviewDirect`는
+  clone 대상을 "지정 파일" → "그 파일이 속한 폴더 전체"로 변경(`withClonedRepo`/`collectAbapFiles` 기존
+  메커니즘 재사용, 신규 clone 방식 없음) — 메인 파일 하나만 지정해도 형제 INCLUDE/TEXTS를 찾을 수 있게
+  했다. 이로 인해 "존재하지 않는 파일 경로" 오류가 400(저장소/경로 자체가 없음)에서 404(폴더는 있지만
+  파일이 없음)로 바뀌는 의도된 계약 변경이 있어 기존 테스트(`GATE 3 (c)`)를 갱신했다.
+- **UI**: `mergedFiles`/`warnings` 있으면 "이 미리보기는 N개 파일(메인 + INCLUDE M개)을 합쳐
+  생성했습니다" 배너 + 경고 표시.
+- **실측 검증**(실제 clone, 스캔 경로/독립 경로 양쪽): `ZAQMR0130.abap`(메인)만 지정 → 병합 전
+  `해석됨 0개` → 병합 후 **18개**, `mergedFiles` 6개(TOP/S01/CLS/O01/I01/F01) 전부, 경고 0건. `_S01.abap`
+  단독 지정은 기존과 동일하게 병합 없이 동작(회귀 없음, 실제 clone으로 재확인).
+
+### Phase 3 — 마감/검증
+
+- `README_CBO_PRECHECK.md` 갱신: "TEXT 라벨 자동 치환"/"INCLUDE 자동 병합" 절 신규, 스캔 없이 미리보기
+  절이 "파일 하나만 clone"에서 "폴더 전체 clone"으로 바뀐 점 반영, 알려진 한계에서 "TEXT-xxx는 항상
+  심볼"이라는 낡은 문구를 "`_TEXTS.txt`가 있으면 치환, 없거나 산문형이면 폴백"으로 정정, INCLUDE 병합은
+  같은 폴더 안에서만 동작한다는 한계 추가.
+- 아키텍트 리뷰(1회, opus): "치명적/높은 심각도 결함 없음" 결론. Medium/Low 4건 지적 — INCLUDE 정규식이
+  `IF FOUND` 미인식+침묵 실패(반영: 인식 확장 + 항상 경고), 탭 구분자 미인식(반영: `\t+` 허용), 산문 주석
+  continuation 오탐 가능성(허용된 트레이드오프로 유지), 섹션 감지가 값 내용에 영향받을 가능성(허용된
+  트레이드오프로 유지, 낮은 심각도). `handlePreviewDirect`의 대상 파일 탐색이 `isDict`(dictionary 문서)를
+  배제하지 않는 사소한 결함도 함께 수정. INCLUDE 병합에 abaplint Registry 대신 텍스트 스플라이스 +
+  기존 단일 파일 파서 재사용 설계는 "합리적인 단순화"로 확인.
+- 셀프 디슬롭(ai-slop-cleaner, 변경 파일 범위 한정) 수행: `lib/cbo-precheck/preview.js`의
+  `parseSelectionScreen`에서 `findTextRef`+`resolveTextSymbol` 조합(원본 심볼 찾기 → 실제 텍스트 치환)이
+  block-begin/comment/pushbutton 세 분기에 동일하게 3중 복붙되어 있던 것을 `resolveRef()` 공용 헬퍼로
+  통합(동작 변경 없음, 순수 리팩터). 그 외 죽은 코드·미사용 변수·디버그 잔재는 발견되지 않음. 디슬롭 후
+  재검증: `npm test` **205 pass / 0 fail / 12 skip**(디슬롭 전과 동일 — 회귀 없음).
+- 전체 `npm test`: **205 pass / 0 fail / 12 skip**(변경 전 182에서 +23 — textSymbols 5, preview 18[GATE1/2
+  + api 통합 + 회귀 고정], ui 6, 기존 테스트 갱신 1건[GATE 3 (c) 400→404]. skip 12건은 기존과 동일 — 회귀
+  없음). `node --check` 전체 통과, 인라인 JS `new Function` 파싱 통과, 시크릿 grep(`sk-`/`ghp_`/
+  `github_pat_`) 0건, `git diff --name-only`로 `/cbo-review` 미변경 확인, 원본 GitHub 소스는 읽기 전용
+  clone(`/tmp`)만 사용해 전혀 수정하지 않음.
+
+RALPH_DONE
+

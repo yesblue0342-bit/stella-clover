@@ -14,7 +14,7 @@ import {
   connectCli, deleteProviderKey, disconnectCli, providerStatus, saveProviderKey,
 } from "../lib/ai-connection/providers.js";
 import { hasAccessPassword, login, requireAuth } from "../lib/cbo-precheck/auth.js";
-import { parsePreview } from "../lib/cbo-precheck/preview.js";
+import { buildPreview } from "../lib/cbo-precheck/preview.js";
 
 function json(res, status, value) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -41,7 +41,7 @@ async function handleScan(req, res) {
   const scannable = files.filter((f) => isScannable(f.name));
   const scannedFiles = scannable.map((f) => f.name);
   const fileContents = Object.fromEntries(scannable.map((f) => [f.name, f.content]));
-  const scanId = saveScan({ repoUrl, branch, path: subPath, issues, fileCount, files: scannedFiles, fileContents });
+  const scanId = saveScan({ repoUrl, branch, path: subPath, issues, fileCount, files: scannedFiles, fileContents, collectedFiles: files });
   const scan = getScan(scanId);
   return json(res, 200, { ok: true, scanId, issues: scan.issues, fileCount, files: scannedFiles, repoUrl, branch, path: subPath });
 }
@@ -179,7 +179,7 @@ async function handlePreview(req, res) {
   const source = scan.fileContents?.[file];
   if (source === undefined) return json(res, 404, { ok: false, message: "해당 파일의 소스를 찾을 수 없습니다(스캔 결과에 없는 파일)." });
   try {
-    const result = parsePreview(source, file);
+    const result = buildPreview(file, source, scan.collectedFiles || []);
     return json(res, 200, { ok: true, ...result });
   } catch (e) {
     return json(res, 500, { ok: false, message: String(e?.message || e) });
@@ -187,9 +187,10 @@ async function handlePreview(req, res) {
 }
 
 // [화면 미리보기 독립 실행 — Phase 3] 사전 스캔 없이 GitHub SSH URL/브랜치/단일 파일 경로만으로 즉시
-// 미리보기를 생성한다. `path`는 폴더가 아니라 파일 하나를 가리켜야 한다(repoFetch.collectAbapFiles가
-// 이미 단일 파일 path를 지원 — Phase 1 세션에서 추가된 엣지케이스 재사용, 신규 clone 방식 도입 없음).
-// GITHUB_TOKEN 불필요(SSH 배포키 clone만 사용 — action=scan과 동일한 전제).
+// 미리보기를 생성한다. `path`는 여전히 파일 하나를 가리키지만(단일 파일 지정 UX 불변), Phase 2부터는
+// 그 파일이 속한 폴더 전체를 clone 대상으로 삼는다 — 같은 폴더의 INCLUDE 형제/TEXTS 문서를 찾아 메인
+// 프로그램 하나만 지정해도 전체 화면을 병합 렌더링하기 위함(repoFetch.collectAbapFiles가 폴더 재귀
+// 수집을 이미 지원 — 신규 clone 방식 도입 없음). GITHUB_TOKEN 불필요(SSH 배포키 clone만, action=scan과 동일).
 async function handlePreviewDirect(req, res) {
   const repoUrl = String(req.body?.repoUrl || "").trim();
   const branch = String(req.body?.branch || "main").trim();
@@ -197,17 +198,22 @@ async function handlePreviewDirect(req, res) {
   if (!repoUrl) return json(res, 400, { ok: false, message: "repoUrl이 필요합니다." });
   if (!filePath) return json(res, 400, { ok: false, message: "미리볼 파일 경로가 필요합니다(단일 파일)." });
 
+  const normalizedPath = filePath.replaceAll("\\", "/").replace(/^\/+/, "");
+  const slashIdx = normalizedPath.lastIndexOf("/");
+  const baseName = slashIdx >= 0 ? normalizedPath.slice(slashIdx + 1) : normalizedPath;
+  const dirPath = slashIdx >= 0 ? normalizedPath.slice(0, slashIdx) : "";
+
   let files;
   try {
-    files = await withClonedRepo({ repoUrl, branch, path: filePath }, (root) => collectAbapFiles(root));
+    files = await withClonedRepo({ repoUrl, branch, path: dirPath }, (root) => collectAbapFiles(root));
   } catch (e) {
     return json(res, 400, { ok: false, message: String(e?.message || e) });
   }
-  const file = files.find((f) => !f.isDdic);
+  const file = files.find((f) => f.name === baseName && !f.isDdic && !f.isTexts && !f.isDict);
   if (!file) return json(res, 404, { ok: false, message: "ABAP 소스 파일을 찾지 못했습니다(경로를 확인하세요)." });
 
   try {
-    const result = parsePreview(file.content, file.name);
+    const result = buildPreview(file.name, file.content, files);
     return json(res, 200, { ok: true, ...result });
   } catch (e) {
     return json(res, 500, { ok: false, message: String(e?.message || e) });
@@ -257,7 +263,7 @@ export default async function handler(req, res) {
     if (req.method === "GET" && action === "scan-get") {
       const scan = getScan(String(req.query.scanId || ""));
       if (!scan) return json(res, 404, { ok: false, message: "스캔 결과를 찾을 수 없습니다." });
-      const { fileContents, ...safe } = scan;
+      const { fileContents, collectedFiles, ...safe } = scan;
       return json(res, 200, { ok: true, ...safe });
     }
     if (req.method === "POST" && action === "preview") return await handlePreview(req, res);

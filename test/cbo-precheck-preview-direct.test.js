@@ -81,7 +81,8 @@ test(
 );
 
 test(
-  "GATE 3 (c): 존재하지 않는 파일 경로는 명확한 404 오류(회귀 없음 — 기존 scan 경로는 무변경)",
+  "GATE 3 (c): 존재하지 않는 파일 경로는 명확한 404 오류(Phase 2부터 대상 파일이 아니라 그 폴더를 clone하므로 — " +
+    "폴더는 실재하고 파일만 없는 경우이니 400 대신 404가 맞다. 저장소/폴더 자체가 없는 경우는 GATE 3 (b)에서 400 확인)",
   { skip: sshOk ? false : "SSH(배포키) 접근 불가 — 네트워크 제약으로 skip" },
   async () => {
     const res = mockRes();
@@ -90,7 +91,7 @@ test(
       query: { action: "preview-direct" },
       body: { repoUrl: LIVE_REPO, branch: "main", path: "260707_QM023_ZAQMR0130/_abap/NOPE_NOT_REAL.abap" },
     }, res);
-    assert.equal(res._status, 400);
+    assert.equal(res._status, 404);
     assert.equal(res._body.ok, false);
   }
 );

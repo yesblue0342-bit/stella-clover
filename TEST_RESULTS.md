@@ -1,5 +1,47 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-14] CBO Pre-Check — 화면 미리보기 라벨 치환 + INCLUDE 자동 병합 (`stella_clover_260714_7.md`, 무인 ralph autopilot)
+
+미리보기가 `TEXT-001`/`s_werks` 같은 내부 심볼·변수명만 보여주던 것을 같은 폴더의 `*_TEXTS.txt` 문서로
+실제 SAP 라벨("Selection Criteria"/"Plant" 등)로 치환하고, 메인 프로그램 파일 하나만 지정해도 INCLUDE를
+따라가 형제 파일(`_S01` 등)의 선택화면을 병합 렌더링하도록 개선. 상세 판단 근거는 `WORK_REPORT.md`의
+동일 제목 섹션 참고.
+
+- **Phase 0 실측**: 실제 `git@github.com:yesblue0342-bit/0Program.git`(SSH)에서 `ZAQMR0130_TEXTS.txt`
+  원문·`ZAQMR0130.abap`의 INCLUDE 문·`_S01.abap`/`_TOP.abap`을 직접 읽고, 다른 3개 프로그램 폴더의
+  TEXTS 문서 형식을 비교 — asterisk 스타일/bracket 스타일/EN·KO 산문형 3가지, TEXTS 파일 자체가 없는
+  프로그램도 확인.
+- **Phase 1 라벨 치환**(신규 `lib/cbo-precheck/textSymbols.js`, `test/cbo-precheck-texts.test.js` 6건 +
+  `test/cbo-precheck-preview.test.js` GATE 1 (b)(c)(d) 3건): 실제 `_TEXTS.txt` 샘플에서 `001`→
+  "Selection Criteria", `S_WERKS`→"Plant", `P_APA`→"Preferred Inspection Type" 등 미션 표와 정확히
+  일치하는 매핑 추출 확인. 매핑 없는 심볼/필드는 크래시 없이 기존 심볼/변수명 표시로 폴백(회귀 없음).
+  SELECT-OPTIONS의 OBLIGATORY 추출 추가(기존엔 PARAMETERS만 지원).
+- **Phase 2 INCLUDE 병합**(신규 `mergeIncludes`/`buildPreview` in `preview.js`, GATE 2 (a)~(f) 6건 +
+  API 통합 테스트 2건): 합성 fixture로 메인 파일 지정 시 INCLUDE 형제의 PARAMETERS/SELECT-OPTIONS가
+  병합 후 해석됨을 확인, include 파일 단독 지정은 무변경(회귀 없음), 대응 파일 없음/인식 못하는 INCLUDE
+  형태는 경고와 함께 부분 렌더(크래시 없음). **실제 `git@github.com:yesblue0342-bit/0Program.git`을 통해
+  `handlePreviewDirect`/`handlePreview` 양쪽 실제 핸들러로 end-to-end 검증**: `ZAQMR0130.abap`(메인)만
+  지정 → 병합 전 `해석됨 0개` → 병합 후 **18개**(select-options 3+parameters 8+block 4쌍 등), `Plant`/
+  `Selection Criteria`/`Display`/`Preferred Inspection Type` 라벨 전부 실제 텍스트로 렌더링됨을 확인.
+  scan → issues 26건(회귀 없음, TEXTS.txt가 린트 결과에 섞이지 않음)도 재확인.
+  - **세션 중 실제로 잡은 회귀**: INCLUDE 정규식을 처음 "더 엄격하게" 고쳤다가, 실제 0Program의 모든
+    INCLUDE 문 뒤에 ABAP 인라인 주석이 붙어 있어(`INCLUDE zaqmr0130_top.   " 전역 데이터...`) 실사용
+    100%가 "인식 못함"으로 되돌아가는 회귀를 만들었다 — 실제 clone 재검증 중 발견해 수정하고 회귀
+    테스트(`GATE 2 (d-2)`)로 고정.
+- **아키텍트 리뷰**(opus, 1회): 치명적/높은 심각도 결함 없음. Medium/Low 4건 중 2건(INCLUDE `IF FOUND`
+  미인식+침묵 실패, 탭 구분자 미인식)과 사소한 결함 1건(`handlePreviewDirect`의 `isDict` 미배제)을
+  즉시 반영·회귀 테스트로 고정. 나머지 2건(산문 주석 오탐 가능성, 섹션 감지 휴리스틱)은 낮은 심각도의
+  허용된 트레이드오프로 유지. INCLUDE 병합에 abaplint Registry 대신 텍스트 스플라이스 방식을 쓴 설계는
+  "합리적인 단순화"로 확인.
+- **셀프 디슬롭**: `preview.js`의 `findTextRef`+`resolveTextSymbol` 3중 복붙을 `resolveRef()` 공용
+  헬퍼로 통합(순수 리팩터, 동작 변경 없음).
+- **정적 검증**: `node --check` 변경 파일 전부 통과. 인라인 `<script>`(`cbo-precheck/index.html`)
+  `new Function()` 파싱 통과.
+- **전체 스위트**: `npm test` **205 pass / 0 fail / 12 skip**(세션 시작 시점 182에서 +23, 회귀 없음).
+- **시크릿 grep**: `sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}` 0건.
+- **범위 확인**: `/cbo-review`는 이번 세션에서 전혀 수정하지 않음(`git diff --name-only`로 확인). 원본
+  GitHub 소스는 읽기 전용 clone(`/tmp`)으로만 조사했고 어떤 파일도 쓰지 않음.
+
 ## [2026-07-14] CBO Pre-Check — 근본 원인 조사·네이밍 어댑터 + UI 버그 + 미리보기 독립 기능 (`stella_clover_260714_5.md`, 무인 ralph autopilot)
 
 `260707_QM023_ZAQMR0130` 스캔이 "파일 8개, 이슈 0건"을 반환하던 것이 실제로 코드가 깨끗해서인지, 타입
