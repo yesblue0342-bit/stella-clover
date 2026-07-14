@@ -9,6 +9,8 @@ import { promisify } from "node:util";
 import {
   extractScreenNumbers, findAllModules, matchScreenModules, extractSetDirective,
   resolveTitlebarText, extractWhenCodes, extractToolbarButtons, extractFormFieldcat, buildScreenInfo,
+  extractSalvFactoryTable, resolveItabStructureType, extractTypesFields, extractSalvColumnTexts,
+  extractSalvListHeader, buildSalvScreenInfo,
 } from "../lib/cbo-precheck/dynproPreview.js";
 
 const exec = promisify(execFile);
@@ -135,6 +137,111 @@ ENDMETHOD.`;
   assert.equal(info.modules.fallback, false);
 });
 
+// SALV 전체화면 ALV(재작업 260714-1-RETRY): CALL SCREEN 없이 CL_SALV_TABLE=>FACTORY로 바로 리스트를
+// 띄우는 ZAQMR0131 패턴. 재현: 이 스위트가 추가되기 전에는 buildScreenInfo 계열 함수가 전혀 없어
+// screens/flow가 통째로 빈 배열이었다(위 GATE 3와 별개 경로 — screenNumbers가 0건이라 buildScreenInfo가
+// 한 번도 호출되지 않음).
+const SALV_SRC = `
+TYPES:
+  BEGIN OF ty_disp,
+    werks     TYPE zaqmt0132-werks,     " Plant
+    matnr     TYPE zaqmt0132-matnr,     " Material
+    maktx     TYPE makt-maktx,          " Material Description
+    art       TYPE zaqmt0132-art,       " Inspection Type
+    action_tx TYPE c LENGTH 10,         " Action Type
+    zseqno    TYPE zaqmt0132-zseqno,    " (정렬용, 화면 숨김)
+  END OF ty_disp.
+
+DATA:
+  gt_disp TYPE STANDARD TABLE OF ty_disp,
+  go_alv  TYPE REF TO cl_salv_table.
+
+FORM f_display.
+  DATA: lr_columns TYPE REF TO cl_salv_columns_table,
+        lr_disp    TYPE REF TO cl_salv_display_settings.
+
+  cl_salv_table=>factory(
+    IMPORTING r_salv_table = go_alv
+    CHANGING  t_table      = gt_disp ).
+
+  lr_columns = go_alv->get_columns( ).
+  PERFORM f_col_text USING lr_columns 'MAKTX'
+                           'Mat.Desc.' 'Material Desc.' 'Material Description'.
+  PERFORM f_col_text USING lr_columns 'ART'
+                           'Insp.Type' 'Inspection Type' 'Inspection Type'.
+  PERFORM f_col_hide USING lr_columns 'ZSEQNO'.
+
+  lr_disp = go_alv->get_display_settings( ).
+  lr_disp->set_list_header( 'QM View Inspection Type - Change History' ).
+  go_alv->display( ).
+ENDFORM.
+
+FORM f_col_text USING ir_columns TYPE REF TO cl_salv_columns_table
+                      iv_col     TYPE lvc_fname
+                      iv_short   TYPE scrtext_s
+                      iv_medium  TYPE scrtext_m
+                      iv_long    TYPE scrtext_l.
+  DATA lr_col TYPE REF TO cl_salv_column.
+  lr_col = ir_columns->get_column( iv_col ).
+  lr_col->set_short_text( iv_short ).
+  lr_col->set_medium_text( iv_medium ).
+  lr_col->set_long_text( iv_long ).
+ENDFORM.
+
+FORM f_col_hide USING ir_columns TYPE REF TO cl_salv_columns_table
+                      iv_col     TYPE lvc_fname.
+  DATA lr_col TYPE REF TO cl_salv_column.
+  lr_col = ir_columns->get_column( iv_col ).
+  lr_col->set_technical( abap_true ).
+ENDFORM.
+`;
+
+test("extractSalvFactoryTable: cl_salv_table=>factory( ... CHANGING t_table = <itab> )에서 내부테이블 변수명을 뽑는다", () => {
+  assert.equal(extractSalvFactoryTable(SALV_SRC), "gt_disp");
+  assert.equal(extractSalvFactoryTable("DATA go_alv TYPE REF TO cl_salv_table."), null);
+});
+
+test("resolveItabStructureType: DATA 선언에서 STANDARD TABLE OF 뒤 구조 타입명을 역추적한다", () => {
+  assert.equal(resolveItabStructureType(SALV_SRC, "gt_disp"), "ty_disp");
+  assert.equal(resolveItabStructureType(SALV_SRC, "no_such_var"), null);
+});
+
+test("extractTypesFields: TYPES BEGIN OF ~ END OF 필드 선언 순서를 그대로 뽑고, 인라인 주석의 '…Type' 오탐을 걸러낸다", () => {
+  assert.deepEqual(extractTypesFields(SALV_SRC, "ty_disp"), ["WERKS", "MATNR", "MAKTX", "ART", "ACTION_TX", "ZSEQNO"]);
+});
+
+test("extractSalvColumnTexts: FORM 경유 PERFORM 호출(2줄에 걸친 리터럴 포함)에서 medium 텍스트와 숨김 컬럼을 뽑는다", () => {
+  const { textMap, hidden } = extractSalvColumnTexts(SALV_SRC);
+  assert.equal(textMap.get("MAKTX").medium, "Material Desc.");
+  assert.equal(textMap.get("ART").medium, "Inspection Type");
+  assert.equal(textMap.has("WERKS"), false); // f_col_text 호출이 없는 컬럼 — 매핑 없음
+  assert.ok(hidden.has("ZSEQNO"));
+});
+
+test("extractSalvListHeader: set_list_header('...') 리터럴을 뽑는다", () => {
+  assert.equal(extractSalvListHeader(SALV_SRC), "QM View Inspection Type - Change History");
+  assert.equal(extractSalvListHeader("go_alv->display( )."), null);
+});
+
+test("buildSalvScreenInfo: SALV 전체화면 ALV 하나를 통째로 조립한다(필드 순서·헤더 텍스트·숨김·타이틀)", () => {
+  const info = buildSalvScreenInfo(SALV_SRC);
+  assert.equal(info.table, "gt_disp");
+  assert.equal(info.title.text, "QM View Inspection Type - Change History");
+  // ZSEQNO는 set_technical(abap_true)로 숨겨져 컬럼 목록에서 빠지고, WERKS/MATNR은 헤더 텍스트 호출이
+  // 없어 필드명 대문자로 폴백한다(요구사항 "헤더 텍스트 없는 컬럼은 필드명 대문자로 표시").
+  assert.deepEqual(info.columns, [
+    { fieldname: "WERKS", coltext: "WERKS", outputlen: null },
+    { fieldname: "MATNR", coltext: "MATNR", outputlen: null },
+    { fieldname: "MAKTX", coltext: "Material Desc.", outputlen: null },
+    { fieldname: "ART", coltext: "Inspection Type", outputlen: null },
+    { fieldname: "ACTION_TX", coltext: "ACTION_TX", outputlen: null },
+  ]);
+});
+
+test("buildSalvScreenInfo: CL_SALV_TABLE=>FACTORY가 없으면 null(Dynpro Screen 경로와 충돌하지 않음)", () => {
+  assert.equal(buildSalvScreenInfo("CALL SCREEN 0100."), null);
+});
+
 const LIVE_REPO = "git@github.com:yesblue0342-bit/0Program.git";
 const sshEnv = {
   ...process.env,
@@ -195,5 +302,59 @@ test(
     assert.equal(screen.alvColumns[0].fieldname, "STATXT");
     assert.equal(screen.alvColumns[1].fieldname, "WERKS");
     assert.equal(screen.alvColumns[1].coltext, "Plant");
+  }
+);
+
+test(
+  "GATE 4 (260714-1-RETRY): 실제 0Program 저장소 — ZAQMR0131(CL_SALV_TABLE 전체화면 ALV, CALL SCREEN 없음)이 " +
+    "SALV 결과화면으로 렌더링된다(재작업 전에는 screens/flow가 통째로 빈 배열이었음)",
+  { skip: sshOk ? false : "SSH(배포키) 접근 불가 — 네트워크 제약으로 skip" },
+  async () => {
+    const handler = (await import("../api/cbo-precheck.js")).default;
+    const res = {
+      _status: 200, _headers: {},
+      setHeader(k, v) { this._headers[k] = v; },
+      status(c) { this._status = c; return this; },
+      json(o) { this._body = o; return this; },
+    };
+    await handler({
+      method: "POST",
+      query: { action: "preview-direct" },
+      body: { repoUrl: LIVE_REPO, branch: "main", path: "260707_QM023_ZAQMR0130" },
+    }, res);
+    assert.equal(res._status, 200, JSON.stringify(res._body));
+    const salv = res._body.previews.find((p) => p.file === "_abap/ZAQMR0131.abap");
+    assert.ok(salv, "ZAQMR0131.abap 미리보기가 있어야 함");
+
+    // 화면 흐름: Selection Screen(1000) → SALV Fullscreen ALV.
+    assert.deepEqual(salv.flow, ["Selection Screen(1000)", "SALV Fullscreen ALV"]);
+
+    assert.equal(salv.screens.length, 1);
+    const screen = salv.screens[0];
+    assert.equal(screen.salv, true);
+    assert.equal(screen.hasAlvGrid, true);
+
+    // set_list_header( '...' ) 타이틀.
+    assert.equal(screen.title.text, "QM View Inspection Type - Change History");
+
+    // ZSEQNO는 set_technical(abap_true)로 숨겨져 컬럼 목록에서 빠진다(16개 필드 중 15개만 표시).
+    assert.equal(screen.alvColumns.length, 15);
+    assert.ok(!screen.alvColumns.some((c) => c.fieldname === "ZSEQNO"));
+
+    // 필드 선언 순서(TYPES ty_disp) = 컬럼 표시 순서.
+    assert.deepEqual(screen.alvColumns.map((c) => c.fieldname), [
+      "WERKS", "MATNR", "MAKTX", "ART", "ACTION_TX", "FNAME", "OLD_VALUE", "NEW_VALUE",
+      "ERNAM", "ERDAT", "ERZET", "AENAM", "AEDAT", "AEZET", "ZRUNID",
+    ]);
+
+    // set_short_text/medium_text/long_text 를 FORM(f_col_text) 경유로 추적해 medium 텍스트를 헤더로 씀.
+    const byField = Object.fromEntries(screen.alvColumns.map((c) => [c.fieldname, c.coltext]));
+    assert.equal(byField.MAKTX, "Material Desc.");
+    assert.equal(byField.ART, "Inspection Type");
+    assert.equal(byField.ERNAM, "Created By");
+
+    // f_col_text 호출이 없는 컬럼(WERKS/MATNR)은 헤더 텍스트 없이 필드명 대문자로 폴백한다.
+    assert.equal(byField.WERKS, "WERKS");
+    assert.equal(byField.MATNR, "MATNR");
   }
 );

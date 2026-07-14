@@ -503,11 +503,17 @@ const ICON_GLYPHS={icon_create:'➕',icon_change:'✏️',icon_delete:'🗑️',
 
 function renderDynproScreen(screen){
   let html=`<div class="sap-screen">`;
-  html+=`<div class="sap-titlebar">Screen ${esc(screen.screenNo)}${screen.title&&screen.title.text?' — '+esc(screen.title.text):''}</div>`;
-  const fcodes=(screen.functionCodes||[]).map(c=>`<span class="sap-fcode">${esc(c)}</span>`).join(' ');
-  html+=`<div class="sap-status-row">${screen.pfStatus?`GUI Status: <b>${esc(screen.pfStatus)}</b>`:'<span class="muted">GUI Status 미검출</span>'}${fcodes?' · 기능코드: '+fcodes:''}</div>`;
-  if(screen.modules&&screen.modules.fallback){
-    html+=`<div class="sap-modules-fallback">⚠ 화면번호로 모듈을 매칭하지 못해 OUTPUT/INPUT 모듈 전체를 표시합니다.</div>`;
+  // SALV 전체화면 ALV(screen.salv=true, 예 ZAQMR0131의 CL_SALV_TABLE=>FACTORY)는 커스텀 Dynpro가 없어
+  // 화면번호/GUI Status/PBO·PAI 모듈이 원래 존재하지 않는다 — 있지도 않은 값을 "미검출"로 표시해
+  // 마치 파싱 실패인 것처럼 보이지 않도록 해당 행 자체를 생략한다.
+  const titleLabel=screen.salv?'SALV Fullscreen ALV':`Screen ${esc(screen.screenNo)}`;
+  html+=`<div class="sap-titlebar">${titleLabel}${screen.title&&screen.title.text?' — '+esc(screen.title.text):''}</div>`;
+  if(!screen.salv){
+    const fcodes=(screen.functionCodes||[]).map(c=>`<span class="sap-fcode">${esc(c)}</span>`).join(' ');
+    html+=`<div class="sap-status-row">${screen.pfStatus?`GUI Status: <b>${esc(screen.pfStatus)}</b>`:'<span class="muted">GUI Status 미검출</span>'}${fcodes?' · 기능코드: '+fcodes:''}</div>`;
+    if(screen.modules&&screen.modules.fallback){
+      html+=`<div class="sap-modules-fallback">⚠ 화면번호로 모듈을 매칭하지 못해 OUTPUT/INPUT 모듈 전체를 표시합니다.</div>`;
+    }
   }
   if(screen.toolbarButtons&&screen.toolbarButtons.length){
     html+='<div class="sap-toolbar">'+screen.toolbarButtons.map(b=>{
@@ -522,9 +528,11 @@ function renderDynproScreen(screen){
       html+=`<div class="sap-unparsed">⚠ ALV 그리드는 있으나 필드카탈로그를 해석하지 못했습니다.</div>`;
     }
   }
-  const pbo=screen.modules&&screen.modules.output&&screen.modules.output.length?screen.modules.output.join(', '):'(미검출)';
-  const pai=screen.modules&&screen.modules.input&&screen.modules.input.length?screen.modules.input.join(', '):'(미검출)';
-  html+=`<div class="sap-flow-text">PBO: ${esc(pbo)} → PAI: ${esc(pai)}</div>`;
+  if(!screen.salv){
+    const pbo=screen.modules&&screen.modules.output&&screen.modules.output.length?screen.modules.output.join(', '):'(미검출)';
+    const pai=screen.modules&&screen.modules.input&&screen.modules.input.length?screen.modules.input.join(', '):'(미검출)';
+    html+=`<div class="sap-flow-text">PBO: ${esc(pbo)} → PAI: ${esc(pai)}</div>`;
+  }
   html+=`<div class="sap-limit-note">Screen Painter 레이아웃과 Flow Logic은 소스에 없어 실제 필드 배치와 다를 수 있습니다. ALV 컬럼·툴바·기능코드·모듈은 소스에서 추출한 실제 값입니다.</div>`;
   html+='</div>';
   return html;

@@ -1,5 +1,47 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-14] CBO Pre-Check — SALV(CL_SALV_TABLE) 전체화면 ALV 결과화면 렌더링 재작업 (`stella_clover_improvement_260714_1_retry.md`, 무인 재작업 세션)
+
+직전 세션이 "이미 완료됨"이라고 잘못 보고한 건을 재검증 후 실제 구현. `lib/cbo-precheck/dynproPreview.js`에
+SALV(커스텀 Dynpro 없이 `CL_SALV_TABLE=>FACTORY`로 바로 리스트를 띄우는 방식) 전체화면 ALV 감지·렌더링을
+추가했다. 상세 판단 근거·구현 세부는 `REVIEW_LOG.md`의 동일 날짜 항목 참고.
+
+- **착각 재확인**: `grep -rn "SALV\|salv" lib/cbo-precheck/ api/cbo-precheck.js cbo-precheck/` → **0건**
+  (구현 착수 전 직접 확인). 이전 세션이 완료했다고 말한 항목(아이콘 오탐 제거/폴더경로 미리보기/Dynpro
+  Screen 0100 렌더링)은 별개의 과거 미션이었다.
+- **재현(수정 전)**: 실제 `git@github.com:yesblue0342-bit/0Program.git`(SSH)에서
+  `260707_QM023_ZAQMR0130/_abap/ZAQMR0131.abap`을 clone해 `buildPreview()`를 직접 호출:
+  `elements=12`(Selection Screen만 파싱), **`screens=[]`, `flow=[]`** — 결과화면이 완전히 비어 재현됨.
+- **원인**: ZAQMR0131은 `CALL SCREEN`이 전혀 없어(`CL_SALV_TABLE=>FACTORY` 전체화면 ALV) 기존
+  `extractScreenNumbers()`가 화면번호를 하나도 못 찾고, Dynpro 전용 `buildScreenInfo` 경로 자체가
+  호출되지 않았다.
+- **구현**: `extractSalvFactoryTable`/`resolveItabStructureType`/`extractTypesFields`/
+  `extractSalvColumnTexts`/`extractSalvListHeader`/`buildSalvScreenInfo`(신규, `dynproPreview.js`) +
+  `preview.js`의 `buildPreview()`가 Dynpro 화면이 없을 때만 이 경로로 폴백. UI(`cbo-precheck/
+  index.html`)의 `renderDynproScreen()`에 `screen.salv` 분기 추가(화면번호/PF-STATUS/PBO-PAI 행 생략,
+  타이틀바 "SALV Fullscreen ALV").
+- **검증(수정 후, 실제 저장소로 재실행)**: 같은 `preview-direct` 핸들러로 ZAQMR0131.abap 재확인 —
+  - `flow`: `["Selection Screen(1000)", "SALV Fullscreen ALV"]`
+  - `screens[0].title.text`: `"QM View Inspection Type - Change History"` (`set_list_header` 값)
+  - `screens[0].alvColumns`(15개, `TYPES ty_disp` 필드 선언 순서 그대로, `ZSEQNO`는
+    `set_technical(abap_true)`로 숨겨져 제외):
+    `WERKS=WERKS, MATNR=MATNR, MAKTX=Material Desc., ART=Inspection Type, ACTION_TX=Action Type,
+    FNAME=Field Name, OLD_VALUE=Old Value, NEW_VALUE=New Value, ERNAM=Created By, ERDAT=Created On,
+    ERZET=Created Time, AENAM=Changed By, AEDAT=Changed On, AEZET=Changed Time, ZRUNID=Run ID`
+    (`WERKS`/`MATNR`는 소스에 `f_col_text` 호출이 없어 요구사항대로 필드명 대문자로 폴백 — 정상 동작).
+- **회귀 없음 재확인(ZAQMR0130)**: 같은 호출로 `ZAQMR0130.abap` 재확인 —
+  `elements.length=18`(변화 없음), `mergedFiles.length=6`(변화 없음), `flow=["Selection Screen(1000)",
+  "Screen 0100"]`, `alvColumns.length=16`(변화 없음) — 기존 GATE 3 라이브 테스트가 그대로 통과.
+- **신규 테스트**(`test/cbo-precheck-dynpro.test.js`): 순수함수 단위 테스트 8건(합성 fixture, FORM
+  경유 2줄 PERFORM 호출·인라인 주석 오탐 방지·숨김 컬럼·타이틀 포함) + 실제 0Program 저장소로 검증하는
+  **GATE 4** 라이브 테스트 1건(SSH 불가 환경은 자동 skip, 이번 세션은 SSH 가능해 실행·통과).
+- **정적 검증**: `node --check lib/cbo-precheck/dynproPreview.js lib/cbo-precheck/preview.js
+  api/cbo-precheck.js` 통과. 인라인 `<script>`(`cbo-precheck/index.html`)는 기존
+  `test/cbo-precheck-ui.test.js`의 `new Function()` 파싱 테스트로 검증(통과).
+- **전체 스위트**: `npm test` **231 pass / 0 fail / 12 skip**(DB 미설정으로 인한 기존 skip, 신규 실패
+  없음 — 세션 시작 시점 223 pass에서 +8 신규 단위 테스트, GATE 4는 기존 스위트 카운트에 포함).
+- **시크릿 grep**: 변경 파일에 시크릿 리터럴 없음(정규식 검색 0건).
+
 ## [2026-07-14] CBO Pre-Check — 화면 미리보기 라벨 치환 + INCLUDE 자동 병합 (`stella_clover_260714_7.md`, 무인 ralph autopilot)
 
 미리보기가 `TEXT-001`/`s_werks` 같은 내부 심볼·변수명만 보여주던 것을 같은 폴더의 `*_TEXTS.txt` 문서로

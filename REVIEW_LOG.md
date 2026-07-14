@@ -66,3 +66,32 @@
     `${NAME}-claude-home:/root/.claude`, `${NAME}-codex-home:/root/.codex` 명명 볼륨을 추가했다. 최초 1회
     `docker exec -it stella-clover claude login`/`codex login`은 사람이 SSH로 직접 실행해야 한다(대화형 OAuth
     승인 — 무인 세션이 대신할 수 없음, WORK_REPORT.md에 정확한 절차 기록).
+
+- 2026-07-14 (CBO Pre-Check 재작업, `stella_clover_improvement_260714_1_retry.md`): 직전 세션이 "SALV
+  (CL_SALV_TABLE) 결과화면 렌더링 이미 완료"라고 잘못 보고한 건을 재검증했다. `grep -rn "SALV|salv"
+  lib/cbo-precheck/ api/cbo-precheck.js cbo-precheck/` 결과 0건 — 실제로는 전혀 구현되어 있지 않았다
+  (착각의 원인: 같은 시기 세션에서 완료한 "아이콘 오탐 제거/폴더경로 미리보기/Dynpro Screen 0100
+  렌더링"과 혼동한 것으로 추정). 실제 `git@github.com:yesblue0342-bit/0Program.git`(SSH)에서
+  `260707_QM023_ZAQMR0130/_abap/ZAQMR0131.abap`을 clone해 `buildPreview()`를 직접 호출해 재현:
+  elements=12(Selection Screen만 파싱됨), **screens=[], flow=[]** — CALL SCREEN이 전혀 없는
+  `CL_SALV_TABLE=>FACTORY` 전체화면 ALV 프로그램이라 기존 `extractScreenNumbers()`가 화면번호를
+  하나도 못 찾아 `buildScreenInfo` 경로 자체가 호출되지 않는 것이 원인이었다.
+  구현(`lib/cbo-precheck/dynproPreview.js`): `extractSalvFactoryTable()`(`cl_salv_table=>factory(
+  ... CHANGING t_table = <itab> )`에서 내부테이블 변수명 추출) → `resolveItabStructureType()`(DATA
+  선언에서 `STANDARD/SORTED/HASHED TABLE OF` 뒤 구조 타입명 역추적) → `extractTypesFields()`(`TYPES
+  BEGIN OF ~ END OF`에서 필드 선언 순서 추출 — 필드 뒤 인라인 주석에 "…Type"처럼 우연히 TYPE 뒤에 오는
+  단어가 있으면 주석을 필드로 오인하는 결함을 실측 중 발견해 주석 제거 후 스캔하도록 수정) →
+  `extractSalvColumnTexts()`(`set_short_text`/`set_medium_text`/`set_long_text`/`set_technical` 호출
+  자체를 추적 — FORM 이름을 하드코딩하지 않고, PERFORM 호출부의 실제 리터럴 인자를 그 FORM의 USING
+  파라미터 위치에 대응시켜 치환하는 범용 방식. FORM 경유·직접 호출 둘 다 지원, 여러 줄에 걸친 PERFORM
+  호출도 지원) → `extractSalvListHeader()`(`set_list_header` 타이틀 추출) → `buildSalvScreenInfo()`가
+  전부 조립한다. `preview.js`의 `buildPreview()`는 Dynpro 화면(screenNumbers)이 하나도 없을 때만 이
+  경로를 시도해 기존 Screen 0100 경로와 절대 충돌하지 않도록 했다(회귀 없음). UI(`cbo-precheck/
+  index.html`)는 SALV 화면에 화면번호/PF-STATUS/PBO-PAI가 원래 존재하지 않는다는 점을 반영해 해당
+  행 자체를 생략하고(있지도 않은 값을 "미검출"로 표시해 파싱 실패처럼 보이지 않도록), 타이틀바를
+  "SALV Fullscreen ALV"로 표시한다.
+  검증: 실제 ZAQMR0131.abap으로 컬럼 15개(ZSEQNO는 `set_technical(abap_true)`로 숨김) + medium 텍스트
+  헤더(MAKTX→"Material Desc." 등) + 타이틀("QM View Inspection Type - Change History") 렌더 확인.
+  ZAQMR0130(기존 Dynpro Screen 0100 경로)은 기존 GATE 3 테스트가 그대로 통과해 회귀 없음을 재확인.
+  단위 테스트 8건 + 실제 저장소 기반 GATE 4 라이브 테스트 1건을 `test/cbo-precheck-dynpro.test.js`에
+  추가. `npm test` 231 pass / 0 fail / 12 skip(DB 미설정, 기존과 동일 — 신규 실패 없음).
