@@ -1,5 +1,37 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-14] CBO Pre-Check — 스캔 대상 재귀 탐색으로 수정 (`stella_clover_260714_3.md`, 무인 ralph autopilot)
+
+`/cbo-precheck` 스캔이 `260707_QM023_ZAQMR0130`처럼 실소스가 `_abap/` 하위 폴더에 있는 저장소에서
+"파일 0개, 이슈 0건"을 반환하던 문제 수정. 근본 원인·판단 근거는 `WORK_REPORT.md`의 동일 제목 섹션 참고.
+
+- **정적 검증**: `node --check lib/cbo-precheck/scan.js lib/cbo-precheck/repoFetch.js
+  test/cbo-precheck-repofetch.test.js` 전부 통과.
+- **실측 재현(수정 전)**: 실제 `git@github.com:yesblue0342-bit/0Program.git`(SSH)를 clone 해
+  `collectAbapFiles()`/`scanFiles()`를 직접 호출 — 파일 8개가 수집되지만 기존 `isScannable()`(abapGit 점
+  표기 네이밍만 인식)이 전부 걸러내 `fileCount=0, issues=0`로 사용자가 보고한 증상을 그대로 재현했다.
+  `collectAbapFiles()`의 재귀 walk 자체는 하위 폴더 깊이/이름과 무관하게 이미 정상 동작했음을 확인 —
+  실제 원인은 재귀 탐색이 아니라 `isScannable()`의 확장자 판정이었다.
+- **단위 테스트**(신규 `test/cbo-precheck-repofetch.test.js`, 3건):
+  1. 임시 폴더에 폴더 바로 밑/1단계(`_abap/`)/2단계(임의 폴더명) 깊이 `.abap` 파일 + DDIC XML +
+     `node_modules`/`.git` + `.txt`를 함께 구성해 재귀 탐색·제외 규칙·확장된 `isScannable`을 한 번에 검증.
+  2. `path`가 폴더가 아니라 단일 파일인 엣지케이스가 깨지지 않음을 확인.
+  3. **GATE 1 (d) 실제 저장소 통합 테스트** — 이 세션 환경은 SSH(배포키) 접근이 가능해 mock 없이 실제
+     clone으로 `260707_QM023_ZAQMR0130/_abap/` 하위 `.abap` 파일 8개(≥6 조건, 미션 문서 예시는 6개였지만
+     실제 저장소는 `_TOP.abap`/`ZAQMR0131.abap`이 더 있어 8개)가 전부 `isScannable=true`로 포함됨을 확인.
+     SSH 접근이 없는 환경에서는 `node:test`의 `skip` 옵션으로 자동 스킵되도록 작성했다(이 프로젝트는
+     GitHub Actions에서 `npm test`를 실행하지 않고 SSH deploy만 수행하므로 CI 영향 없음, `.github/workflows/deploy-oci.yml`
+     확인 완료).
+  4. 기존 `test/cbo-precheck-scan.test.js`(abapGit 점 표기 fixture 기반, `zaqmr0130_bad.prog.abap` 등)는
+     무변경으로 그대로 통과 — `isScannable` 확장이 기존 abapGit 네이밍 인식·GATE 1 §3 fixture 회귀를
+     깨지 않음을 확인.
+- **전체 스위트**: `npm test` **149 pass / 0 fail / 12 skip**(직전 세션 종료 시점 146 pass에서 +3, skip
+  12건은 기존 DATABASE_URL 미설정 스킵과 동일 — 회귀 없음).
+- **시크릿 grep**: `sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}` 0건.
+- **범위 확인**: `/cbo-review` 등 다른 모듈 파일은 이번 세션에서 전혀 수정하지 않았다(diff 대상은
+  `lib/cbo-precheck/scan.js`, `lib/cbo-precheck/repoFetch.js`, `README_CBO_PRECHECK.md`,
+  `test/cbo-precheck-repofetch.test.js`, `WORK_REPORT.md`, `TEST_RESULTS.md` 뿐).
+
 ## [2026-07-14] CBO Pre-Check — AI 연결 설정을 CBO Review와 통합 (`stella_clover_260714_2.md`, 무인 autopilot)
 
 CBO Pre-Check의 "Claude 수정 PR" 인증을 CBO Review의 "AI 연결 설정"과 완전히 동일한 공용 모듈로 통합.

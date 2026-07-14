@@ -664,3 +664,69 @@ RALPH_DONE
 
 RALPH_DONE
 
+## 2026-07-14 CBO Pre-Check — 스캔 대상 재귀 탐색으로 수정 (`stella_clover_260714_3.md`, 무인 ralph autopilot)
+
+**결론 요약**: (1) 원인 — `collectAbapFiles()`(`lib/cbo-precheck/repoFetch.js`)의 폴더 재귀 탐색 자체는
+이미 정상 동작했다(하위 폴더 깊이 무관하게 파일을 수집). 실제 원인은 `isScannable()`(`lib/cbo-precheck/scan.js`)이
+abapGit 점 표기 네이밍(`.prog.abap`/`.clas.abap`/`.intf.abap`/`.fugr.*.abap`)만 "스캔 대상"으로 인정하고,
+`ZAQMR0130.abap`처럼 단순 확장자만 쓰는 파일을 전부 걸러내 `fileCount`/`issues`가 0으로 나왔던 것.
+(2) 수정 방식 — `isScannable()`을 `isAbapSource()`(`/\.abap$/i`)로 위임해 확장자 판정만으로 넓혔고,
+`collectAbapFiles()`에 `path`가 폴더가 아니라 단일 파일인 엣지케이스 처리를 추가했다. (3) 남은 리스크 —
+매우 깊은 폴더 구조·대용량 저장소에서는 `MAX_FILES=500` 상한과 재귀 탐색 자체의 순차 `fs.readdir` I/O로
+스캔 시간이 늘어날 수 있다(기존 상한 그대로 유지, 별도 성능 최적화는 이번 범위 밖).
+
+### Phase 0 — 정찰
+
+- 파일 수집 경로 추적: `api/cbo-precheck.js` `handleScan()` → `withClonedRepo()` (SSH만 clone 허용,
+  `lib/cbo-precheck/repoFetch.js`) → `collectAbapFiles(root)` → `scanFiles({ files, config })`
+  (`lib/cbo-precheck/scan.js`).
+- **`collectAbapFiles()`는 이미 재귀 탐색이었다**: 내부 `walk(dir)`이 `entry.isDirectory()`면 재귀 호출한다
+  (하드코딩된 폴더명 가정 없음, `node_modules`/`.`로 시작하는 폴더만 제외). "한 단계만 readdir" 같은 버그는
+  없었다 — 미션 문서의 가설과 달랐다(코드로 직접 확인, 아래 재현 스크립트로 실측).
+- **실측 재현**: 실제 `git@github.com:yesblue0342-bit/0Program.git`(SSH, 이 세션 환경에서 접근 가능 확인)을
+  clone 해 `260707_QM023_ZAQMR0130`에 임시 스크립트를 직접 실행:
+  `collectAbapFiles()` → 8개 파일 정상 수집(`_abap/ZAQMR0130*.abap` 7개 + `_abap/ZAQMR0131.abap` 1개).
+  그런데 기존 `isScannable()`은 이 8개 전부를 걸러내 `scanFiles()`의 `fileCount=0, issues=0` — 사용자가
+  보고한 "파일 0개, 이슈 0건" 증상을 정확히 재현. **원인은 재귀 탐색이 아니라 확장자 판정 필터였다.**
+- **다른 프로그램 폴더 관례 확인**(실제 clone, 2~3개 샘플): `260625_QM005_ZAQMR0080V03`,
+  `260701_QM004_Inspection Group Upload`, `260705_QM008_Q Info Record Upload` 모두 동일하게
+  `_abap/` 하위 폴더에 `ZAQMR0XXX*.abap`(단순 확장자) 소스를 두는 관례를 따른다 — 일반적인 패턴으로 판단.
+  단, 파일 개수·이름은 프로그램마다 다르다(예: `260707_QM023_ZAQMR0130`은 미션 문서 예시(6개)보다 많은
+  8개 — `_TOP.abap` 1개, 연관 리포트 `ZAQMR0131.abap` 1개가 더 있음. 테스트는 "정확히 6개"가 아니라
+  "6개 이상 전부 포함"으로 작성).
+- **확장자 필터 점검**: `.txt`(`ZAQMR0130_DDIC.txt`)는 abaplint 스캔 대상이 아니므로 그대로 수집 제외 유지
+  (최소 침습적 수정 우선 — UI에 "제외됨" 표시를 추가하는 확장 변경은 이번 범위 밖으로 판단, README에만 명시).
+- 기존 빌드 기준선: 변경 전 `npm test` **149 pass 이전 상태(146 pass) / 0 fail / 12 skip**(직전 세션 종료
+  시점과 동일 — 회귀 없음 확인).
+
+### Phase 1 — 수정
+
+- `lib/cbo-precheck/scan.js`: `isScannable(name)`을 `isAbapSource(name)`(`/\.abap$/i`)에 위임하도록 변경.
+  DDIC XML(`isDdicXml`)은 별도 정규식이라 영향 없음 — 회귀 없음.
+- `lib/cbo-precheck/repoFetch.js`: `collectAbapFiles(root)`에 `root`가 파일인 경우(단일 파일 `path`
+  엣지케이스) 그 파일 하나만 대상으로 반환하는 분기 추가(`fs.stat` 선확인). 폴더 재귀 walk 로직 자체는
+  이미 올바르게 동작했으므로 구조 변경 없이 확장자 판정만 별도 헬퍼(`isTargetFile`)로 추출해 재사용.
+- `README_CBO_PRECHECK.md`: 스캔 대상이 하위 폴더를 재귀적으로 포함하며 단순 확장자(`.abap`)도 인식한다는
+  설명 추가.
+
+### Phase 2 — 검증/마감
+
+- 신규 테스트 `test/cbo-precheck-repofetch.test.js` 3건:
+  1. 임시 폴더에 폴더 바로 밑/1단계(`_abap/`)/2단계(임의 이름) 깊이 파일 + DDIC XML + `node_modules`/`.git`
+     + `.txt`를 함께 만들어 재귀 탐색·제외 규칙·`isScannable` 확장을 한 번에 검증.
+  2. `path`가 단일 파일인 엣지케이스.
+  3. **실제 `0Program` 저장소 통합 테스트**(GATE 1 (d)) — SSH 접근 가능하면 실제 clone 으로
+     `260707_QM023_ZAQMR0130/_abap/` 하위 `.abap` 파일이 전부(8개, ≥6 조건으로 검증) 스캔 대상에
+     포함됨을 확인. SSH(배포키) 접근이 없는 환경(GitHub Actions 등, 이 프로젝트는 CI에서 `npm test`를
+     실행하지 않으므로 실제 영향 없음)에서는 `node:test`의 `skip` 옵션으로 자동 스킵 — 네트워크 제약 시
+     대체 경로.
+  4. 기존 `test/cbo-precheck-scan.test.js`(abapGit 점 표기 fixture 기반)는 무변경으로 그대로 통과 —
+     `isScannable` 확장이 기존 abapGit 네이밍 인식을 깨지 않음을 확인.
+- `node --check lib/cbo-precheck/scan.js lib/cbo-precheck/repoFetch.js test/cbo-precheck-repofetch.test.js`
+  통과.
+- 전체 `npm test`: **149 pass / 0 fail / 12 skip**(변경 전 146에서 +3, skip 12건은 기존 DATABASE_URL
+  미설정 스킵과 동일 — 회귀 없음). 상세는 `TEST_RESULTS.md` 참고.
+- 시크릿 grep(`sk-`, `ghp_`, `github_pat_`) 0건.
+
+RALPH_DONE
+
