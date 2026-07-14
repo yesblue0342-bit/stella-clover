@@ -73,33 +73,27 @@ test("resolveMeetingTitle: 의미있는 제목 보존, generic/빈값은 날짜+
   assert.equal(resolveMeetingTitle('보고/회의:점검', new Date()), "보고회의점검"); // 금지문자 제거
 });
 
-test("titleFromFileName: 확장자·선행 날짜 스탬프 제거, 나머지는 그대로 보존", () => {
+test("titleFromFileName: 회의록 제목 = 업로드 파일명(확장자 제거·언더스코어→공백, ★날짜 접두어 유지)", () => {
+  // 사용자 요구: 파일명 그대로(날짜 포함). "컨설턴트 미팅"처럼 날짜가 사라지면 파일과 다르다고 느낀다.
+  assert.equal(titleFromFileName("260714_컨설턴트 미팅.m4a"), "260714 컨설턴트 미팅");
+  assert.equal(titleFromFileName("260710_SAP Role 설명회.m4a"), "260710 SAP Role 설명회");
   assert.equal(titleFromFileName("GMP 스코프 및 마이그레이션.m4a"), "GMP 스코프 및 마이그레이션");
-  assert.equal(titleFromFileName("260612_주간회의.m4a"), "주간회의");
-  assert.equal(titleFromFileName("20260612_회의.wav"), "회의");
-  assert.equal(titleFromFileName("2026-06-12 회의.m4a"), "회의");
-  assert.equal(titleFromFileName("recording.m4a"), "recording"); // 날짜 없으면 그대로(확장자만 제거)
+  assert.equal(titleFromFileName("음성 260711_203109.m4a"), "음성 260711 203109");
+  // 의미없는 기본명만 "" → 호출부가 AI/날짜 제목으로 폴백
+  assert.equal(titleFromFileName("recording.webm"), "");
+  assert.equal(titleFromFileName("2026-07-15 12:09 회의록.webm"), ""); // 앱 기본 키 제목(파일명 아님)
+  assert.equal(titleFromFileName("ocr_image"), "");
   assert.equal(titleFromFileName(""), "");
   assert.equal(titleFromFileName(undefined), "");
-  assert.equal(titleFromFileName("261399_x.m4a"), "261399_x"); // 잘못된 월/일은 날짜로 보지 않고 원문 유지
 });
 
-test("제목 우선순위: 파일명 기반 제목이 있으면 AI 제목 대신 사용, 없으면 AI 제목 폴백", () => {
-  // generateMinutes 내부 로직과 동일한 조합: titleFromFileName || aiTitle → resolveMeetingTitle
+test("제목 우선순위: 파일명 제목이 있으면 AI 제목 대신 사용(날짜 유지), 없으면 AI 폴백", () => {
+  // generateMinutes 내부 로직과 동일: resolveMeetingTitle(titleFromFileName || aiTitle)
   const aiTitle = "SAP 프로젝트 점검";
   const now = new Date("2026-06-22T10:38:00Z");
-  assert.equal(
-    resolveMeetingTitle(titleFromFileName("GMP 스코프 및 마이그레이션.m4a") || aiTitle, now),
-    "GMP 스코프 및 마이그레이션"
-  ); // 파일명 우선
-  assert.equal(
-    resolveMeetingTitle(titleFromFileName("") || aiTitle, now),
-    aiTitle
-  ); // 파일명 없으면 AI 제목 폴백
-  assert.equal(
-    resolveMeetingTitle(titleFromFileName("260612_회의록.m4a") || aiTitle, now),
-    "2026-06-22 19:38 회의록"
-  ); // 파일명이 날짜만 남기고 나면(generic "회의록") 기본 날짜+시각 제목으로 폴백
+  assert.equal(resolveMeetingTitle(titleFromFileName("260714_컨설턴트 미팅.m4a") || aiTitle, now), "260714 컨설턴트 미팅"); // 파일명(날짜 포함) 우선
+  assert.equal(resolveMeetingTitle(titleFromFileName("") || aiTitle, now), aiTitle);                        // 파일명 없으면 AI
+  assert.equal(resolveMeetingTitle(titleFromFileName("recording.webm") || aiTitle, now), aiTitle);          // 이름없는 녹음 → AI 폴백
 });
 
 test("meetingDateFromName: 파일명에서 회의 날짜 추출(260612/20260612/2026-06-12)", () => {

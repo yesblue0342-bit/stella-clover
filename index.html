@@ -444,6 +444,7 @@ const INSTR_KEY='cl_ai_instructions';
 const FILEMETA_KEY='cl_file_meta';   // {id:{folder,tags:[]}}
 const FOLDERS_KEY='cl_folders';      // [name,...]
 const ACTIVE_JOBS_KEY='clover_active_jobs'; // 진행 중 백그라운드 전사 잡 [{jobId,title,filename,fileDate,lang,sessionId,startedAt}]
+const PENDING_UPLOAD_KEY='clover_pending_upload'; // 잡 생성 전 업로드 복구(앱 닫힘 중단 시 남은 조각 이어올림 후 잡 생성). 잡 생성되면 즉시 제거(원본 미보존).
 let _activeUpload=false;             // 청크 업로드 진행 중(beforeunload 경고 + 중복 시작 방지)
 let _selectedModel='gpt-4o-transcribe'; // 전사 모델 기본=고품질(gpt-4o-transcribe). whisper-1=세그먼트 타임스탬프.
 const _jobTimers={};                 // jobId -> setTimeout id (폴링 취소·중복방지)
@@ -627,22 +628,31 @@ async function uploadPart(blob, sessionId, index, retries){
 // 회의록 생성→이력 저장→원본 Drive 보관)은 서버 백그라운드가 수행 — 탭을 닫아도 완결된다.
 const UPLOAD_CONCURRENCY = 4;                 // 동시 업로드 수(속도↑). 서버는 로컬 디스크 기록이라 부담 적음.
 const PART_BYTES = 3.5*1024*1024;             // 조각 3.5MB — 절대 규칙(5MB 금지) 내
-async function uploadAndCreateJob(audio, ctx){
+// 잡 생성 전 업로드 복구 레코드(앱 닫힘 중단 대비). 잡이 생기면 즉시 제거 → 원본은 업로드 창에서만 임시 보존.
+function getPendingUpload(){ try{return JSON.parse(localStorage.getItem(PENDING_UPLOAD_KEY)||'null');}catch(e){return null;} }
+function setPendingUpload(p){ try{localStorage.setItem(PENDING_UPLOAD_KEY,JSON.stringify(p));}catch(e){} }
+function clearPendingUpload(){ try{localStorage.removeItem(PENDING_UPLOAD_KEY);}catch(e){} }
+
+// 남은 조각만 병렬 업로드 → 잡 생성. doneArr(이미 올린 index)로 재개, 조각마다 진행상황 저장 → 앱 닫아도 이어짐.
+async function uploadAndCreateJob(audio, ctx, doneArr){
   const totalParts = Math.max(1, Math.ceil(audio.size/PART_BYTES));
   const mb=(audio.size/1024/1024).toFixed(1);
-  let doneCount = 0, next = 0;
+  const done = {}; (doneArr||[]).forEach(function(i){ done[i]=true; });
+  let doneCount = Object.keys(done).length, next = 0;
   _activeUpload = true;
-  upProgress(6,'📤 서버 업로드','원본 '+mb+'MB · '+totalParts+'개 조각 (동시 '+Math.min(UPLOAD_CONCURRENCY,totalParts)+'개 전송)');
+  upProgress(6,'📤 서버 업로드','원본 '+mb+'MB · '+totalParts+'개 조각'+(doneCount?(' · '+doneCount+'개 이어받기'):'')+' (동시 '+Math.min(UPLOAD_CONCURRENCY,totalParts)+'개 전송)');
   try{
     // 인덱스 큐를 워커 여러 개가 나눠 병렬 처리 → 업로드 속도 향상. 한 조각이라도 영구 실패면 전체 중단.
     async function worker(){
       while(true){
         const i = next++;
         if(i >= totalParts) return;
+        if(done[i]) continue; // 재개: 이미 올린 조각 스킵
         const part = audio.slice(i*PART_BYTES, Math.min(audio.size,(i+1)*PART_BYTES));
-        await uploadPart(part, ctx.sessionId, i, 5);
-        doneCount++;
-        upProgress(6+Math.round((doneCount/totalParts)*88),'📤 서버 업로드','조각 '+doneCount+'/'+totalParts+' 업로드 완료');
+        await uploadPart(part, ctx.sessionId, i, 5); // (sessionId,index) 멱등 재업로드 안전
+        done[i]=true; doneCount++;
+        var p=getPendingUpload(); if(p){ p.done=Object.keys(done).map(Number); setPendingUpload(p); } // 진행상황 영속
+        upProgress(6+Math.round((doneCount/totalParts)*88),'📤 서버 업로드','조각 '+doneCount+'/'+totalParts+' 업로드 완료 · 앱 닫아도 이어집니다');
       }
     }
     const pool=[]; for(let w=0; w<Math.min(UPLOAD_CONCURRENCY, totalParts); w++) pool.push(worker());
@@ -658,6 +668,9 @@ async function uploadAndCreateJob(audio, ctx){
     const dj=await safeJson(rj);
     if(!dj.ok||!dj.job_id) throw new Error(dj.message||'변환 작업 생성 실패');
     const jobId=dj.job_id;
+    // ★ 잡 생성 완료 → 복구 레코드/임시 원본 즉시 제거(원본 미보존, OCI/기기 용량 무관). 이후는 서버가 완결.
+    var pend=getPendingUpload(); clearPendingUpload();
+    if(pend&&pend.recId){ idbDelete(pend.recId); }
     const meta={jobId:jobId, title:ctx.title, filename:ctx.filename||'recording.webm', fileDate:ctx.fileDate||'', lang:ctx.lang, sessionId:ctx.sessionId, startedAt:ctx.startedAt||Date.now()};
     addActiveJob(meta);
     upProgress(100,'✅ 서버 업로드 완료','이제 탭을 닫아도 서버에서 회의록 저장까지 완료합니다');
@@ -671,7 +684,7 @@ async function generate(){
   const audio=currentAudioFile||recordedBlob;
   if(!audio){showErr('음성 파일을 선택하거나 녹음해주세요.');return;}
   if(Object.keys(_jobTimers).length){ showErr('진행 중인 변환이 있습니다. 완료 후 다시 시도해주세요.'); return; } // 동시 실행 → 공유 렌더 상태 충돌 방지
-  if(_activeUpload){ showErr('업로드가 진행 중입니다. 완료 후 다시 시도해주세요.'); return; }
+  if(_activeUpload||getPendingUpload()){ showErr('업로드가 진행 중입니다. 완료 후 다시 시도해주세요.'); return; }
   hideErr(); $('genBtn').disabled=true;
   resetSteps(); setStep(1,'done'); setStep(2,'active');
 
@@ -681,15 +694,35 @@ async function generate(){
     const title=(currentAudioFile&&currentAudioFile.name)||defaultMeetingTitle();
     const fileDate=(currentAudioFile&&currentAudioFile.lastModified)?new Date(currentAudioFile.lastModified).toISOString().slice(0,10):'';
     const sessionId=Date.now().toString(36)+Math.floor(Math.random()*1e6).toString(36);
-    // ★ 원본 오디오는 저장하지 않는다(기기·OCI 용량 관리). 청크만 서버로 전송해 텍스트로 변환 후 서버가 청크 삭제.
+    // 업로드 창 동안만 원본을 IndexedDB에 임시 보관 → 앱을 닫아도 남은 조각을 이어올려 잡 생성 가능.
+    // 잡이 생성되면 즉시 삭제하므로 원본은 영구 저장되지 않는다(용량 무관).
+    const recId=await idbSaveRecording(audio, filename);
     const ctx={sessionId:sessionId, title:title, filename:filename, fileDate:fileDate, lang:_selectedLang, model:_selectedModel, startedAt:Date.now()};
-    await uploadAndCreateJob(audio, ctx);
+    setPendingUpload({sessionId:sessionId, recId:recId||0, filename:filename, title:title, fileDate:fileDate, lang:_selectedLang, model:_selectedModel, startedAt:ctx.startedAt, done:[]});
+    await uploadAndCreateJob(audio, ctx, []);
   }catch(e){
     showErr('오류: '+fmtErr(e));
     setStep(2,'wait'); setStep(3,'wait');
-    upProgress(0,'실패','오류가 발생했습니다. 다시 시도해주세요.');
+    upProgress(0,'실패','오류가 발생했습니다. 새로고침하면 남은 조각을 자동으로 이어서 시도합니다.');
     $('genBtn').disabled=false;
   }
+}
+
+// 페이지 로드 시: 잡 생성 전에 끊긴 업로드가 있으면 임시 보관 원본으로 남은 조각을 이어올려 잡을 만든다.
+// (앱을 닫아도 변환이 이어지도록 — 간헐적 "창 닫으면 변환 안 됨" 대응). 원본 없거나 이미 잡 생성됐으면 조용히 정리.
+async function resumePendingUpload(){
+  const p=getPendingUpload();
+  if(!p||!p.sessionId) return;
+  if(_activeUpload||Object.keys(_jobTimers).length){ return; } // 이미 다른 업로드/변환 진행 중이면 보류
+  let audio=null;
+  try{ if(p.recId){ const rec=await idbGet(p.recId); if(rec&&rec.blob) audio=new File([rec.blob], p.filename||'recording.webm', {type:rec.type||'audio/webm'}); } }catch(e){}
+  if(!audio){ clearPendingUpload(); if(p.recId) idbDelete(p.recId); return; } // 임시 원본 없음 → 재개 불가, 정리
+  showToast('중단된 업로드를 이어서 진행합니다');
+  hideErr(); $('genBtn').disabled=true;
+  resetSteps(); setStep(1,'done'); setStep(2,'active');
+  const ctx={sessionId:p.sessionId, title:p.title, filename:p.filename, fileDate:p.fileDate, lang:p.lang||_selectedLang, model:p.model||_selectedModel, startedAt:p.startedAt};
+  try{ await uploadAndCreateJob(audio, ctx, p.done||[]); }
+  catch(e){ showErr('업로드 이어받기 실패: '+fmtErr(e)+' — 새로고침하면 다시 시도합니다.'); setStep(2,'wait'); $('genBtn').disabled=false; }
 }
 
 // 잡 상태 폴링(3초) → 진행률 표시 → done이면 transcript로 기존 요약/렌더, error면 표시.
@@ -1367,6 +1400,7 @@ setInterval(autosaveTick,5*60*1000);
 applyTheme(); applyProfile(); resetSteps();
 loadMeetings(); renderRecent(); restoreSession();
 resumeActiveJobs(); // 진행 중이던 백그라운드 전사 잡을 자동 재개(탭 닫힘 복구 — 잡 생성 후엔 서버가 끝까지 처리)
+resumePendingUpload(); // 잡 생성 전에 끊긴 업로드가 있으면 남은 조각을 이어올려 잡 생성(앱 닫힘 중단 복구)
 loadMyJobs();       // "진행 중인 변환" 목록 로드
 
 if('serviceWorker' in navigator){
