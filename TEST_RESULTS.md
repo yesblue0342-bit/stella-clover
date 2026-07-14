@@ -1084,3 +1084,26 @@ end-to-end 실행에서만 드러났다).
 네비게이션이 network-first이므로 — 이전 세션들과 동일한 판단 근거, README_CBO_PRECHECK.md 참고).
 
 RALPH_DONE
+
+## 2026-07-14 "8번 미션 실패 재작업" 세션 (`stella_clover_260714_9.md`, ralph autopilot)
+
+| 항목 | 결과 |
+|---|---|
+| Phase 0: `260707_QM023_ZAQMR0130` 실제 clone 재현 | 26건 정확히 재현(check_syntax 5/unknown_types 2/sql_escape_host_variables 16/obsolete_statement 1/unused_variables 2) — 미션 문서 관찰치와 100% 일치 |
+| GATE 1(a) icon_* check_syntax(4개 폴더 실측) | QM023 5→0, QM005 4→0, QM004 5→0, QM008 7→0 (전부 0) |
+| GATE 1(b) 나머지 진짜 이슈 회귀 없음 | sql_escape_host_variables 16(불변)/unknown_types 2(불변)/obsolete_statement 1(불변)/unused_variables 2→8(masking 해제로 증가 — 회귀 아님, WORK_REPORT.md 설명) |
+| GATE 1(c) fixture 회귀(zaqmr0130_bad, 신규 zaqmr_icon_symbol) | 둘 다 의도적 미선언 변수 그대로 검출 |
+| GATE 2(a) 폴더 경로만 입력 → 미리보기 | 실제 clone, `multi:true`+메인 2개(ZAQMR0130.abap/ZAQMR0131.abap), 18요소·INCLUDE 6개 병합(회귀 없음) |
+| GATE 2(b) 단일 파일 경로 회귀 | 기존 GATE 3(d) 테스트 그대로 통과 |
+| GATE 2(d) 메인 프로그램 없는 폴더 | 404 + "메인 프로그램... 찾지 못했습니다" |
+| GATE 3(a)-(g) Dynpro Screen 0100 | 실제 clone 통합 테스트(`test/cbo-precheck-dynpro.test.js`)로 전부 확인 — Screen 검출, PBO/PAI 매핑, PF-STATUS/TITLEBAR(변수 치환), 기능코드 3개, ALV 툴바 5버튼, ALV 컬럼 16개, 화면흐름, Selection Screen 회귀 없음 |
+| `node --check`(신규/수정 lib·api·test 전체) | 전부 OK |
+| 인라인 `<script>` `new Function` 파싱(cbo-precheck/index.html) | OK |
+| `npm test`(전체) | **222 pass / 0 fail / 12 skip**(직전 205 pass에서 신규 17건 순증 — 회귀 없음) |
+| 시크릿 grep(`sk-`/`ghp_`/`github_pat_`) | 0건 |
+| 원본 0Program 저장소 파일 수정 여부 | 미수정(읽기 전용 SSH clone만 사용) |
+
+`sw.js` 캐시 버전은 올리지 않았다(이전 세션과 동일 판단 근거 — cbo-precheck/index.html은 서비스워커
+프리캐시 목록에 없음).
+
+RALPH_DONE
