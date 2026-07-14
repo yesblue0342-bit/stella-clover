@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_TABL" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <DD02V>
+    <TABNAME>QALS</TABNAME>
+    <DDLANGUAGE>E</DDLANGUAGE>
+    <TABCLASS>TRANSP</TABCLASS>
+    <DDTEXT>Inspection lot record (fixture — QALS/MATNR/WERK only)</DDTEXT>
+    <CONTFLAG>A</CONTFLAG>
+   </DD02V>
+   <DD09L>
+    <TABNAME>QALS</TABNAME>
+    <AS4LOCAL>A</AS4LOCAL>
+    <TABKAT>0</TABKAT>
+    <TABART>APPL0</TABART>
+    <BUFALLOW>N</BUFALLOW>
+   </DD09L>
+   <DD03P_TABLE>
+    <DD03P>
+     <FIELDNAME>MANDT</FIELDNAME>
+     <POSITION>0001</POSITION>
+     <KEYFLAG>X</KEYFLAG>
+     <ROLLNAME>MANDT</ROLLNAME>
+     <DATATYPE>CLNT</DATATYPE>
+     <LENG>000003</LENG>
+     <MASK>  CLNT</MASK>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>PRUEFLOS</FIELDNAME>
+     <POSITION>0002</POSITION>
+     <KEYFLAG>X</KEYFLAG>
+     <ROLLNAME>QPRUEFLOS</ROLLNAME>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000012</LENG>
+     <MASK>  CHAR</MASK>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>MATNR</FIELDNAME>
+     <POSITION>0003</POSITION>
+     <ROLLNAME>MATNR</ROLLNAME>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000018</LENG>
+     <MASK>  CHAR</MASK>
+    </DD03P>
+    <DD03P>
+     <FIELDNAME>WERK</FIELDNAME>
+     <POSITION>0004</POSITION>
+     <ROLLNAME>QWERK</ROLLNAME>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000004</LENG>
+     <MASK>  CHAR</MASK>
+    </DD03P>
+   </DD03P_TABLE>
+  </asx:values>
+ </asx:abap>
+</abapGit>

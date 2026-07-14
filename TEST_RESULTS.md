@@ -832,3 +832,23 @@ Google API 왕복의 합(네트워크 상태에 따라 변동이 크지만, 이 
 | CBO Git 인증 선택 | `GITHUB_TOKEN` 존재 시 HTTPS PAT, 미설정 시 SSH |
 | Git Credential Manager 대화상자 | `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=Never`로 비대화형 고정 |
 | `npm test` | 113 total / 105 pass / 8 DB skip / 0 fail |
+
+## [2026-07-14] CBO Pre-Check Phase 0+1 — abaplint 스캔 엔진 (`PROMPT_CBO_PRECHECK_260714.md`, 무인 autopilot)
+
+| 검증 | 결과 |
+|---|---|
+| GATE 0 baseline `npm test` | 107 pass / 0 fail / 12 skip |
+| `@abaplint/core@2.119.66` 설치 + 라이브러리 호출(CLI spawn 아님) | OK |
+| 의도 오류 fixture(`fixtures/zaqmr0130_bad.prog.abap`) 스캔 | 5개 룰 동시 검출(obsolete_statement 1, sql_escape_host_variables 2, unknown_types 1, check_syntax 1) |
+| unused_variables 격리 검증(syntax 오류 없는 별도 샘플) | 1건 검출 — 6번째 기대 이슈 실증(abaplint 설계상 동시 검출 불가, WORK_REPORT.md 참고) |
+| 정상 fixture(`fixtures/zaqmr0130_good.prog.abap`) 스캔 | 이슈 0건 |
+| quickfixAvailable 플래그 | obsolete_statement/sql_escape_host_variables 둘 다 true(abaplint 기본 fix 존재) |
+| export xlsx/md/txt/json 4포맷 | 전부 생성 + xlsx는 ExcelJS 재로드로 헤더/행수/수식주입 방지(`'=1+1`) 검증 |
+| store(scanId 캐시) 저장/조회/보류·메모 갱신 | OK |
+| `api/cbo-precheck.js` 모듈 로드 + 잘못된 repoUrl 요청 | 항상 JSON(`{ok:false,message}`), 500/평문 없음 |
+| 전체 `npm test`(신규 `test/cbo-precheck-scan.test.js` 8건 포함) | **115 pass / 0 fail / 12 skip**(회귀 없음) |
+| 시크릿 grep(`sk-`/`ghp_`/`github_pat_`) | 0건 |
+
+실제 GitHub SSH clone/PR 생성 E2E는 이 세션에 `GITHUB_TOKEN`/SSH 키가 없어 수행하지 못함 — 스캔 엔진 자체는
+fixture 기반 유닛 테스트로 완전 검증했고, clone 관련 코드(`lib/cbo-precheck/repoFetch.js`)는 정적
+검증(`node --check`)까지만 수행. Phase 2에서 GitHub API는 mock 기반으로 검증한다(GATE 2 요구사항).

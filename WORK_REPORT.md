@@ -202,3 +202,91 @@ xlsx 첨부 2개 + SAP QM CBO FS 작성 같은 실사용 요청은 claude/codex 
 - CBO Review는 개인용 공유 비밀번호 1개(`lib/cbo-review/auth.js`)로 사용자 구분이 없어, 잡도 사용자별로
   스코프하지 않았다(모든 잡이 전역 하나의 큐를 공유). 다중 사용자 동시 사용 시나리오가 생기면 `cbo_jobs`에
   세션/사용자 식별 컬럼을 추가하는 확장이 필요하다.
+
+---
+
+# CBO Pre-Check — 작업 보고 (2026-07-14, 무인 autopilot, `PROMPT_CBO_PRECHECK_260714.md`)
+
+## Phase 0 — 정찰
+
+- 스택: 프레임워크 없는 순수 Node ESM(`"type":"module"`). `server.mjs`(Express)가 `/api/<단일세그먼트>.js`의
+  `export default handler(req,res)`만 동적 import 로 실행 — **하위 경로 라우팅 불가**(`sub.includes("/")` 는
+  404). 따라서 미션 문서의 `POST /api/cbo-precheck/scan` 형태 대신, 기존 `api/cbo-review.js` 관례를 그대로
+  따라 **`?action=` 쿼리 파라미터**로 서브라우팅한다(`/api/cbo-precheck?action=scan` 등). (근거: 절대 규칙 3
+  "스택 추종".)
+- 빌드/테스트 명령: 빌드 별도 없음(정적 파일 + Node 서버). 테스트 `npm test`
+  (`node --experimental-test-module-mocks --test test/*.test.js`). 배포 워크플로
+  `.github/workflows/deploy-oci.yml`는 빌드/테스트 게이트 없이 push 시 OCI SSH 재배포만 수행(테스트는 로컬/PR
+  단계에서 수동 실행).
+- 기존 "CBO Spec & Code Review"(`api/cbo-review.js`, `lib/cbo-review/*`, `cbo-review/index.html`)는 이름은
+  비슷하지만 **다른 기능**(LLM 기반 스펙 생성·코드 리뷰, `0Program` repo에 직접 main 커밋)이라 파일을 건드리지
+  않았다(절대 규칙 2). 다만 `lib/cbo-review/repository.js`의 git clone/SSH/커밋 패턴은 참고만 하고 독립적으로
+  재구현했다(공유 모듈 의존 없음 — 이 모듈이 없어도 CBO Pre-Check가 동작해야 하므로).
+- `@abaplint/core@2.119.66`을 `dependencies`에 추가(CLI 아님 — 절대 규칙에 따라 라이브러리 직접 호출).
+- Baseline(GATE 0): `npm test` → **107 pass / 0 fail / 12 skip**(DB 미설정으로 통합 테스트 skip — 기존에도
+  동일, 회귀 아님). 이 상태를 기준선으로 기록.
+- 환경변수 확인: 이 개발 세션에는 `GITHUB_TOKEN`/`ANTHROPIC_API_KEY`/SSH agent 키가 전혀 없음 → Phase 2의
+  PR 자동 생성 기능은 "설정 안 됨" 상태에서의 graceful-disable 경로로만 검증 가능(절대 규칙 5에 이미 요구된
+  동작이라 문제 없음). 실제 GitHub PR 1건 생성 후 close(GATE 2 c) 는 이 샌드박스에서 수행 불가 — 운영 OCI
+  서버에 자격 증명이 설정된 뒤 사용자가 직접 1회 확인하도록 README에 안내한다.
+
+## Phase 1 — 스캔 엔진 (backend)
+
+### abaplint 실측과 미션 문서의 차이(판단 근거 기록 — 절대 규칙 1)
+
+미션 §3 fixture는 "룰 이름"을 사람이 붙인 주석으로 표기했는데, 실제 `@abaplint/core@2.119.66`으로 스캔해
+보니 두 곳이 실제 룰과 달랐다. 문서 문구가 아니라 **엔진의 실제 동작**을 기준으로 구현했다(우선순위 §4:
+"GATE 통과" > "문서의 세부 사양"):
+
+1. `check_ddic` 룰은 DDIC 오브젝트(TABL/DOMA/DTEL...) **자신의 타입 정의**만 검사한다(소스 코드에서
+   `TYPE qals-존재하지않는필드`처럼 DDIC 필드를 잘못 참조하는 것은 검사하지 않음). 이 케이스(PARAMETERS
+   p_werks TYPE qals-**werks**, 정답은 werk)를 실제로 잡는 룰은 **`unknown_types`**였다
+   (`Variable "P_WERKS" contains unknown: Field "WERKS" not found in structure`). `check_ddic`은 그대로
+   활성화해 두되(DDIC 오브젝트 자체 검증용으로 유효), 필드 오참조 검출은 `unknown_types`에 맡긴다.
+2. `check_variables`라는 룰 키는 이 abaplint 버전에 **존재하지 않는다**
+   (`ArtifactsRules.getRules()`에 없음). 미선언 변수 참조(`MOVE ls_out-matnr TO gv_matnr` — gv_matnr 미선언)는
+   `SyntaxLogic` 예외를 이슈로 변환하는 **`check_syntax`** 룰이 잡는다(`"gv_matnr" not found, Target`).
+3. abaplint `unused_variables` 룰은 **설계상** 같은 오브젝트에 다른 syntax 오류가 있으면 보고를 건너뛴다
+   (`rules/unused_variables.js`: `if (syntax.issues.length > 0) return [];` 주석: "dont report unused
+   variables when there are syntax errors"). §3 fixture는 미선언 변수 오류(→check_syntax)와 미사용 변수
+   (gv_count)를 **같은 파일**에 동시에 심어뒀기 때문에, 실제 엔진에서는 **한 번의 스캔에 5개 이슈만 동시
+   검출**된다(`obsolete_statement`×1, `sql_escape_host_variables`×2, `unknown_types`×1, `check_syntax`×1).
+   6번째(unused_variables/gv_count)는 그 자체로 실재하는 정상 검출 규칙이므로, syntax 오류가 없는 격리된
+   샘플로 별도 검증해 "6개 룰이 모두 정확히 동작함"을 확인했다(`test/cbo-precheck-scan.test.js`의 "GATE 1
+   (격리 검증)" 케이스). fixture 파일 내용 자체는 미션 §3 원문 그대로 생성했다(수정 금지 지침 준수) — 검증
+   방식만 엔진 실측에 맞게 보정했다.
+
+### 구현
+
+- `lib/cbo-precheck/scan.js`: `buildConfig()`(syntax v755, errorNamespace `^(Z|Y)`, 위 보정된 룰셋),
+  `scanFiles({files})` — `@abaplint/core` `Registry`+`MemoryFile`로 인메모리 스캔, 결과를
+  `{file,line,col,severity,rule,message,quickfixAvailable}[]`로 정규화(심각도→파일→라인 정렬). DDIC
+  XML/의존성 파일은 타입 해석용으로만 추가되고 결과 목록에는 노출하지 않는다.
+- `lib/cbo-precheck/repoFetch.js`: `git@host:owner/repo(.git)` SSH 형식만 허용(정규식 검증, 절대 규칙 6),
+  브랜치/서브경로 안전성 검증(경로 탈출 차단), `--depth 1` clone → 임시 폴더(os.tmpdir) → `.abap`/DDIC
+  XML(`.tabl/.dtel/.doma/.ttyp/.shlp/.view.xml`) 수집(최대 500개 파일, 파일당 2MB 상한) → `finally`에서
+  임시 폴더 삭제.
+- `lib/cbo-precheck/exportFormats.js`: xlsx(exceljs, `lib/cbo-review/extract.js`와 동일한 수식주입 방지
+  패턴 `/^[=+\-@]/` → 텍스트 고정)/md/txt/json 4포맷.
+- `lib/cbo-precheck/store.js`: 스캔 결과 인메모리 `Map` 캐시(scanId, 최대 30건 보관) — `lib/cbo-review`의
+  `reviews = new Map()` 패턴을 그대로 따름. 새 DB 스키마를 만들지 않아 `_db.js`(공유 모듈)를 건드리지 않는다
+  (구현 단순성 우선 — 스캔은 재실행 가능한 멱등 작업이라 영속성 필수 아님).
+- `api/cbo-precheck.js`: `action=scan`(POST, git clone+스캔+캐시), `action=export`(GET, 4포맷 다운로드),
+  `action=issue-update`(POST, 보류/메모 — Phase 2 UI에서 사용), `action=scan-get`(GET, 폴링/재조회). 모든
+  분기가 try/catch로 감싸여 항상 JSON 반환(절대 규칙 3).
+- fixtures: `fixtures/zaqmr0130_bad.prog.abap`(§3 원문 그대로), `fixtures/zaqmr0130_good.prog.abap`(BLOCK
+  1·PARAMETERS 2·SELECT-OPTIONS 1·ALV fieldcatalog 3컬럼 + COMMENT/PUSHBUTTON, Phase 3 파서 테스트용),
+  `fixtures/ddic/qals.tabl.xml`(abapGit TABL XML, PRUEFLOS/MATNR/WERK 3필드).
+
+### GATE 1 검증 (`test/cbo-precheck-scan.test.js`)
+
+- 의도적 오류 fixture 스캔 → 5개 룰 동시 검출(obsolete_statement 1, sql_escape_host_variables 2,
+  unknown_types 1, check_syntax 1) + 격리 케이스로 unused_variables 1건 추가 검증 = 실질 6개 룰 위반 검증
+  완료.
+- quickfixAvailable: `obsolete_statement`(MOVE→=), `sql_escape_host_variables`(호스트변수 `@` 이스케이프)
+  둘 다 abaplint 기본 fix 제공 확인(Phase 2 "자동 수정 PR" 대상 판별에 사용).
+- 정상 fixture는 이슈 0건.
+- export 4포맷 전부 생성 확인(xlsx는 ExcelJS로 재로드해 헤더/행수/수식주입 방지 검증).
+- store: scanId 캐시 저장/조회/상태갱신(보류+메모) 확인.
+- 전체 `npm test`: **115 pass / 0 fail / 12 skip**(기존 107 + 신규 8, DB skip 12건은 기존과 동일 — 회귀
+  없음). 시크릿 grep(`sk-`/`ghp_`/`github_pat_`) 0건.

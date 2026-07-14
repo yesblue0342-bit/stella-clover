@@ -8,6 +8,7 @@
     "test": "node --experimental-test-module-mocks --test test/*.test.js"
   },
   "dependencies": {
+    "@abaplint/core": "^2.119.66",
     "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "formidable": "^3.5.1",
