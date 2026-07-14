@@ -848,6 +848,36 @@ RALPH_DONE
    두 가지 ALV 패턴)만 지원 — README "알려진 한계"에 이미 기록된 기존 제약이며 이번 세션에서 확장하지
    않았다(범위 밖).
 
+### 커밋 후 architect 검증 + 후속 수정
+
+FINAL GATE 통과 후 `ef47ad1` 커밋·push까지 마쳤으나, ralph 프로토콜의 필수 검증 단계(Step 7)로 별도
+architect(Opus) 서브에이전트에 독립 재검증을 위임했다 — `@abaplint/core` 내부 소스를 직접 읽고 실측
+주장을 재확인, 테스트가 실제로 회귀에 민감한지, `preview-direct`의 보안 경계가 `scan`과 동일한지,
+네이밍 충돌·상태 누수 가능성을 전부 점검하도록 지시했다.
+
+**결과: APPROVED**, 단 두 가지 지적:
+
+1. **근본 원인 서술 정정(코드 동작에는 영향 없음)**: `scan.js` 상단 주석/커밋 메시지가 "타입 미인식
+   → `UnknownObject`로 강등 → 사실상 검사 안 됨"이라고 설명했는데, 실제로는 그보다 **더 이전 단계**에서
+   걸린다 — `node_modules/@abaplint/core/build/src/registry.js:189`의
+   `isNotAbapgitFile = filename.split(".").length <= 2`가 `ZAQMR0130.abap`(점 1개, 2조각)을 **오브젝트로
+   등록조차 하지 않고 continue로 완전히 건너뛴다**(`UnknownObject`가 만들어지기도 전). 어댑터가 만드는
+   가상 이름(`zaqmr0130.prog.abap`, 3조각)은 이 필터도 함께 통과시키므로 수정 자체는 정확했지만, 주석의
+   메커니즘 설명이 부정확했다 — `scan.js` 상단 주석을 정정했다(동작 변경 없음, 문서 정확성만 수정).
+2. **네이밍 충돌 방어 추가(architect 권고, 선택 사항이었으나 비용이 낮아 반영)**: 같은 폴더에 plain
+   네이밍 파일과 그 가상 이름과 우연히 동일한 abapGit 네이밍 파일이 함께 있으면(현재 실제 대상 저장소
+   에서는 발생하지 않지만, 혼용 네이밍 저장소를 스캔할 경우 이론상 가능) `Registry`가 같은 오브젝트로
+   합쳐 한쪽 내용이 조용히 사라질 수 있다는 지적을 받아, `virtualizeFiles()`에 충돌 감지 시 명확한
+   오류를 던지는 가드를 추가했다(조용한 덮어쓰기 방지). 회귀 테스트 1건 추가.
+3. **디슬롭(중복 제거)**: `scan.js`/`preview.js`에 각각 따로 있던 "가상 파일명 계산"(디렉토리/베이스네임
+   분리 + 타입 접미사 부여) 로직이 복붙 중복이었던 것을 `scan.js`의 `virtualizeName()` 단일 함수로
+   통합해 `preview.js`가 재사용하도록 정리했다(동작 변경 없음). `REPORT/PROGRAM` 문 검사 정규식도
+   `hasReportStatement()` 하나로 통합해 `detectAbapGitType()`과 include-XML 판단이 같은 규칙을 공유한다.
+
+재검증: `node --check lib/cbo-precheck/scan.js lib/cbo-precheck/preview.js` 통과, 전체 `npm test`
+**167 pass / 0 fail / 12 skip**(정정·가드·디슬롭 후 회귀 없음, 신규 충돌 가드 테스트 1건 포함), 시크릿
+grep 0건. 이 수정들을 별도 커밋으로 push했다(FINAL GATE 재통과 확인 후).
+
 ## 2026-07-14 CBO Pre-Check — 스캔 대상 재귀 탐색으로 수정 (`stella_clover_260714_3.md`, 무인 ralph autopilot)
 
 **결론 요약**: (1) 원인 — `collectAbapFiles()`(`lib/cbo-precheck/repoFetch.js`)의 폴더 재귀 탐색 자체는
