@@ -10,7 +10,7 @@ const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cbo-providers-test-"));
 process.env.CBO_DATA_DIR = tmpDir;
 const {
   getProviderKey, getProviderMode, connectCli, disconnectCli, detectCli, providerStatus, callModel,
-} = await import("../lib/cbo-review/providers.js");
+} = await import("../lib/ai-connection/providers.js");
 
 test.after(async () => { await fs.rm(tmpDir, { recursive: true, force: true }); });
 

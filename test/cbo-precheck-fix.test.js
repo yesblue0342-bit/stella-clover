@@ -1,13 +1,24 @@
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import { scanFiles } from "../lib/cbo-precheck/scan.js";
 import { applyEdits, applyIssuesToFile } from "../lib/cbo-precheck/applyFix.js";
 import {
   hasGithubToken, parseGithubSshUrl, getBranchSha, createBranch, getFile, putFile,
   createPullRequest, closePullRequest, openFixPullRequest,
 } from "../lib/cbo-precheck/github.js";
-import { hasAnthropicKey, suggestFix } from "../lib/cbo-precheck/anthropic.js";
+
+// aiFix.js는 lib/ai-connection/providers.js(모듈 로드 시점에 CBO_DATA_DIR을 읽음)를 통해서만 연결 상태를
+// 읽으므로, 정적 import보다 먼저 격리된 임시 디렉터리로 지정한 뒤 동적 import한다(다른 테스트 파일의
+// 데이터 디렉터리와 절대 공유하지 않기 위함 — test/cbo-review-providers.test.js와 동일 패턴).
+const aiFixTmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cbo-precheck-aifix-test-"));
+process.env.CBO_DATA_DIR = aiFixTmpDir;
+const { hasAiConnection, pickAiConnection, suggestFix } = await import("../lib/cbo-precheck/aiFix.js");
+const { saveProviderKey } = await import("../lib/ai-connection/providers.js");
+test.after(async () => { await fsp.rm(aiFixTmpDir, { recursive: true, force: true }); });
 
 const bad = fs.readFileSync("fixtures/zaqmr0130_bad.prog.abap", "utf8");
 
@@ -109,18 +120,33 @@ test("github.js: GitHub API 오류 응답은 message를 그대로 전달한다",
   await assert.rejects(() => createBranch("o", "r", "dup", "sha", { token: "fake", fetchImpl }), /Reference already exists/);
 });
 
-test("anthropic.js: hasAnthropicKey + suggestFix(mock 성공/실패)", async () => {
-  const before = process.env.ANTHROPIC_API_KEY;
-  delete process.env.ANTHROPIC_API_KEY;
-  assert.equal(hasAnthropicKey(), false);
-  await assert.rejects(() => suggestFix({ fileName: "a.abap", source: "x", issues: [{ line: 1, col: 1, rule: "x", severity: "Error", message: "m" }], apiKey: "" }), /ANTHROPIC_API_KEY/);
+// aiFix.js: 연결 수단이 전혀 없으면 hasAiConnection=false + suggestFix가 명확한 오류를 던진다.
+test("aiFix.js: 연결된 AI 수단이 없으면 hasAiConnection=false, suggestFix는 명확한 오류", async () => {
+  assert.equal(await hasAiConnection(), false);
+  assert.equal(await pickAiConnection(), null);
+  await assert.rejects(
+    () => suggestFix({ fileName: "a.abap", source: "x", issues: [{ line: 1, col: 1, rule: "x", severity: "Error", message: "m" }] }),
+    /AI 연결이 필요합니다/,
+  );
+});
 
-  const fetchImplOk = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ content: [{ type: "text", text: "```abap\nREPORT zfixed.\n```" }] }) });
-  const fixed = await suggestFix({ fileName: "a.abap", source: "REPORT zbad.", issues: [{ line: 1, col: 1, rule: "obsolete_statement", severity: "Error", message: "m" }], apiKey: "fake", fetchImpl: fetchImplOk });
-  assert.equal(fixed, "REPORT zfixed.");
-
-  const fetchImplErr = async () => ({ ok: false, status: 401, text: async () => JSON.stringify({ error: { message: "invalid x-api-key" } }) });
-  await assert.rejects(() => suggestFix({ fileName: "a.abap", source: "x", issues: [{ line: 1, col: 1, rule: "x", severity: "Error", message: "m" }], apiKey: "bad", fetchImpl: fetchImplErr }), /invalid x-api-key/);
-
-  if (before === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = before;
+// aiFix.js: API 키 연결 시 공용 모듈(callModel)을 경유해 anthropic provider로 호출한다(fetch 모킹).
+test("aiFix.js: API 키 연결 시 공용 모듈 경유로 anthropic을 호출한다(mock)", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("api.anthropic.com/v1/models")) return { ok: true, json: async () => ({ data: [{ id: "claude-sonnet-5" }] }) };
+    if (u.includes("api.anthropic.com/v1/messages")) return { ok: true, text: async () => JSON.stringify({ content: [{ type: "text", text: "```abap\nREPORT zfixed.\n```" }] }) };
+    throw new Error(`mock 되지 않은 요청: ${u}`);
+  };
+  try {
+    await saveProviderKey("anthropic", "sk-ant-test-0000000000");
+    assert.equal(await hasAiConnection(), true);
+    const picked = await pickAiConnection();
+    assert.deepEqual(picked, { provider: "anthropic", model: "claude-sonnet-5", via: "api-key" });
+    const fixed = await suggestFix({ fileName: "a.abap", source: "REPORT zbad.", issues: [{ line: 1, col: 1, rule: "obsolete_statement", severity: "Error", message: "m" }] });
+    assert.equal(fixed, "REPORT zfixed.");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

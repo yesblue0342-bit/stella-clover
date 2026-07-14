@@ -9,7 +9,10 @@ import { saveScan, getScan, updateIssue } from "../lib/cbo-precheck/store.js";
 import { exportScan, CONTENT_TYPES } from "../lib/cbo-precheck/exportFormats.js";
 import { applyIssuesToFile } from "../lib/cbo-precheck/applyFix.js";
 import { hasGithubToken, parseGithubSshUrl, getFile, openFixPullRequest } from "../lib/cbo-precheck/github.js";
-import { hasAnthropicKey, suggestFix } from "../lib/cbo-precheck/anthropic.js";
+import { hasAiConnection, suggestFix } from "../lib/cbo-precheck/aiFix.js";
+import {
+  connectCli, deleteProviderKey, disconnectCli, providerStatus, saveProviderKey,
+} from "../lib/ai-connection/providers.js";
 import { hasAccessPassword, login, requireAuth } from "../lib/cbo-precheck/auth.js";
 import { parsePreview } from "../lib/cbo-precheck/preview.js";
 
@@ -124,7 +127,7 @@ async function handleFixAuto(req, res) {
 
 // [Claude 수정 PR] 1단계: AI 제안만 생성해 diff 미리보기로 반환(PR 생성 없음 — 사용자가 확정해야 진행).
 async function handleFixClaudePreview(req, res) {
-  if (!hasAnthropicKey()) return json(res, 503, { ok: false, message: "ANTHROPIC_API_KEY가 설정되지 않아 Claude 수정 제안을 사용할 수 없습니다." });
+  if (!(await hasAiConnection())) return json(res, 503, { ok: false, message: "AI 연결이 필요합니다 — [AI 연결 설정]에서 로그인하세요." });
   let scan, issues;
   try { ({ scan, issues } = scanAndFileIssues(req)); } catch (e) { return json(res, 400, { ok: false, message: String(e.message) }); }
 
@@ -200,7 +203,28 @@ export default async function handler(req, res) {
     if (req.method === "POST" && action === "fix-claude-preview") return await handleFixClaudePreview(req, res);
     if (req.method === "POST" && action === "fix-claude-confirm") return await handleFixClaudeConfirm(req, res);
     if (req.method === "GET" && action === "capabilities") {
-      return json(res, 200, { ok: true, githubToken: hasGithubToken(), anthropicKey: hasAnthropicKey() });
+      return json(res, 200, { ok: true, githubToken: hasGithubToken(), aiConnected: await hasAiConnection() });
+    }
+    // AI 연결 설정 — CBO Review(api/cbo-review.js)와 완전히 동일한 공용 모듈(lib/ai-connection/providers.js)을
+    // 그대로 호출한다(동일 저장소 공유 — 한쪽에서 연결하면 다른 쪽에도 즉시 반영).
+    if (req.method === "GET" && action === "settings") {
+      return json(res, 200, { ok: true, providers: await providerStatus() });
+    }
+    if (req.method === "POST" && action === "provider-save") {
+      await saveProviderKey(String(req.body?.provider || ""), req.body?.key);
+      return json(res, 200, { ok: true, providers: await providerStatus() });
+    }
+    if (req.method === "POST" && action === "provider-delete") {
+      await deleteProviderKey(String(req.body?.provider || ""));
+      return json(res, 200, { ok: true, providers: await providerStatus() });
+    }
+    if (req.method === "POST" && action === "cli-connect") {
+      await connectCli(String(req.body?.provider || ""));
+      return json(res, 200, { ok: true, providers: await providerStatus() });
+    }
+    if (req.method === "POST" && action === "cli-disconnect") {
+      await disconnectCli(String(req.body?.provider || ""));
+      return json(res, 200, { ok: true, providers: await providerStatus() });
     }
     if (req.method === "GET" && action === "scan-get") {
       const scan = getScan(String(req.query.scanId || ""));

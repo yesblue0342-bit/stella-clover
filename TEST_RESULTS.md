@@ -1,5 +1,35 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-14] CBO Pre-Check — AI 연결 설정을 CBO Review와 통합 (`stella_clover_260714_2.md`, 무인 autopilot)
+
+CBO Pre-Check의 "Claude 수정 PR" 인증을 CBO Review의 "AI 연결 설정"과 완전히 동일한 공용 모듈로 통합.
+상세 판단 근거는 `WORK_REPORT.md`의 동일 제목 섹션 참고.
+
+- **정적 검증**: `node --check` — 신규/수정된 모든 `api/*.js`, `lib/cbo-precheck/*.js`, `lib/cbo-review/*.js`,
+  `lib/ai-connection/*.js`(신규), `server.mjs`, `sw.js` 전부 통과. `index.html`/`cbo-review/index.html`/
+  `cbo-precheck/index.html` 인라인 `<script>` 전부 `new Function()` 파싱 통과.
+- **단위 테스트**: `npm test` **145 pass / 0 fail / 12 skip**(Phase 0 기준선 140 pass에서 +5, skip 12건은
+  기존 DATABASE_URL 미설정 스킵과 동일 — 회귀 없음).
+  - `test/cbo-review-providers.test.js`: 경로만 `lib/ai-connection/providers.js`로 갱신, 스펙 자체는
+    무변경 — CBO Review 회귀 없음을 그대로 담보.
+  - `test/cbo-precheck-fix.test.js`: `anthropic.js` 전용 테스트를 제거하고 `aiFix.js` 대상 2건으로 교체
+    (연결 없음 → 명확한 오류 / API 키 연결 → `callModel` 경유 확인, `fetch` 전역 모킹).
+  - `test/cbo-precheck-api.test.js`: `capabilities`(`aiConnected` 필드)·`fix-claude-preview`(503 메시지)
+    갱신.
+  - `test/cbo-precheck-aifix-cli.test.js`(신규, `mock.module()`로 공용 모듈 대체): 구독(Claude/ChatGPT)·
+    API 키 조합 4가지의 우선순위(구독 Claude 우선 > 구독 ChatGPT > API 키 Claude 우선 > API 키 ChatGPT,
+    구독이 있으면 API 키보다 항상 우선)를 실제 subprocess 없이 확정 검증.
+- **서버 기동 스모크**(격리된 `CBO_DATA_DIR`): `/`, `/cbo-review`, `/cbo-precheck`, `/flow` 전부 200.
+  `GET /api/cbo-precheck?action=settings`가 CBO Review와 동일한 provider 3종(openai/anthropic/gemini)을
+  반환(공용 저장소 확인). `?action=capabilities`의 `aiConnected` 필드가 연결 상태에 따라 정확히 반영됨.
+  `?action=provider-save`에 잘못된 키 형식을 보내면 공용 모듈의 검증 오류가 그대로 JSON으로 반환(에러
+  경로 회귀 없음). `sw.js` 버전 v33 서빙 확인.
+- **시크릿 grep**: `sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{10,}|github_pat_[A-Za-z0-9_]{10,}` 전체 추적+스테이징
+  대상 0건.
+- **미실행(불가)**: 실제 운영 서버에서 Codex CLI 구독 경로로 "Claude 수정 PR" 전체 흐름(스캔→AI 제안→PR
+  생성)을 사람이 1회 수동 확인해야 한다 — 이 세션은 CLI 라우팅 로직만 `mock.module()`로 검증했고 실제
+  subprocess는 호출하지 않았다(실제 spawn 동작 자체는 Phase 1에서 그대로 옮긴 기존 회귀 스펙이 담보).
+
 ## [2026-07-12] CBO Review 계정 로그인(CLI) 연동 (`stella_clover_improvement_260712_2.md`, 무인 세션)
 
 무인 자동화 지시서 기준 작업 1(공통 AI 모델 드롭다운 미연결 표시)·작업 2(계정 로그인 CLI 재사용, 경로 A)

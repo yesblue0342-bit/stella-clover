@@ -58,6 +58,7 @@ tr.held{opacity:.55}
 .spinner{display:inline-block;width:15px;height:15px;border:2px solid #ffffff55;border-top-color:white;border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .cap-note{font-size:.78rem;color:var(--muted);margin-top:6px}
+.provider-row{display:grid;grid-template-columns:120px 1fr auto;gap:8px;align-items:end;margin:12px 0}
 /* SAP GUI 유사 스타일(Phase 3 미리보기) — Stella Clover 다크모드와 무관하게 고정 그레이 톤 */
 .sap-screen{background:#eeeeea;color:#1a1a1a;border:1px solid #8f8f8f;border-radius:4px;padding:16px 14px;font-family:"Segoe UI",Arial,sans-serif}
 .sap-block{border:1px solid #6b6b6b;border-radius:2px;margin:16px 6px 10px;padding:14px 10px 12px;position:relative}
@@ -86,6 +87,7 @@ tr.held{opacity:.55}
   <button class="btn secondary" onclick="location.href='/'">Clover</button>
   <div class="spacer"></div>
   <span class="cap-note" id="capNote"></span>
+  <button class="btn secondary" onclick="openSettings()">AI 연결 설정</button>
   <button class="icon" onclick="toggleTheme()">◐</button>
 </div></header>
 
@@ -174,12 +176,15 @@ tr.held{opacity:.55}
   <p class="muted" id="claudeModalStatus"></p>
 </div></div>
 
+<div class="modal" id="settings"><div class="modal-box"><button class="icon" style="float:right" onclick="closeSettings()">×</button><h2>AI 연결 설정</h2><p class="muted">각 계정에서 발급한 API 키를 연결하거나, 서버에 로그인된 CLI 계정을 그대로 사용할 수 있습니다(본인 구독 한도로 호출). 키는 서버 로컬 데이터 영역에만 저장되고 화면에는 다시 표시되지 않습니다. CBO Spec & Code Review와 동일한 연결을 공유합니다.</p><div id="providerRows"></div></div></div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 const $=id=>document.getElementById(id);
 let token=sessionStorage.getItem('cbo_precheck_token')||'';
-let capabilities={githubToken:false,anthropicKey:false};
+let capabilities={githubToken:false,aiConnected:false};
+let providers=[];
 let scan=null; // { scanId, issues, files, repoUrl, branch, path }
 let claudeCtx=null; // { file, originalSha }
 
@@ -203,8 +208,13 @@ async function doLogin(){
 
 async function loadCapabilities(){
   try{
-    const d=await safeJson(await fetch('/api/cbo-precheck?action=capabilities',{headers:authHeaders()}));
-    capabilities={githubToken:d.githubToken,anthropicKey:d.anthropicKey};
+    const [cap,settings]=await Promise.all([
+      safeJson(await fetch('/api/cbo-precheck?action=capabilities',{headers:authHeaders()})),
+      safeJson(await fetch('/api/cbo-precheck?action=settings',{headers:authHeaders()})),
+    ]);
+    capabilities={githubToken:cap.githubToken,aiConnected:cap.aiConnected};
+    providers=settings.providers;
+    renderProviders();
     $('gate').classList.remove('show');
     renderCapabilityNote();
     return true;
@@ -218,9 +228,55 @@ async function loadCapabilities(){
 function renderCapabilityNote(){
   const notes=[];
   if(!capabilities.githubToken) notes.push('GITHUB_TOKEN 미설정 — PR 생성 비활성');
-  if(!capabilities.anthropicKey) notes.push('ANTHROPIC_API_KEY 미설정 — Claude 수정 제안 비활성');
+  if(!capabilities.aiConnected) notes.push('AI 연결 필요 — [AI 연결 설정]에서 로그인하세요');
   $('capNote').textContent=notes.join(' · ');
   $('capabilityNote').textContent=notes.length?('⚠ '+notes.join(' · ')):'';
+}
+
+function openSettings(){$('settings').classList.add('show')}
+function closeSettings(){$('settings').classList.remove('show')}
+function renderProviders(){
+  $('providerRows').innerHTML=providers.map(p=>{
+    const statusText=p.connected?(p.mode==='cli'?'● 연결됨 (계정 로그인)':'● 연결됨 (API 키)'):'○ 미연결';
+    let cliBlock='';
+    if(p.cli&&p.cli.available){
+      if(p.mode==='cli')cliBlock=`<button class="btn secondary" onclick="disconnectCli('${p.provider}')">계정 로그인 해제</button>`;
+      else if(p.cli.authenticated)cliBlock=`<button class="btn" onclick="connectCliProvider('${p.provider}')">계정으로 로그인 사용</button>`;
+      else cliBlock=`<div class="muted">서버에서 CLI 로그인 필요(1회)</div>`;
+    }
+    return `<div class="provider-row"><div><b>${p.provider}</b><div class="muted">${statusText}</div></div><input type="password" id="key-${p.provider}" placeholder="API key"><button class="btn ${p.connected?'secondary':''}" onclick="saveProvider('${p.provider}')">저장</button>${cliBlock}</div>`;
+  }).join('');
+}
+async function saveProvider(p){
+  try{
+    const d=await safeJson(await fetch('/api/cbo-precheck?action=provider-save',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({provider:p,key:$('key-'+p).value})}));
+    providers=d.providers;renderProviders();
+    await refreshAiCapability();
+    toast(p+' 연결 완료');
+  }catch(e){toast(e.message)}
+}
+async function connectCliProvider(p){
+  try{
+    const d=await safeJson(await fetch('/api/cbo-precheck?action=cli-connect',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({provider:p})}));
+    providers=d.providers;renderProviders();
+    await refreshAiCapability();
+    toast(p+' 계정 로그인 연결 완료');
+  }catch(e){toast(e.message)}
+}
+async function disconnectCli(p){
+  try{
+    const d=await safeJson(await fetch('/api/cbo-precheck?action=cli-disconnect',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({provider:p})}));
+    providers=d.providers;renderProviders();
+    await refreshAiCapability();
+    toast(p+' 계정 로그인 해제');
+  }catch(e){toast(e.message)}
+}
+// provider 연결 상태가 바뀌면 [Claude 수정 PR] 버튼 활성 조건(capabilities.aiConnected)도 다시 계산한다.
+async function refreshAiCapability(){
+  const cap=await safeJson(await fetch('/api/cbo-precheck?action=capabilities',{headers:authHeaders()}));
+  capabilities={githubToken:cap.githubToken,aiConnected:cap.aiConnected};
+  renderCapabilityNote();
+  renderReview();
 }
 
 async function runScan(){
@@ -273,7 +329,7 @@ function renderReview(){
   $('reviewRows').innerHTML=scan.issues.map(i=>{
     const statusLabel=i.status==='resolved'?`해결 ${esc(i.note||'')}`:i.status==='held'?'보류':'미처리';
     const autoDisabled=(!i.quickfixAvailable||!capabilities.githubToken||i.status!=='open')?'disabled':'';
-    const claudeDisabled=(!capabilities.anthropicKey||i.status!=='open')?'disabled':'';
+    const claudeDisabled=(!capabilities.aiConnected||i.status!=='open')?'disabled':'';
     const holdLabel=i.status==='held'?'보류 해제':'보류';
     return `<tr class="${i.status==='held'?'held':''}" data-issue="${i.id}">
       <td>${esc(i.file)}</td><td>${i.line}</td><td><span class="sev ${i.severity}">${i.severity}</span><br><span class="muted">${esc(i.rule)}</span></td>

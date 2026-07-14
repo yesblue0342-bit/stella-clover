@@ -4,7 +4,7 @@ import { extractFile, markdownToWorkbook } from "../lib/cbo-review/extract.js";
 import { hasAccessPassword, login, requireAuth } from "../lib/cbo-review/auth.js";
 import {
   callModel, connectCli, deleteProviderKey, disconnectCli, providerStatus, saveProviderKey,
-} from "../lib/cbo-review/providers.js";
+} from "../lib/ai-connection/providers.js";
 import {
   applyFindings, buildReviewPrompt, buildSpecPrompt, chunkSource, detectLanguage,
   extractMainTitle, normalizeFindings, parseJsonObject, sha256, validateProviderModel,
