@@ -234,17 +234,9 @@ async function handlePreviewDirect(req, res) {
   const mainFiles = files.filter((f) => isAbapSource(f.name) && !f.isDdic && !f.isTexts && !f.isDict && hasReportStatement(f.content));
   if (!mainFiles.length) return json(res, 404, { ok: false, message: "이 폴더에서 메인 프로그램(REPORT/PROGRAM 문이 있는 .abap 파일)을 찾지 못했습니다." });
 
-  if (mainFiles.length === 1) {
-    try {
-      const result = buildPreview(mainFiles[0].name, mainFiles[0].content, files);
-      return json(res, 200, { ok: true, ...result });
-    } catch (e) {
-      return json(res, 500, { ok: false, message: String(e?.message || e) });
-    }
-  }
-
   // 메인 프로그램이 여러 개면(예: ZAQMR0130.abap + ZAQMR0131.abap) 전부 렌더링한다 — 사용자 선택 UI보다
-  // 구현이 단순하고, 스펙 문서 작성 시 어차피 전부 확인해야 하므로 한 번에 보여주는 쪽을 택했다.
+  // 구현이 단순하고, 스펙 문서 작성 시 어차피 전부 확인해야 하므로 한 번에 보여주는 쪽을 택했다. 하나뿐이면
+  // 그 결과 하나만 풀어서 응답한다(회귀 없음 — 기존 단일 파일 응답과 동일 모양).
   const previews = mainFiles.map((file) => {
     try {
       return { ok: true, file: file.name, ...buildPreview(file.name, file.content, files) };
@@ -252,6 +244,7 @@ async function handlePreviewDirect(req, res) {
       return { ok: false, file: file.name, message: String(e?.message || e) };
     }
   });
+  if (previews.length === 1) return json(res, previews[0].ok ? 200 : 500, previews[0]);
   return json(res, 200, { ok: true, multi: true, previews });
 }
 
