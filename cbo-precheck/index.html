@@ -58,6 +58,26 @@ tr.held{opacity:.55}
 .spinner{display:inline-block;width:15px;height:15px;border:2px solid #ffffff55;border-top-color:white;border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .cap-note{font-size:.78rem;color:var(--muted);margin-top:6px}
+/* SAP GUI 유사 스타일(Phase 3 미리보기) — Stella Clover 다크모드와 무관하게 고정 그레이 톤 */
+.sap-screen{background:#eeeeea;color:#1a1a1a;border:1px solid #8f8f8f;border-radius:4px;padding:16px 14px;font-family:"Segoe UI",Arial,sans-serif}
+.sap-block{border:1px solid #6b6b6b;border-radius:2px;margin:16px 6px 10px;padding:14px 10px 12px;position:relative}
+.sap-block-title{font-weight:700;font-size:12px;position:absolute;top:-10px;left:8px;background:#eeeeea;padding:0 4px}
+.sap-row{display:flex;align-items:center;gap:8px;margin:7px 0;flex-wrap:wrap}
+.sap-label{width:180px;flex:0 0 auto;text-align:left;font-size:12px}
+.sap-input{width:auto;min-width:120px;border:1px solid #6b6b6b;background:#fff;color:#111;padding:3px 6px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.sap-input.checkbox{width:16px;min-width:0;height:16px;padding:0}
+.sap-obligatory{color:#0a7a3d;font-weight:900;margin-left:2px}
+.sap-select-options{display:flex;gap:4px;align-items:center}
+.sap-select-options .sap-input{width:100px;min-width:0}
+.sap-multi-btn{border:1px solid #6b6b6b;background:#dcdcd4;color:#111;width:22px;height:24px;font-size:11px}
+.sap-comment{font-size:12px;padding:4px 0;color:#333}
+.sap-pushbutton{border:1px solid #6b6b6b;background:linear-gradient(#f7f7f2,#dcdcd4);color:#111;padding:4px 12px;font-size:12px;border-radius:2px;display:inline-block;margin:4px 0}
+.sap-alv{margin-top:14px;border:1px solid #6b6b6b;overflow:auto}
+.sap-alv table{width:100%;border-collapse:collapse;font-size:12px}
+.sap-alv th{background:#c7d6e8;color:#111;border:1px solid #8f8f8f;padding:5px 7px;text-align:left;white-space:nowrap}
+.sap-alv td{border:1px solid #d8d8d0;background:#fff;padding:7px;height:12px}
+.sap-unparsed{background:#fff3cd;border:1px dashed #c9a227;color:#7a5b00;padding:6px 8px;font-size:12px;margin:8px 6px;border-radius:4px}
+.sap-coverage{margin-top:12px;font-size:.8rem;color:var(--muted)}
 @media(max-width:900px){.hero,.repo-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,1fr)}.diff{grid-template-columns:1fr}}
 </style></head><body>
 
@@ -127,12 +147,12 @@ tr.held{opacity:.55}
   <section id="panel-preview" class="panel">
     <div class="card">
       <h2>화면 미리보기</h2>
-      <p class="muted">Phase 3에서 제공됩니다 — 스캔 후 대상 ABAP 파일의 Selection Screen/ALV 목업을 볼 수 있습니다.</p>
+      <p class="muted">스캔된 ABAP 파일의 Selection Screen/ALV 목업입니다(실제 SAP GUI 텍스트 풀은 반영되지 않습니다 — TEXT-xx 심볼로 표시).</p>
       <div class="toolbar">
-        <select class="select" id="previewFile" style="width:auto"><option value="">파일 선택</option></select>
+        <select class="select" id="previewFile" style="width:auto" onchange="$('previewBtn').disabled=!this.value"><option value="">파일 선택</option></select>
         <button class="btn" id="previewBtn" onclick="runPreview()" disabled>미리보기 생성</button>
       </div>
-      <div id="previewRoot" class="empty">준비 중입니다.</div>
+      <div id="previewRoot" class="empty">스캔 후 파일을 선택하고 미리보기를 생성하세요.</div>
     </div>
   </section>
 </main>
@@ -322,8 +342,59 @@ async function confirmClaudeFix(){
 function renderPreviewFileList(){
   const sel=$('previewFile');
   sel.innerHTML='<option value="">파일 선택</option>'+(scan?.files||[]).map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('');
+  $('previewBtn').disabled=true;
 }
-function runPreview(){toast('Phase 3에서 제공됩니다')}
+
+async function runPreview(){
+  const file=$('previewFile').value;
+  if(!scan||!file){toast('파일을 선택하세요');return}
+  const b=$('previewBtn');
+  try{
+    busy(b,true,'생성 중');
+    const d=await safeJson(await fetch('/api/cbo-precheck?action=preview',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({scanId:scan.scanId,file})}));
+    renderPreviewElements(d.elements,d.coverage);
+  }catch(e){toast(e.message)}
+  finally{busy(b,false)}
+}
+
+function renderParameterEl(el){
+  let inputHtml;
+  if(el.checkbox){
+    inputHtml=`<input class="sap-input checkbox" type="checkbox" disabled>`;
+  }else if(el.radioGroup){
+    inputHtml=`<input class="sap-input" type="radio" disabled> <span class="muted" style="font-size:11px">그룹 ${esc(el.radioGroup)}</span>`;
+  }else{
+    inputHtml=`<input class="sap-input" type="text" disabled value="${esc(el.default||'')}">`;
+  }
+  return `<div class="sap-row"><span class="sap-label">${esc(el.name)}${el.obligatory?'<span class="sap-obligatory" title="필수 입력">*</span>':''}</span>${inputHtml}${el.dataType?`<span class="muted" style="font-size:11px">${esc(el.dataType)}</span>`:''}${el.lowerCase?'<span class="muted" style="font-size:11px">(소문자 허용)</span>':''}</div>`;
+}
+function renderSelectOptionsEl(el){
+  return `<div class="sap-row"><span class="sap-label">${esc(el.name)}</span><div class="sap-select-options"><input class="sap-input" disabled placeholder="from"><span>–</span><input class="sap-input" disabled placeholder="to"><button class="sap-multi-btn" disabled title="다중 선택">⋯</button></div>${el.forField?`<span class="muted" style="font-size:11px">FOR ${esc(el.forField)}</span>`:''}</div>`;
+}
+function renderAlvEl(el){
+  const cols=el.columns||[];
+  const blankRows=Array.from({length:5});
+  return `<div class="sap-alv"><table><thead><tr>${cols.map(c=>`<th>${esc(c.coltext||c.fieldname)}${c.outputlen?` <span style="font-weight:400;opacity:.6">(${c.outputlen})</span>`:''}</th>`).join('')||'<th>(컬럼 인식 안됨)</th>'}</tr></thead><tbody>${blankRows.map(()=>`<tr>${cols.map(()=>'<td></td>').join('')||'<td></td>'}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function renderPreviewElements(elements,coverage){
+  let html='<div class="sap-screen">';
+  let openBlocks=0;
+  for(const el of elements){
+    if(el.type==='block-begin'){html+=`<div class="sap-block"><div class="sap-block-title">${esc(el.title||el.name||'BLOCK')}</div>`;openBlocks++}
+    else if(el.type==='block-end'){if(openBlocks>0){html+='</div>';openBlocks--}}
+    else if(el.type==='parameter')html+=renderParameterEl(el);
+    else if(el.type==='select-options')html+=renderSelectOptionsEl(el);
+    else if(el.type==='comment')html+=`<div class="sap-comment">${esc(el.text||'')}</div>`;
+    else if(el.type==='pushbutton')html+=`<div class="sap-pushbutton">[ ${esc(el.text||el.userCommand||'PB')} ]</div>`;
+    else if(el.type==='alv')html+=renderAlvEl(el);
+    else if(el.type==='unparsed')html+=`<div class="sap-unparsed">⚠ 해석 불가: ${esc(el.text)}</div>`;
+  }
+  while(openBlocks>0){html+='</div>';openBlocks--}
+  html+='</div>';
+  html+=`<div class="sap-coverage">해석됨 ${coverage.parsed}개 / 해석 불가 ${coverage.unparsed}개</div>`;
+  $('previewRoot').innerHTML=html;
+}
 
 loadCapabilities();
 </script>

@@ -11,6 +11,7 @@ import { applyIssuesToFile } from "../lib/cbo-precheck/applyFix.js";
 import { hasGithubToken, parseGithubSshUrl, getFile, openFixPullRequest } from "../lib/cbo-precheck/github.js";
 import { hasAnthropicKey, suggestFix } from "../lib/cbo-precheck/anthropic.js";
 import { hasAccessPassword, login, requireAuth } from "../lib/cbo-precheck/auth.js";
+import { parsePreview } from "../lib/cbo-precheck/preview.js";
 
 function json(res, status, value) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -34,8 +35,10 @@ async function handleScan(req, res) {
   const hasDdic = files.some((f) => f.isDdic);
   const config = buildConfig({ rules: { ...buildConfig().rules, check_ddic: hasDdic } });
   const { issues, fileCount } = scanFiles({ files, config });
-  const scannedFiles = files.filter((f) => isScannable(f.name)).map((f) => f.name);
-  const scanId = saveScan({ repoUrl, branch, path: subPath, issues, fileCount, files: scannedFiles });
+  const scannable = files.filter((f) => isScannable(f.name));
+  const scannedFiles = scannable.map((f) => f.name);
+  const fileContents = Object.fromEntries(scannable.map((f) => [f.name, f.content]));
+  const scanId = saveScan({ repoUrl, branch, path: subPath, issues, fileCount, files: scannedFiles, fileContents });
   const scan = getScan(scanId);
   return json(res, 200, { ok: true, scanId, issues: scan.issues, fileCount, files: scannedFiles, repoUrl, branch, path: subPath });
 }
@@ -165,6 +168,21 @@ async function handleFixClaudeConfirm(req, res) {
   }
 }
 
+async function handlePreview(req, res) {
+  const scanId = String(req.body?.scanId || "");
+  const file = String(req.body?.file || "");
+  const scan = getScan(scanId);
+  if (!scan) return json(res, 404, { ok: false, message: "스캔 결과를 찾을 수 없습니다(만료되었을 수 있습니다)." });
+  const source = scan.fileContents?.[file];
+  if (source === undefined) return json(res, 404, { ok: false, message: "해당 파일의 소스를 찾을 수 없습니다(스캔 결과에 없는 파일)." });
+  try {
+    const result = parsePreview(source, file);
+    return json(res, 200, { ok: true, ...result });
+  } catch (e) {
+    return json(res, 500, { ok: false, message: String(e?.message || e) });
+  }
+}
+
 export default async function handler(req, res) {
   const action = String(req.query.action || "scan");
   try {
@@ -187,8 +205,10 @@ export default async function handler(req, res) {
     if (req.method === "GET" && action === "scan-get") {
       const scan = getScan(String(req.query.scanId || ""));
       if (!scan) return json(res, 404, { ok: false, message: "스캔 결과를 찾을 수 없습니다." });
-      return json(res, 200, { ok: true, ...scan });
+      const { fileContents, ...safe } = scan;
+      return json(res, 200, { ok: true, ...safe });
     }
+    if (req.method === "POST" && action === "preview") return await handlePreview(req, res);
     return json(res, 404, { ok: false, message: `알 수 없는 action: ${action}` });
   } catch (e) {
     console.error("[api/cbo-precheck]", e);

@@ -875,3 +875,24 @@ fixture 기반 유닛 테스트로 완전 검증했고, clone 관련 코드(`lib
 **미실행 항목**: 실제 GitHub PR 1건 생성 후 close(GATE 2-c 마지막 요구사항) — `GITHUB_TOKEN`/SSH 배포키가
 이 세션 환경에 없어 수행 불가. mock 기반 유닛 테스트로 로직은 완전 검증했으며, 운영 자격증명 설정 후 수동
 1회 확인이 필요하다(README_CBO_PRECHECK.md 안내 예정 — Phase 4).
+
+## [2026-07-14] CBO Pre-Check Phase 3 — Selection Screen/ALV 미리보기 렌더러 (`PROMPT_CBO_PRECHECK_260714.md`, 무인 autopilot)
+
+| 검증 | 결과 |
+|---|---|
+| 정상 fixture 파싱: PARAMETERS/SELECT-OPTIONS/BLOCK/ALV 개수 | 2 / 1 / 1쌍 / 3컬럼 — GATE 3 기준 충족 |
+| OBLIGATORY+DEFAULT('US11'), AS CHECKBOX 파라미터 속성 | 정확히 인식 |
+| BLOCK 제목(TEXT-b01), COMMENT(TEXT-c01), PUSHBUTTON(TEXT-p01/USER-COMMAND fltr) | 정확히 추출 |
+| ULINE 등 미지원 구문 | `unparsed`로 목록화(누락/크래시 없음) |
+| ALV `VALUE #( ( fieldname = ... ) )` 생성자(정규식 보조) | 컬럼 정확히 추출 |
+| api action=preview(스캔 캐시 소스 재사용, GITHUB_TOKEN 불필요) | 정상 동작 |
+| api action=preview: 존재하지 않는 파일 | 404 |
+| api action=scan-get 응답에 fileContents 비노출 | 확인 |
+| 프론트 렌더 함수(Node vm 샌드박스로 인라인 JS 실행, 실제 parsePreview 출력 주입) | 컬럼명/OBLIGATORY 마커/체크박스/블록 타이틀/커버리지 문구 모두 HTML에 포함 확인 |
+| 서버 기동 스모크: `/cbo-precheck`, `/cbo-review`, `/` | 200/200/200 |
+| 전체 `npm test`(신규 6건) | **140 pass / 0 fail / 12 skip** |
+| 시크릿 grep | 0건 |
+
+브라우저 자동화 도구가 이 세션에 없어 실제 시각적 렌더링(색상/레이아웃)은 Node `vm` 기반 HTML 문자열
+검증으로 대체했다 — 실제 브라우저에서의 최종 시각 확인은 사용자 몫으로 남는다(README_CBO_PRECHECK.md에
+명시 예정, Phase 4).
