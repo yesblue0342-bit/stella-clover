@@ -78,6 +78,27 @@ test("dictToTablXml: fields가 없으면 명확한 오류를 던진다", () => {
   assert.throws(() => dictToTablXml(null));
 });
 
+// architect 검증 후속 권고 1: 문서 필드에 XML 특수문자가 섞여도 이스케이프되어 태그가 깨지지 않아야 한다
+// (dictionary 문서는 클론된 저장소의 제3자 콘텐츠 — 신뢰할 수 없는 입력으로 취급).
+test("dictToTablXml: 설명/데이터 엘리먼트에 XML 특수문자가 있어도 이스케이프되어 유효한 XML로 남는다", () => {
+  const dict = {
+    tableName: "ZDEMOT003",
+    ddtext: "Demo <script>&\"quote\"",
+    deliveryClass: "A",
+    fields: [
+      { name: "MANDT", key: true, rollname: "MANDT", type: "CLNT", len: 3 },
+      { name: "FLAG", key: false, rollname: 'A&B<C>"D"', type: "CHAR", len: 1 },
+    ],
+  };
+  const xml = dictToTablXml(dict);
+  assert.ok(!/<script>/.test(xml), "이스케이프되지 않은 <script> 태그가 그대로 남으면 안 됨");
+  assert.match(xml, /<DDTEXT>Demo &lt;script&gt;&amp;&quot;quote&quot;<\/DDTEXT>/);
+  assert.match(xml, /<ROLLNAME>A&amp;B&lt;C&gt;&quot;D&quot;<\/ROLLNAME>/);
+  // 각 태그가 정확히 한 쌍(열기/닫기)만 있는지 - 이스케이프 실패로 태그가 추가 생성되지 않았는지 확인.
+  assert.equal((xml.match(/<DD03P>/g) || []).length, 2);
+  assert.equal((xml.match(/<\/DD03P>/g) || []).length, 2);
+});
+
 // ── scanFiles 통합: dictionary 문서만으로 unknown_types가 해소되는지 실제 스캔으로 확인 ──
 
 test("scanFiles: dictionary/*.md 문서만 있어도 해당 테이블 필드 참조가 unknown_types 없이 해석된다", () => {
