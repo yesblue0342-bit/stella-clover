@@ -1149,3 +1149,32 @@ RALPH_DONE
 프리캐시 목록에 없음).
 
 RALPH_DONE
+
+---
+
+## [2026-07-15] 회의록 제목=업로드 파일명(날짜 유지) + 앱 닫힘 중 업로드 복구
+
+### 문제
+1. 회의록 제목이 업로드 파일명과 다름: `260714_컨설턴트 미팅.m4a` → "컨설턴트 미팅"(날짜 접두어가 사라짐).
+   원인: `titleFromFileName`이 **선행 날짜 스탬프를 제거**하고 있었음(7/10 이전 기록은 날짜 유지 → 불일치).
+2. 앱 창을 닫으면 간헐적으로 변환이 안 됨(잡 생성 전 조각 업로드 중단 시 유실 → 3번만에 성공).
+
+### 수정
+- **제목 = 파일명 그대로(`api/_meeting.js titleFromFileName`)**: 선행 날짜 스탬프 **유지**로 변경(확장자 제거·언더스코어→공백만).
+  `260714_컨설턴트 미팅.m4a` → **"260714 컨설턴트 미팅"**(사용자가 만족한 `260710 SAP Role 설명회` 스타일과 일치).
+  의미없는 기본명(이름없는 녹음/앱 기본 키 제목/OCR)만 폴백. `lib/minutes.js`는 이미 `titleFromFileName` 우선 호출이라 함수만 수정.
+- **앱 닫힘 중 업로드 복구(`index.html`)**: 잡 생성 전 조각 업로드 중 앱을 닫아도 **임시 보관 원본**으로 남은 조각을
+  이어올려 잡 생성. 원본은 **업로드 창 동안만** IndexedDB 임시 보관하고 **잡 생성 즉시 삭제**(영구 미보존). 조각마다 진행 영속,
+  재개는 조용한 토스트. `sw.js` v34→**v35**.
+
+### 테스트 (샌드박스, Node)
+| # | 항목 | 결과 |
+|---|------|------|
+| 1 | `titleFromFileName` 날짜 유지(260714_컨설턴트 미팅→"260714 컨설턴트 미팅") + 기본명 폴백 | ✅ |
+| 2 | `test/meeting.test.js` 전체 | **20 PASS / 0 fail** ✅ |
+| 3 | `node --check` api/lib/server + 인라인 JS(index/note/flow/rate) 파싱 | 전부 OK ✅ |
+| 4 | `npm test` 전체 | **216 PASS / 22 skip / 1 fail** — 유일 실패는 cbo-precheck `mock.module`(Node 실험 API 미지원, **main 에서도 동일 실패·본 변경 무관**) |
+| 5 | 서버 `/` 복구(resumePendingUpload/PENDING_UPLOAD) 렌더 + `/sw.js` v35 | ✅ |
+
+> 제목 흐름 end-to-end: 프런트 `fileName`→`jobs.js source_name`→`jobs-runtime`→`generateMinutes(audioFileName)`→`titleFromFileName`.
+> 복구는 잡 생성 전 중단 대상(잡 생성 후엔 서버가 완결). 병렬 개발본의 날짜-제거 `titleFromFileName`을 사용자 요구(날짜 유지)로 정정.

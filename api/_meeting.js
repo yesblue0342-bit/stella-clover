@@ -107,22 +107,22 @@ export function meetingDateFromName(name) {
   return "";
 }
 
-// 업로드 파일명 → 회의 제목 후보. 확장자 제거 + 선행 날짜 스탬프(YYYYMMDD/YYMMDD/YYYY-MM-DD 등, meetingDateFromName과 동일 판정) 제거.
-// 사용자가 업로드 전 파일명을 원하는 제목으로 바꿔 놓는 관례를 그대로 반영(제목 추출의 1순위 소스).
+// ★ 업로드 파일명 = 회의록 제목(사용자 요구: Clover 제목 = 업로드 파일명 그대로).
+//   확장자 제거 + 언더스코어→공백 정규화만 하고 **선행 날짜 스탬프는 유지**한다
+//   (예 "260714_컨설턴트 미팅.m4a" → "260714 컨설턴트 미팅"; "260710_SAP Role 설명회" 스타일과 일치).
+//   사용자 요구: 날짜 접두어를 떼지 말 것 — "컨설턴트 미팅"처럼 날짜가 사라지면 파일과 다르다고 느낀다.
+//   의미없는 기본명(이름없는 녹음 blob / 앱 기본 키 제목 / OCR)만 "" 반환 → 호출부가 AI/날짜 제목으로 폴백.
 export function titleFromFileName(name) {
-  const raw = String(name || "").trim();
-  if (!raw) return "";
-  let base = raw.replace(/\.[^./\\]+$/, "").trim();
-  const m8 = base.match(/^(20\d{2})[._-]?(\d{2})[._-]?(\d{2})(?:[._\-\s]+|$)/);
-  if (m8 && +m8[2] >= 1 && +m8[2] <= 12 && +m8[3] >= 1 && +m8[3] <= 31) {
-    base = base.slice(m8[0].length);
-  } else {
-    const m6 = base.match(/^(\d{2})(\d{2})(\d{2})(?:[._\-\s]+|$)/);
-    if (m6 && +m6[2] >= 1 && +m6[2] <= 12 && +m6[3] >= 1 && +m6[3] <= 31) {
-      base = base.slice(m6[0].length);
-    }
-  }
-  return base.trim();
+  let s = String(name || "").trim();
+  if (!s) return "";
+  s = s.replace(/\.[A-Za-z0-9]{1,6}$/, "").trim();       // 확장자 제거
+  if (/^\d{4}-\d{2}-\d{2} \d{2}[:.]\d{2}( 회의록)?$/.test(s)) return ""; // 앱 기본 키 제목(녹음, 파일명 아님) — 콜론 제거 전 판정
+  s = s.replace(/[\\/:*?"<>|]/g, "").trim();             // 파일시스템 금지문자 제거
+  s = s.replace(/_/g, " ").replace(/\s+/g, " ").trim();  // 언더스코어→공백, 공백 정규화
+  if (!s) return "";
+  if (/^recording$/i.test(s)) return "";                 // 이름없는 녹음 blob
+  if (/^ocr[ _]?image$/i.test(s)) return "";             // OCR 입력
+  return s.slice(0, 200);
 }
 
 // 업로드 기본 제목(키 제목) — KST 기준 "YYYY-MM-DD HH:MM 회의록".
