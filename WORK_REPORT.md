@@ -648,5 +648,19 @@ RALPH_DONE
    자체를 대체해 라우팅 로직만 검증했다 — 실제 spawn 동작 자체는 Phase 1에서 그대로 옮긴 기존 회귀 스펙
    (`test/cbo-review-providers.test.js`)이 이미 담보하므로 중복 검증하지 않았다(판단 근거 기록).
 
+### 리뷰 후속 수정 (architect 검증 통과 후 발견된 edge case 1건)
+
+- **발견**: `oh-my-claudecode:architect` 리뷰(GATE 통과 확정 후 필수 리뷰 단계)에서 낮은 심각도 edge case
+  발견 — `pickAiConnection()`이 `mode==="cli"`인 provider의 저장된 API 키를 보고 `"api-key"`로 선택할 수
+  있었는데, 공용 모듈 `callModel()`은 `mode==="cli"`면 미인증이어도 절대 API 키 경로로 새지 않는 설계다
+  (providers.js의 의도된 보안 규칙). 그 결과 "CLI 로그인 만료 + 같은 provider에 API 키도 저장됨"인 좁은
+  상황에서 버튼은 활성으로 보이는데 클릭하면 "로그인 만료" 오류로 실패하는 불일치가 생길 수 있었다.
+- **수정**: `lib/cbo-precheck/aiFix.js`의 `keyUsable()`이 `mode !== "cli"`인 provider만 API 키 폴백 대상으로
+  삼도록 변경 — `callModel()`의 실제 라우팅과 `pickAiConnection()`의 판단을 항상 일치시킨다(버튼 활성
+  상태 = 실제로 성공할 수 있는 상태).
+- **검증**: `test/cbo-precheck-aifix-cli.test.js`에 회귀 테스트 1건 추가("cli 모드인데 로그인 만료면 저장된
+  API 키로 폴백하지 않는다") — 전체 `npm test` **146 pass / 0 fail / 12 skip**(이전 145에서 +1, 회귀 없음).
+  시크릿 grep 재확인 0건.
+
 RALPH_DONE
 
