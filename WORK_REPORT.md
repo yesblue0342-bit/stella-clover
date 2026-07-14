@@ -1,5 +1,51 @@
 # CBO Spec & Code Review — 작업 보고
 
+## 2026-07-14 "8번 미션 실패 재작업" 세션 결론 요약 (`stella_clover_260714_9.md`, ralph autopilot)
+
+**8번 미션(`stella_clover_260714_8.md`, 커밋 `ef47ad1`~`d74f306`)이 `RALPH_DONE`을 보고했지만, 배포 후
+실제 앱에서 확인한 결과 세 가지 목표(SAP 표준 심볼 오탐 제거·미리보기 폴더 경로 지원·Dynpro Screen 렌더링)
+전부 미구현이었다.** 아래는 이번 재작업의 최상단 결론 요약이다(상세는 각 Phase 절 참고).
+
+1. **직전 세션 실패 원인**(Phase 0에서 코드 근거로 확인):
+   - **오탐 제거**: 8번 미션은 `lib/cbo-precheck/scan.js` 상단 주석에 "icon_create 등 SAP 표준
+     type-pool 미포함으로 인한 기대된 한계"라고 **명시적으로 미해결로 남겨두고 GATE를 통과시켰다** — 즉
+     구현이 아예 없었다(회귀 테스트도, `syntax.globalConstants` 사용도 전무). `README_CBO_PRECHECK.md`
+     "알려진 한계" 절에도 "`ICON` 타입풀(icon_create 등)... 진짜 결함처럼 보고합니다"라고 스스로 문서화해
+     두고도 손대지 않았다.
+   - **폴더 경로 미리보기**: `api/cbo-precheck.js`의 `handlePreviewDirect`가 `path`를 항상 "파일"로만
+     취급했다(`filePath.lastIndexOf("/")`로 디렉터리/파일명을 분리하고 `files.find(f => f.name ===
+     baseName)`로 정확히 그 파일명과 일치하는 파일만 찾음). 폴더만 넣으면 `baseName`이 폴더명 자체가 되어
+     일치하는 파일이 없어 항상 404("ABAP 소스 파일을 찾지 못했습니다")였다 — 이 분기 자체가 없었다.
+   - **Dynpro Screen 렌더링**: `lib/cbo-precheck/preview.js`의 `parsePreview()`는 `Parameter`/
+     `SelectOption`/`SelectionScreen` AST 문장과 ALV fieldcatalog(APPEND 루프/VALUE 생성자)만 파싱했다.
+     `CALL SCREEN`/`MODULE ... OUTPUT`/`SET PF-STATUS`/ALV 툴바를 다루는 코드가 전혀 없어 Screen 0100은
+     애초에 추출 대상이 아니었다 — UI(`cbo-precheck/index.html`)에도 Selection Screen/ALV 목업 렌더
+     함수만 있었다.
+   - 세 가지 모두 "부분적으로 구현했는데 조건이 안 맞아 실행 안 됨"이 아니라 **구현 자체가 없었다.**
+2. **오탐 before/after**(실제 `260707_QM023_ZAQMR0130` clone 재현, Phase 1 참고): `icon_*` 계열
+   `check_syntax` 5건 → 0건. 나머지는 회귀 없이 그대로 검출(`sql_escape_host_variables` 16건,
+   `unknown_types` 2건, `obsolete_statement` 1건) — 단, `unused_variables`는 2건 → 8건으로 **늘었다**(회귀
+   아님, Phase 1 절 참고: icon 오탐이 사라지면서 같은 파일에서 masking되던 진짜 미사용 변수 6건이 함께
+   드러난 것 — abaplint 설계상 "다른 syntax 오류가 있으면 unused_variables를 보고하지 않음").
+3. **폴더 경로 지원 방식**: `action=preview-direct`의 `path`가 `.abap`로 끝나면 기존과 동일하게 단일 파일로
+   처리(회귀 없음), 아니면 폴더로 간주해 그 경로를 통째로 clone한 뒤 하위 전체에서 `REPORT`/`PROGRAM` 문이
+   있는 메인 프로그램을 찾는다. 메인 프로그램이 여러 개(`260707_QM023_ZAQMR0130`은 실제로 2개 —
+   `ZAQMR0130.abap`/`ZAQMR0131.abap`)면 전부 렌더링한다(선택 UI보다 구현이 단순해 이쪽을 택함).
+4. **Screen 렌더 커버리지**: 실제 `260707_QM023_ZAQMR0130`에서 Screen 0100 검출·PBO(`status_0100`)/
+   PAI(`user_command_0100`) 모듈 매핑·`SET PF-STATUS 'STATUS_0100'`/`SET TITLEBAR 'TITLE_0100'`(TEXTS
+   문서로 실제 제목 텍스트까지 해석, `&1`/`&2` 자리는 `«gv_mode_text»`처럼 변수명으로 안내)·PAI 기능코드
+   (BACK/EXIT/CANCEL)·ALV 툴바 5버튼(Assign/Change/Delete/History/Error Log, 아이콘 근사 표시)·ALV
+   컬럼 16개(fieldcatalog 3번째 패턴 — `PERFORM 헬퍼FORM USING '필드' '텍스트' 길이` 리터럴 전달 방식,
+   기존 두 패턴 모두 이 프로그램에는 해당 없었음) 전부 실제 소스 값으로 렌더링됨을 라이브 clone 통합
+   테스트로 확인. Screen Flow Logic/Screen Painter 레이아웃은 소스에 없어 재현하지 않고 안내 문구로 명시.
+5. **남은 진짜 이슈·리스크**: `260707_QM023_ZAQMR0130`의 `sql_escape_host_variables`(16건)·
+   `unused_variables`(8건, 이번에 6건 추가 노출)·`unknown_types`(2건, `ZACMS0005` 테이블 정의 없음)는
+   전부 진짜 결함이며 이번 세션 범위가 아니다(이번 미션은 세 가지 UX/오탐 버그 수정이 목적). `260625_QM005_*`
+   폴더는 `INCLUDE zaqmr0080_cls.`가 `INCLUDE zaqmr0080_top.`보다 먼저 와서(로컬 클래스가 TOP 선언보다
+   앞서 include됨) `gc_c`/`gv_mode`/`gc_x` 등 추가 `check_syntax` 오탐이 있는데, 이는 icon 오탐과 무관한
+   **그 저장소 자체의 INCLUDE 순서 문제**(실제 SAP에서도 순서에 따라 컴파일 결과가 달라질 수 있음)라 이번
+   범위 밖으로 남겨둔다(GATE 1(d) "다른 폴더 오탐 확인"은 icon 계열 오탐이 사라졌는지만 확인하면 충족).
+
 ## 완료 기능
 
 - 메인 메뉴 `CBO Spec&Code Review` 탭과 독립 SPA `/cbo-review`
@@ -1210,6 +1256,134 @@ RALPH_DONE
   없음). `node --check` 전체 통과, 인라인 JS `new Function` 파싱 통과, 시크릿 grep(`sk-`/`ghp_`/
   `github_pat_`) 0건, `git diff --name-only`로 `/cbo-review` 미변경 확인, 원본 GitHub 소스는 읽기 전용
   clone(`/tmp`)만 사용해 전혀 수정하지 않음.
+
+RALPH_DONE
+
+## 2026-07-14 "8번 미션 실패 재작업" 세션 상세 (`stella_clover_260714_9.md`, ralph autopilot)
+
+결론 요약은 파일 최상단 참고. 아래는 Phase별 실측 근거.
+
+### Phase 0 — 실패 원인 규명(추측 금지, 실측)
+
+`git log --oneline -15`로 8번 미션 커밋(`ef47ad1` naming adapter, `d76cad2` naming-collision guard,
+`e1d5cf8` dictionary→DDIC, `72f4411` dict parser cleanup, `d74f306` real SAP labels + INCLUDE 자동병합)을
+확인하고, `WORK_REPORT.md`에서 8번 미션이 "완료"로 주장한 범위를 대조했다. 8번 미션은 실제로는 **폴더 경로
+지원(dict→DDIC), SAP 라벨 치환, INCLUDE 자동 병합**을 구현했을 뿐 — 정작 이번 미션이 요구한 세 가지
+(icon 오탐 제거, 미리보기 자체의 폴더 경로 지원, Dynpro Screen 렌더링)는 손대지 않았다. `git@github.com:
+yesblue0342-bit/0Program.git`을 실제 SSH clone(`git clone --depth 1`, 성공 확인)해 `260707_QM023_ZAQMR0130`을
+`scanFiles()`로 재현 — 정확히 26건(check_syntax 5/unknown_types 2/sql_escape_host_variables 16/
+obsolete_statement 1/unused_variables 2), 미션 문서가 관찰한 수치와 100% 일치했다. 코드 근거는 위 결론
+요약 1번 참고.
+
+### Phase 1 — SAP 표준 심볼(icon_*) 오탐 제거
+
+**방법 선택**: abaplint 소스(`node_modules/@abaplint/core/build/src/abap/5_syntax/_current_scope.js`
+`CurrentScope.buildDefault()` → `addBuiltIn(s, reg.getConfig().getSyntaxSetttings().globalConstants)` →
+`_builtin.js` `BuiltIn.get(extras)`가 각 이름을 `VoidType.get(e)` 타입의 read-only built-in 식별자로
+등록)를 직접 읽어 `syntax.globalConstants`(문자열 배열)가 정확히 이 용도로 제공되는 공식 확장점임을
+확인했다. abapGit TABL XML 의존성 주입(방법 후보 2)은 TYPE-POOLS 상수에는 적용 대상이 아니고(TABL은 DDIC
+테이블용), `errorNamespace` 제외 옵션(후보 3)은 검사 대상 오브젝트 자체를 필터링하는 것이라 목적과 다름 —
+`globalConstants`가 유일하게 맞는 정식 옵션이었다.
+
+**구현**: `lib/cbo-precheck/sapStandardSymbols.js` 신설 — 개별 아이콘 이름을 전부 나열하는 대신
+`/^icon_[a-z0-9_]+$/i` 같은 **명명 규칙 패턴**으로 인식(SAP ICON 타입풀은 수백 개라 전수 나열은 비현실적).
+`lib/cbo-precheck/scan.js`의 `scanFiles()`를 2-패스로 변경: 1차 스캔에서 `check_syntax`의
+`"<식별자>" not found` 메시지를 파싱해(`extractNotFoundSymbol`) 패턴에 매치하는 것만 `globalConstants`에
+추가한 뒤 2차로 재스캔. 매치되지 않는 식별자(진짜 미선언 변수)는 그대로 1차 결과에 남는다 — 룰 자체를 끈
+게 아니라 "abaplint가 모르는 외부 상수"만 알려주는 것이므로 하드 룰 비활성화와 다르다(HARNESS RULES 3번
+준수).
+
+**실측 검증**(4개 프로그램 폴더 실제 clone):
+
+| 폴더 | icon_* check_syntax (전/후) | 비고 |
+|---|---|---|
+| `260707_QM023_ZAQMR0130` | 5 → 0 | 목표 프로그램. unused_variables 2→8(별도 로직, 아래 설명) |
+| `260625_QM005_ZAQMR0080V03` | 4 → 0 | icon_system_save/select_all/deselect_all/mass_changes 해소. 나머지 check_syntax(gc_c/gv_mode 등)는 그 저장소의 INCLUDE 순서 문제로 별개(위 "남은 리스크" 참고) |
+| `260701_QM004_Inspection Group Upload` | 5 → 0 | icon_system_save/select_all/deselect_all/delete_row/mass_change 해소. check_syntax 0건(완전히 clean) |
+| `260705_QM008_Q Info Record Upload` | 7 → 0 | icon_save/exit/green_light/red_light(×3)/yellow_light 해소. `gv_mode not found`(0110.abap L62) 1건은 icon과 무관한 별개 이슈로 남음 |
+
+`unused_variables`가 2건→8건으로 **늘어난 이유**: abaplint `unused_variables` 룰(`rules/
+unused_variables.js`)은 "같은 오브젝트에 다른 syntax 오류가 있으면 보고하지 않는다"는 설계다. icon_*
+check_syntax 오탐이 `ZAQMR0130_CLS.abap`(그리고 이 파일과 같은 스코프를 공유하는 `_TOP.abap`/
+`ZAQMR0131.abap`)의 분석을 막고 있었는데, 그게 해소되니 `is_line`/`p_disp`/`makt`/`gc_a`/`gc_n`/`gc_prog`
+같은 **진짜 미사용 변수 6건이 함께 드러났다**(masking 해제 — 회귀가 아니라 오히려 이번 우선순위 규칙
+1번 "진짜 오류를 놓치지 않는 것이 오탐 제거보다 우선"에 부합하는 개선). fixture 회귀 가드 3종
+(`fixtures/zaqmr0130_bad.prog.abap`의 미선언 변수, `fixtures/zaqmr_icon_symbol.prog.abap` 신규 fixture의
+진짜 미선언 변수, 기존 26건 스캔의 나머지 21건)은 전부 그대로 검출됨을 `test/cbo-precheck-sap-symbols.test.js`/
+`test/cbo-precheck-scan.test.js`로 고정.
+
+### Phase 2 — 미리보기 폴더 경로 지원
+
+`api/cbo-precheck.js`의 `handlePreviewDirect()`에서 `path`가 `.abap`로 끝나면(=파일) 기존 로직 그대로,
+아니면(=폴더) 그 경로를 통째로 `withClonedRepo`+`collectAbapFiles`(이미 재귀 수집을 지원하는 기존 함수 —
+신규 clone 로직 없음)로 가져와 `hasReportStatement()`로 메인 프로그램을 찾는 분기를 추가했다. 실제
+`260707_QM023_ZAQMR0130`은 메인 프로그램이 **2개**(`ZAQMR0130.abap`, `ZAQMR0131.abap`) 있음을 실측으로
+확인 — "메인 프로그램이 여러 개면 전부 렌더링"(선택 UI보다 구현이 단순한 쪽, 미션 문서가 허용한 두 선택지
+중 하나) 쪽으로 구현하고 응답에 `multi:true, previews:[...]`를 추가했다. UI(`cbo-precheck/index.html`)는
+`renderPreviewElements`의 렌더 로직을 `buildPreviewHtml`(문자열 반환)로 분리하고 `renderMultiPreview`가
+여러 개를 이어 붙이도록 했다. 입력 라벨을 "파일 경로(단일 파일)" → "경로(폴더 또는 파일)"로, placeholder
+기본값을 폴더 경로 예시로 바꿨다.
+
+**실측 검증**(라이브 SSH clone): 폴더 경로만 넣으면 `multi:true`+메인 2개, `ZAQMR0130.abap` 미리보기는
+Selection Screen 18개 요소·INCLUDE 6개 병합(기존 GATE 1/2 기준선과 동일 — 회귀 없음). 단일 파일 경로
+입력은 기존 테스트(GATE 3 (d))가 그대로 통과해 회귀 없음을 재확인. 메인 프로그램이 없는 폴더
+(`260707_QM023_ZAQMR0130/notes`)는 404 + "메인 프로그램... 찾지 못했습니다" 메시지.
+
+### Phase 3 — Dynpro Screen(실행 후 화면) 렌더링
+
+**실측으로 미션 문서의 가정을 재확인/정정**: 미션 문서는 컨테이너 예시로 `cl_gui_custom_container`를 들었지만
+실제 `ZAQMR0130_F01.abap`은 `cl_gui_docking_container`를 쓴다 — 컨테이너 클래스를 하드코딩하지 않고
+"`cl_gui_alv_grid` 타입 참조가 있는가"만으로 ALV 화면 여부를 판단하도록 구현해 이 차이에 영향받지 않게
+했다. 또한 ALV fieldcatalog는 기존에 지원하던 두 패턴(APPEND 루프, `VALUE #(...)` 생성자) **어느 쪽에도
+해당하지 않고**, `PERFORM f_fc_add USING '필드' '텍스트' 길이 ...`처럼 헬퍼 FORM에 리터럴을 넘기는 세 번째
+관용구를 쓰고 있었다 — 이를 놓쳤다면 GATE 3(d)(ALV 컬럼 렌더)가 실패했을 것이다.
+
+**구현**: `lib/cbo-precheck/dynproPreview.js` 신설.
+- `extractScreenNumbers`: `CALL SCREEN`/`SET SCREEN`/`LEAVE TO SCREEN` nnnn 전수 수집(`LEAVE TO SCREEN 0`은
+  "현재 화면 종료" 관용구라 실제 Dynpro가 아니므로 제외).
+- `findAllModules`+`matchScreenModules`: 화면번호가 이름에 포함된 `MODULE ... OUTPUT/INPUT`을 매칭,
+  실패 시 전체 모듈을 fallback으로 표시(미션 요구사항 그대로).
+- `extractSetDirective`: `SET PF-STATUS`/`SET TITLEBAR` 이름과 `WITH` 변수 목록 추출.
+- `resolveTitlebarText`: TEXTS 문서의 `&1`/`&2` 자리표시자를 실제 변수명으로 치환(`«gv_mode_text»`처럼 —
+  런타임 값은 정적 분석으로 알 수 없으므로 "이 자리에 이 변수가 들어간다"만 안내).
+- `extractWhenCodes`: PAI `CASE sy-ucomm`/`WHEN 'X' OR 'Y'` 기능코드 목록.
+- `extractToolbarButtons`: `on_toolbar` 이벤트 메서드에서 `APPEND <ws> TO <table>.`(대상이
+  `e_object->mt_toolbar`처럼 `->`를 포함해 기존 append-loop 헬퍼의 토큰 인덱싱을 재사용할 수 없어 별도
+  구현)로 버튼 블록 경계를 나누고 `-function/-icon/-text/-quickinfo`를 각 블록에서 추출, `-butn_type`만
+  있고 function이 없으면 구분선으로 표시.
+- `extractFormFieldcat`: 세 번째 fieldcatalog 관용구 — `<ws>-fieldname = <파라미터>.`로 필드카탈로그를
+  채우는 FORM을 찾아(대부분의 FORM은 이 시그니처가 없어 자동으로 걸러짐) coltext/outputlen 파라미터
+  위치까지 역추적한 뒤, 모든 `PERFORM <그 FORM> USING ...` 호출의 리터럴을 위치대로 읽어 컬럼을
+  재구성한다.
+- `lib/cbo-precheck/textSymbols.js`에 `titles`(식별자별 GUI Title 맵) 추가 — 기존 단일 `title`(Selection
+  Screen 상단 배너)은 회귀 없이 그대로 유지.
+- `lib/cbo-precheck/preview.js`의 `buildPreview()`가 위 조각을 조립해 `screens:[...]`/`flow:[...]`를
+  결과에 추가(Screen이 없는 프로그램은 둘 다 빈 배열 — 기존 동작과 동일, 회귀 없음).
+- `cbo-precheck/index.html`에 `renderDynproScreen()` 추가, `ICON_GLYPHS`(서버 `sapStandardSymbols.js`와
+  동일 매핑, 빌드 파이프라인이 없는 단일 파일 SPA라 인라인 중복 — 이번 범위에서 공유 모듈화는 하지 않음)로
+  아이콘 근사 표시.
+
+**실측 검증**(라이브 SSH clone, `test/cbo-precheck-dynpro.test.js` "GATE 3" 통합 테스트로 고정):
+Screen 0100 검출, PBO `status_0100`/PAI `user_command_0100` 매핑(`fallback:false`), `SET PF-STATUS
+'STATUS_0100'`, 타이틀 "[QM] Assign Inspection Type to QM View — «gv_mode_text» («gv_tcode»)", 기능코드
+BACK/EXIT/CANCEL, ALV 툴바 버튼 텍스트 정확히 [Assign, Change, Delete, History, Error Log](구분선 2개
+포함 7개 항목), ALV 컬럼 16개(STATXT/WERKS="Plant" 등 실제 텍스트), 화면 흐름
+`["Selection Screen(1000)", "Screen 0100"]`, Selection Screen 18개 요소·INCLUDE 6개 병합(회귀 없음) 전부
+확인.
+
+### 최종 검증
+
+- `npm test`: **222 pass / 0 fail / 12 skip**(DATABASE_URL 미설정 통합 테스트, 기존과 동일). 신규 17건
+  (Phase 1 sap-symbols 5, Phase 2 preview-direct 폴더 2, Phase 3 dynpro 9[단위 8+라이브 통합 1], UI dep
+  갱신은 기존 6건 재사용) + 기존 205건 전부 통과 — 회귀 없음.
+- `node --check`: 신규/수정 파일(`lib/cbo-precheck/{scan,preview,textSymbols,sapStandardSymbols,
+  dynproPreview}.js`, `api/cbo-precheck.js`, 신규 테스트 4종) 전부 통과.
+- 인라인 `<script>` 파싱: `cbo-precheck/index.html`을 `new Function()`으로 파싱 성공.
+- 시크릿 grep(`sk-`/`ghp_`/`github_pat_`) 0건.
+- 원본 GitHub 파일: 읽기 전용 SSH clone(`git clone --depth 1`, 임시 디렉터리)만 사용 — 어떤 파일도
+  push/수정하지 않음.
+- 회귀: 기존 Selection Screen 미리보기(18개 요소·INCLUDE 6개 병합·라벨 치환), 검증/처리 탭, `/cbo-review`
+  전부 라이브 clone 테스트와 전체 유닛 테스트 스위트로 회귀 없음을 재확인.
 
 RALPH_DONE
 

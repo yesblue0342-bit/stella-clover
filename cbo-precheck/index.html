@@ -85,6 +85,16 @@ tr.held{opacity:.55}
 .sap-varname{color:#666;font-size:10px;margin-left:4px}
 .sap-radio-group{display:flex;gap:16px;flex-wrap:wrap}
 .sap-radio-opt{display:flex;align-items:center;gap:4px;font-size:12px}
+/* Dynpro Screen 렌더(Phase 3) */
+.sap-flow-banner{font-size:.78rem;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:12px}
+.sap-status-row{font-size:12px;color:#333;margin:4px 6px 10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.sap-fcode{background:#dcdcd4;border-radius:3px;padding:1px 6px;font-family:ui-monospace,Consolas,monospace}
+.sap-toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 6px}
+.sap-toolbar-btn{border:1px solid #6b6b6b;background:linear-gradient(#f7f7f2,#dcdcd4);color:#111;padding:4px 10px;font-size:12px;border-radius:2px}
+.sap-toolbar-sep{width:1px;align-self:stretch;background:#8f8f8f;margin:2px 2px}
+.sap-flow-text{font-size:11px;color:#555;margin:10px 6px 0}
+.sap-limit-note{font-size:11px;color:#7a5b00;background:#fff3cd;border:1px dashed #c9a227;padding:6px 8px;margin:12px 6px 0;border-radius:4px}
+.sap-modules-fallback{font-size:11px;color:var(--warn)}
 @media(max-width:900px){.hero,.repo-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,1fr)}.diff{grid-template-columns:1fr}}
 </style></head><body>
 
@@ -163,11 +173,11 @@ tr.held{opacity:.55}
     </div>
     <div class="card">
       <h3>스캔 없이 바로 미리보기</h3>
-      <p class="muted">검증(Lint) 스캔을 먼저 돌리지 않아도, 저장소/브랜치/파일 경로만 입력하면 즉시 렌더링합니다. 메인 프로그램을 지정하면 같은 폴더의 INCLUDE 형제 파일까지 함께 가져와 병합합니다.</p>
+      <p class="muted">검증(Lint) 스캔을 먼저 돌리지 않아도, 저장소/브랜치/경로만 입력하면 즉시 렌더링합니다. 폴더 경로를 넣으면 그 아래에서 메인 프로그램(REPORT/PROGRAM 문)을 자동으로 찾고, 파일 경로를 넣으면 그 파일을 기준으로 같은 폴더의 INCLUDE 형제 파일까지 함께 가져와 병합합니다.</p>
       <div class="repo-grid">
         <div><label>GitHub SSH URL</label><input id="directRepoUrl" value="git@github.com:yesblue0342-bit/0Program.git" placeholder="git@github.com:owner/repo.git"></div>
         <div><label>브랜치</label><input id="directBranch" value="main"></div>
-        <div><label>파일 경로(단일 파일)</label><input id="directPath" placeholder="예: 260707_QM023_ZAQMR0130/_abap/ZAQMR0130_S01.abap"></div>
+        <div><label>경로(폴더 또는 파일)</label><input id="directPath" value="260707_QM023_ZAQMR0130" placeholder="예: 260707_QM023_ZAQMR0130 또는 260707_QM023_ZAQMR0130/_abap/ZAQMR0130_S01.abap"></div>
         <div><button class="btn" id="directPreviewBtn" onclick="runPreviewDirect()">미리보기 생성</button></div>
       </div>
       <div class="muted" id="directPreviewStatus" style="margin-top:10px"></div>
@@ -436,14 +446,19 @@ async function runPreview(){
 
 async function runPreviewDirect(){
   const repoUrl=$('directRepoUrl').value.trim(), branch=$('directBranch').value.trim()||'main', path=$('directPath').value.trim();
-  if(!repoUrl||!path){toast('GitHub SSH URL과 파일 경로를 입력하세요');return}
+  if(!repoUrl||!path){toast('GitHub SSH URL과 경로를 입력하세요');return}
   const b=$('directPreviewBtn');
   try{
     busy(b,true,'생성 중');
-    $('directPreviewStatus').textContent='저장소에서 해당 파일만 clone하는 중입니다…';
+    $('directPreviewStatus').textContent='저장소를 clone하는 중입니다…';
     const d=await safeJson(await fetch('/api/cbo-precheck?action=preview-direct',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({repoUrl,branch,path})}));
-    $('directPreviewStatus').textContent=`미리보기 생성 완료 — ${d.file}`;
-    renderPreviewElements(d.elements,d.coverage,d);
+    if(d.multi){
+      $('directPreviewStatus').textContent=`미리보기 생성 완료 — 메인 프로그램 ${d.previews.length}개`;
+      renderMultiPreview(d.previews);
+    }else{
+      $('directPreviewStatus').textContent=`미리보기 생성 완료 — ${d.file}`;
+      renderPreviewElements(d.elements,d.coverage,d);
+    }
   }catch(e){
     $('directPreviewStatus').textContent='';
     toast(e.message);
@@ -482,7 +497,40 @@ function renderAlvEl(el){
   return `<div class="sap-alv"><table><thead><tr>${cols.map(c=>`<th>${esc(c.coltext||c.fieldname)}${c.outputlen?` <span style="font-weight:400;opacity:.6">(${c.outputlen})</span>`:''}</th>`).join('')||'<th>(컬럼 인식 안됨)</th>'}</tr></thead><tbody>${blankRows.map(()=>`<tr>${cols.map(()=>'<td></td>').join('')||'<td></td>'}</tr>`).join('')}</tbody></table></div>`;
 }
 
-function renderPreviewElements(elements,coverage,meta){
+// ALV 툴바 아이콘 근사 표시 — 서버 lib/cbo-precheck/sapStandardSymbols.js ICON_GLYPHS와 동일 매핑
+// (별도 빌드 파이프라인이 없는 SPA라 인라인 <script>에 직접 둔다 — 서버/클라 공유 모듈화는 이번 범위 밖).
+const ICON_GLYPHS={icon_create:'➕',icon_change:'✏️',icon_delete:'🗑️',icon_history:'🕘',icon_alert:'⚠️',icon_system_save:'💾',icon_select_all:'☑️',icon_deselect_all:'⬜',icon_mass_change:'✏️',icon_mass_changes:'✏️',icon_delete_row:'➖',icon_save:'💾',icon_exit:'🚪',icon_green_light:'🟢',icon_yellow_light:'🟡',icon_red_light:'🔴',icon_led_inactive:'⚪'};
+
+function renderDynproScreen(screen){
+  let html=`<div class="sap-screen">`;
+  html+=`<div class="sap-titlebar">Screen ${esc(screen.screenNo)}${screen.title&&screen.title.text?' — '+esc(screen.title.text):''}</div>`;
+  const fcodes=(screen.functionCodes||[]).map(c=>`<span class="sap-fcode">${esc(c)}</span>`).join(' ');
+  html+=`<div class="sap-status-row">${screen.pfStatus?`GUI Status: <b>${esc(screen.pfStatus)}</b>`:'<span class="muted">GUI Status 미검출</span>'}${fcodes?' · 기능코드: '+fcodes:''}</div>`;
+  if(screen.modules&&screen.modules.fallback){
+    html+=`<div class="sap-modules-fallback">⚠ 화면번호로 모듈을 매칭하지 못해 OUTPUT/INPUT 모듈 전체를 표시합니다.</div>`;
+  }
+  if(screen.toolbarButtons&&screen.toolbarButtons.length){
+    html+='<div class="sap-toolbar">'+screen.toolbarButtons.map(b=>{
+      if(b.separator) return '<div class="sap-toolbar-sep"></div>';
+      const glyph=b.icon?(ICON_GLYPHS[String(b.icon).toLowerCase()]||''):'';
+      return `<div class="sap-toolbar-btn" title="${esc(b.quickinfo||b.function||'')}">${glyph?glyph+' ':''}${esc(b.text||b.function||'')}</div>`;
+    }).join('')+'</div>';
+  }
+  if(screen.hasAlvGrid){
+    html+=renderAlvEl({columns:screen.alvColumns});
+    if(!screen.alvColumns||!screen.alvColumns.length){
+      html+=`<div class="sap-unparsed">⚠ ALV 그리드는 있으나 필드카탈로그를 해석하지 못했습니다.</div>`;
+    }
+  }
+  const pbo=screen.modules&&screen.modules.output&&screen.modules.output.length?screen.modules.output.join(', '):'(미검출)';
+  const pai=screen.modules&&screen.modules.input&&screen.modules.input.length?screen.modules.input.join(', '):'(미검출)';
+  html+=`<div class="sap-flow-text">PBO: ${esc(pbo)} → PAI: ${esc(pai)}</div>`;
+  html+=`<div class="sap-limit-note">Screen Painter 레이아웃과 Flow Logic은 소스에 없어 실제 필드 배치와 다를 수 있습니다. ALV 컬럼·툴바·기능코드·모듈은 소스에서 추출한 실제 값입니다.</div>`;
+  html+='</div>';
+  return html;
+}
+
+function buildPreviewHtml(elements,coverage,meta){
   meta=meta||{};
   let banner='';
   if(meta.mergedFiles&&meta.mergedFiles.length){
@@ -521,7 +569,22 @@ function renderPreviewElements(elements,coverage,meta){
   while(openBlocks>0){html+='</div>';openBlocks--}
   html+='</div>';
   html+=`<div class="sap-coverage">해석됨 ${coverage.parsed}개 / 해석 불가 ${coverage.unparsed}개</div>`;
-  $('previewRoot').innerHTML=banner+html;
+  if(meta.flow&&meta.flow.length){
+    html+=`<div class="sap-flow-banner">화면 전환 흐름: ${meta.flow.map(esc).join(' → ')}</div>`;
+  }
+  if(meta.screens&&meta.screens.length){
+    html+=meta.screens.map(renderDynproScreen).join('');
+  }
+  return banner+html;
+}
+function renderPreviewElements(elements,coverage,meta){
+  $('previewRoot').innerHTML=buildPreviewHtml(elements,coverage,meta);
+}
+function renderMultiPreview(previews){
+  $('previewRoot').innerHTML=previews.map(p=>{
+    if(p.ok===false) return `<h3 style="margin:18px 6px 6px">${esc(p.file||'')}</h3><div class="sap-unparsed">⚠ ${esc(p.message||'미리보기 생성 실패')}</div>`;
+    return `<h3 style="margin:18px 6px 6px">${esc(p.file)}</h3>`+buildPreviewHtml(p.elements,p.coverage,p);
+  }).join('');
 }
 
 loadCapabilities();

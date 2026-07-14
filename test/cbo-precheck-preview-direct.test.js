@@ -95,3 +95,44 @@ test(
     assert.equal(res._body.ok, false);
   }
 );
+
+// Phase 2(재작업): 폴더 경로 입력 — 직전 세션(mission 8)은 이 분기 자체가 없어 폴더만 넣으면 항상
+// "ABAP 소스 파일을 찾지 못했습니다"였다(WORK_REPORT.md "실패 재작업" Phase 0 참고). 실제 저장소에는
+// 같은 폴더에 메인 프로그램이 2개(ZAQMR0130.abap, ZAQMR0131.abap) 있어 다중 렌더 분기까지 확인 가능하다.
+test(
+  "GATE 2 (a)(c): 실제 0Program 저장소 — 폴더 경로만 입력하면 메인 프로그램(2개)을 자동 탐지해 전부 렌더링한다",
+  { skip: sshOk ? false : "SSH(배포키) 접근 불가 — 네트워크 제약으로 skip" },
+  async () => {
+    const res = mockRes();
+    await handler({
+      method: "POST",
+      query: { action: "preview-direct" },
+      body: { repoUrl: LIVE_REPO, branch: "main", path: "260707_QM023_ZAQMR0130" },
+    }, res);
+    assert.equal(res._status, 200, JSON.stringify(res._body));
+    assert.equal(res._body.ok, true);
+    assert.equal(res._body.multi, true, "메인 프로그램이 2개면 multi 응답이어야 함");
+    assert.equal(res._body.previews.length, 2);
+    const main = res._body.previews.find((p) => p.file === "_abap/ZAQMR0130.abap");
+    assert.ok(main, "ZAQMR0130.abap 미리보기가 있어야 함");
+    assert.equal(main.ok, true);
+    assert.equal(main.elements.length, 18, "Selection Screen 18개 요소 — 회귀 없음(기존 GATE 1 기준선)");
+    assert.equal(main.mergedFiles.length, 6, "INCLUDE 6개 병합 — 회귀 없음(기존 GATE 2 기준선)");
+  }
+);
+
+test(
+  "GATE 2 (d): 메인 프로그램(REPORT/PROGRAM 문)이 없는 폴더는 명확한 404 오류를 반환한다",
+  { skip: sshOk ? false : "SSH(배포키) 접근 불가 — 네트워크 제약으로 skip" },
+  async () => {
+    const res = mockRes();
+    await handler({
+      method: "POST",
+      query: { action: "preview-direct" },
+      body: { repoUrl: LIVE_REPO, branch: "main", path: "260707_QM023_ZAQMR0130/notes" },
+    }, res);
+    assert.equal(res._status, 404, JSON.stringify(res._body));
+    assert.equal(res._body.ok, false);
+    assert.match(res._body.message, /메인 프로그램/);
+  }
+);

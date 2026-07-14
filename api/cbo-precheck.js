@@ -3,7 +3,7 @@
 // server.mjs 라우팅은 /api/<단일세그먼트> 만 허용(하위 경로 없음) — 미션 문서의
 // `POST /api/cbo-precheck/scan` 형태 대신 기존 cbo-review.js 관례(action 쿼리 파라미터)를 따른다.
 import crypto from "node:crypto";
-import { scanFiles, buildConfig, isScannable } from "../lib/cbo-precheck/scan.js";
+import { scanFiles, buildConfig, isScannable, isAbapSource, hasReportStatement } from "../lib/cbo-precheck/scan.js";
 import { withClonedRepo, collectAbapFiles } from "../lib/cbo-precheck/repoFetch.js";
 import { saveScan, getScan, updateIssue } from "../lib/cbo-precheck/store.js";
 import { exportScan, CONTENT_TYPES } from "../lib/cbo-precheck/exportFormats.js";
@@ -186,38 +186,73 @@ async function handlePreview(req, res) {
   }
 }
 
-// [화면 미리보기 독립 실행 — Phase 3] 사전 스캔 없이 GitHub SSH URL/브랜치/단일 파일 경로만으로 즉시
-// 미리보기를 생성한다. `path`는 여전히 파일 하나를 가리키지만(단일 파일 지정 UX 불변), Phase 2부터는
-// 그 파일이 속한 폴더 전체를 clone 대상으로 삼는다 — 같은 폴더의 INCLUDE 형제/TEXTS 문서를 찾아 메인
-// 프로그램 하나만 지정해도 전체 화면을 병합 렌더링하기 위함(repoFetch.collectAbapFiles가 폴더 재귀
-// 수집을 이미 지원 — 신규 clone 방식 도입 없음). GITHUB_TOKEN 불필요(SSH 배포키 clone만, action=scan과 동일).
+// [화면 미리보기 독립 실행 — Phase 3, 폴더 경로는 Phase 2] 사전 스캔 없이 GitHub SSH URL/브랜치/경로만으로
+// 즉시 미리보기를 생성한다. `path`는 파일(`*.abap`로 끝남) 또는 폴더 둘 다 받는다 — 파일이면 기존과 동일하게
+// 그 파일이 속한 폴더 전체를 clone해 같은 폴더의 INCLUDE 형제/TEXTS 문서를 찾아 병합 렌더링한다(회귀 없음).
+// 폴더면 그 폴더를 통째로 clone해 하위 전체에서 메인 프로그램(REPORT/PROGRAM 문 포함)을 자동으로 찾는다
+// (WORK_REPORT.md 2026-07-14 "실패 재작업" 세션 — 직전 세션은 이 분기 자체가 없어 폴더만 넣으면 항상 404였다).
+// GITHUB_TOKEN 불필요(SSH 배포키 clone만, action=scan과 동일).
 async function handlePreviewDirect(req, res) {
   const repoUrl = String(req.body?.repoUrl || "").trim();
   const branch = String(req.body?.branch || "main").trim();
-  const filePath = String(req.body?.path || "").trim();
+  const rawPath = String(req.body?.path || "").trim();
   if (!repoUrl) return json(res, 400, { ok: false, message: "repoUrl이 필요합니다." });
-  if (!filePath) return json(res, 400, { ok: false, message: "미리볼 파일 경로가 필요합니다(단일 파일)." });
+  if (!rawPath) return json(res, 400, { ok: false, message: "미리볼 경로가 필요합니다(폴더 또는 파일)." });
 
-  const normalizedPath = filePath.replaceAll("\\", "/").replace(/^\/+/, "");
-  const slashIdx = normalizedPath.lastIndexOf("/");
-  const baseName = slashIdx >= 0 ? normalizedPath.slice(slashIdx + 1) : normalizedPath;
-  const dirPath = slashIdx >= 0 ? normalizedPath.slice(0, slashIdx) : "";
+  const normalizedPath = rawPath.replaceAll("\\", "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  const isFilePath = isAbapSource(normalizedPath);
 
+  if (isFilePath) {
+    const slashIdx = normalizedPath.lastIndexOf("/");
+    const baseName = slashIdx >= 0 ? normalizedPath.slice(slashIdx + 1) : normalizedPath;
+    const dirPath = slashIdx >= 0 ? normalizedPath.slice(0, slashIdx) : "";
+
+    let files;
+    try {
+      files = await withClonedRepo({ repoUrl, branch, path: dirPath }, (root) => collectAbapFiles(root));
+    } catch (e) {
+      return json(res, 400, { ok: false, message: String(e?.message || e) });
+    }
+    const file = files.find((f) => f.name === baseName && !f.isDdic && !f.isTexts && !f.isDict);
+    if (!file) return json(res, 404, { ok: false, message: "ABAP 소스 파일을 찾지 못했습니다(경로를 확인하세요)." });
+
+    try {
+      const result = buildPreview(file.name, file.content, files);
+      return json(res, 200, { ok: true, ...result });
+    } catch (e) {
+      return json(res, 500, { ok: false, message: String(e?.message || e) });
+    }
+  }
+
+  // 폴더 경로 — 하위 전체를 clone해 메인 프로그램을 자동 탐지한다.
   let files;
   try {
-    files = await withClonedRepo({ repoUrl, branch, path: dirPath }, (root) => collectAbapFiles(root));
+    files = await withClonedRepo({ repoUrl, branch, path: normalizedPath }, (root) => collectAbapFiles(root));
   } catch (e) {
     return json(res, 400, { ok: false, message: String(e?.message || e) });
   }
-  const file = files.find((f) => f.name === baseName && !f.isDdic && !f.isTexts && !f.isDict);
-  if (!file) return json(res, 404, { ok: false, message: "ABAP 소스 파일을 찾지 못했습니다(경로를 확인하세요)." });
+  const mainFiles = files.filter((f) => isAbapSource(f.name) && !f.isDdic && !f.isTexts && !f.isDict && hasReportStatement(f.content));
+  if (!mainFiles.length) return json(res, 404, { ok: false, message: "이 폴더에서 메인 프로그램(REPORT/PROGRAM 문이 있는 .abap 파일)을 찾지 못했습니다." });
 
-  try {
-    const result = buildPreview(file.name, file.content, files);
-    return json(res, 200, { ok: true, ...result });
-  } catch (e) {
-    return json(res, 500, { ok: false, message: String(e?.message || e) });
+  if (mainFiles.length === 1) {
+    try {
+      const result = buildPreview(mainFiles[0].name, mainFiles[0].content, files);
+      return json(res, 200, { ok: true, ...result });
+    } catch (e) {
+      return json(res, 500, { ok: false, message: String(e?.message || e) });
+    }
   }
+
+  // 메인 프로그램이 여러 개면(예: ZAQMR0130.abap + ZAQMR0131.abap) 전부 렌더링한다 — 사용자 선택 UI보다
+  // 구현이 단순하고, 스펙 문서 작성 시 어차피 전부 확인해야 하므로 한 번에 보여주는 쪽을 택했다.
+  const previews = mainFiles.map((file) => {
+    try {
+      return { ok: true, file: file.name, ...buildPreview(file.name, file.content, files) };
+    } catch (e) {
+      return { ok: false, file: file.name, message: String(e?.message || e) };
+    }
+  });
+  return json(res, 200, { ok: true, multi: true, previews });
 }
 
 export default async function handler(req, res) {
