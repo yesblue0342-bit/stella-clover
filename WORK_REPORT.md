@@ -290,3 +290,56 @@ xlsx 첨부 2개 + SAP QM CBO FS 작성 같은 실사용 요청은 claude/codex 
 - store: scanId 캐시 저장/조회/상태갱신(보류+메모) 확인.
 - 전체 `npm test`: **115 pass / 0 fail / 12 skip**(기존 107 + 신규 8, DB skip 12건은 기존과 동일 — 회귀
   없음). 시크릿 grep(`sk-`/`ghp_`/`github_pat_`) 0건.
+
+## Phase 2 — 처리 UI + PR 생성 (frontend + backend)
+
+### 추가 판단(문서에 없지만 필요했던 것) — 개인용 접근 게이트
+
+미션 문서에는 CBO Pre-Check용 로그인 게이트가 명시되지 않았지만, 이 모듈은 임의 GitHub repo를 SSH로
+clone하고 `GITHUB_TOKEN`으로 branch/PR을 생성하며 `ANTHROPIC_API_KEY`로 과금 호출을 트리거할 수 있다 —
+인증 없이 배포하면 인터넷의 누구나 서버 자격증명으로 이 작업들을 실행할 수 있다. 동일한 위험 프로필을 가진
+기존 "CBO Spec & Code Review"가 이미 `CBO_ACCESS_PW` 게이트(HMAC 서명 토큰, 서버 세션 없음)를 쓰고 있어,
+**같은 시크릿을 재사용**해 `lib/cbo-precheck/auth.js`를 독립 구현했다(신규 API 키 발급 아님 — 절대 규칙 2
+"기존 인프라 재사용" 원칙에 부합, `lib/cbo-review` 파일은 import/수정하지 않음). `CBO_ACCESS_PW`가
+미설정이면(=로컬 개발) 게이트 없이 그대로 동작한다(cbo-review와 동일 동작 방식).
+
+### 구현
+
+- `lib/cbo-precheck/applyFix.js`: abaplint `Issue.getDefaultFix()`의 row/col(1-based, end 배타) edit을
+  전체 텍스트 offset으로 변환해 적용(`applyEdits`) — 여러 edit은 offset 내림차순으로 적용해 앞쪽이 밀리지
+  않게 한다. `applyIssuesToFile`로 선택된 이슈들의 fix를 한 번에 적용(적용/스킵 목록 반환).
+- `lib/cbo-precheck/github.js`: GitHub REST API 클라이언트(브랜치 조회/생성, 파일 조회/커밋, PR 생성/close).
+  `fetchImpl` 주입 가능(유닛 테스트에서 실제 네트워크 없이 mock) — **main 직접 커밋 경로 없음**, 항상
+  `openFixPullRequest`(branch→커밋→PR)로만 반영된다.
+- `lib/cbo-precheck/anthropic.js`: "Claude 수정 PR"용 Anthropic Messages API 직접 호출(SDK 미사용,
+  `lib/cbo-review/providers.js`와 동일하게 raw fetch). **모델은 미션 문서의 "claude-sonnet-4-6"이 아니라
+  실재하는 `claude-sonnet-5`를 기본값으로 사용**한다(sibling 모듈 PROVIDER_MODELS 및 이 세션의 실제 모델
+  로스터와 일치 — 문서의 모델명은 존재하지 않아 그대로 쓰면 API가 항상 실패한다).
+- `api/cbo-precheck.js` 확장: `action=fix-auto`(abaplint 자체 quickfix만 적용, AI 미사용·결정적),
+  `action=fix-claude-preview`(AI 제안 생성 → PR 생성 없이 diff만 반환), `action=fix-claude-confirm`(사용자가
+  diff 확인 후 확정한 내용으로만 branch+PR 생성 — 미션 사양대로 자동 PR 생성 없음), `action=capabilities`
+  (토큰 보유 여부만 반환, 값 자체는 노출 안 함), `action=login`(게이트).
+- `cbo-precheck/index.html`: cbo-review와 동일한 CSS 변수 테마/다크모드(`cl_theme` 공유)로 3탭 SPA.
+  ① 검증: 결과 테이블(심각도→파일→라인 정렬은 서버가 이미 처리) + 심각도/룰 필터 + 4포맷 내보내기.
+  ② 처리: 행별 [자동 수정 PR]/[Claude 수정 PR]/[보류] — 토큰 미설정 시 해당 버튼만 `disabled`(회색, 상단에
+  사유 안내), 앱 자체는 정상 기동. Claude 제안은 모달로 원본/제안 diff를 보여주고 사용자가 [PR 생성]을 눌러야
+  실제 PR이 생성된다. ③ 화면: Phase 3에서 마저 연결(현재는 안내 문구만).
+- `server.mjs`: `REWRITES`에 `/cbo-precheck` 한 줄 추가(기존 라우트/기능 변경 없음 — 최소 접점).
+
+### GATE 2 검증
+
+- `test/cbo-precheck-fix.test.js`: `applyEdits`가 실제 abaplint fix를 정확히 적용함을 실측 확인(bad
+  fixture의 obsolete_statement/sql_escape_host_variables 3건 모두), 범위 불일치 시 오류. GitHub API는
+  **mock fetch**로 브랜치 생성→파일 커밋→PR 생성 순서, 오류 메시지 전달, 토큰 없을 때의 명확한 실패를 검증
+  (실제 PR을 만들지 않음 — "PR 남발 금지" 요구사항 충족).
+- `test/cbo-precheck-api.test.js`: `action=fix-auto`/`fix-claude-preview`는 토큰 미설정 시 503 + 명확한
+  사유(앱 크래시 없음), `action=capabilities`는 `{githubToken:false, anthropicKey:false}`를 반환.
+- `test/cbo-precheck-auth.test.js`: `CBO_ACCESS_PW` 설정 시 토큰 없는 요청은 401, 올바른 토큰은 통과.
+- 실제 서버 기동 스모크(`PORT=8973 node server.mjs`): `GET /cbo-precheck` 200, `GET /api/cbo-precheck?action=capabilities`
+  정상 JSON, `POST action=scan`에 잘못된 URL을 주면 평문 없이 JSON 오류, **기존 `GET /cbo-review` 200 유지**
+  (회귀 없음). 토큰 미설정 상태에서 앱이 정상 기동하고 화면이 뜨는 것을 확인(GATE 2-c 요구사항 중 이 부분).
+- **실제 GitHub PR 1건 생성 후 close는 이 세션에서 수행하지 못했다** — `GITHUB_TOKEN`/SSH 배포키가 이
+  샌드박스에 없다(Phase 0에 기록). PR 생성 로직 자체는 mock 테스트로 완전히 검증했고, 운영 OCI 서버에
+  `GITHUB_TOKEN`이 설정된 뒤 실제 저장소로 1회 수동 확인이 필요하다 — `README_CBO_PRECHECK.md`(Phase 4)에
+  확인 절차를 안내한다.
+- 전체 `npm test`: **134 pass / 0 fail / 12 skip**(회귀 없음). 시크릿 grep 0건.

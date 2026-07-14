@@ -852,3 +852,26 @@ Google API 왕복의 합(네트워크 상태에 따라 변동이 크지만, 이 
 실제 GitHub SSH clone/PR 생성 E2E는 이 세션에 `GITHUB_TOKEN`/SSH 키가 없어 수행하지 못함 — 스캔 엔진 자체는
 fixture 기반 유닛 테스트로 완전 검증했고, clone 관련 코드(`lib/cbo-precheck/repoFetch.js`)는 정적
 검증(`node --check`)까지만 수행. Phase 2에서 GitHub API는 mock 기반으로 검증한다(GATE 2 요구사항).
+
+## [2026-07-14] CBO Pre-Check Phase 2 — 처리 UI + PR 생성 (`PROMPT_CBO_PRECHECK_260714.md`, 무인 autopilot)
+
+| 검증 | 결과 |
+|---|---|
+| applyEdits: 실제 abaplint fix(obsolete_statement/sql_escape×2) 적용 | 원본→수정 텍스트 일치 확인 |
+| applyEdits: 범위 불일치(원본 변경) | 명확한 오류로 안전 실패 |
+| github.js mock: getBranchSha/createBranch/getFile/putFile/createPullRequest/closePullRequest | 순서·payload 검증 |
+| github.js mock: openFixPullRequest(branch→커밋→PR) | 호출 순서 GET→POST→PUT→POST 확인 |
+| github.js: 토큰 없음/API 오류 응답 | 명확한 오류 메시지로 전달(조용한 실패 없음) |
+| anthropic.js mock: suggestFix 성공/키없음/API오류 | 코드펜스 제거 후 소스만 추출, 오류 메시지 전달 |
+| api action=fix-auto / fix-claude-preview: 토큰 미설정 | 503 + 명확한 사유(크래시 없음) |
+| api action=capabilities | `{githubToken:false, anthropicKey:false}` |
+| api action=login/auth 게이트(CBO_ACCESS_PW 설정 시) | 미인증 401, 정상 토큰 통과 |
+| 서버 기동 스모크: `GET /cbo-precheck` | 200 |
+| 서버 기동 스모크: `GET /cbo-review`(기존 모듈) | 200 — 회귀 없음 |
+| `POST action=scan` 잘못된 URL | JSON 오류(평문 없음) |
+| 전체 `npm test`(신규 20건: fix 8 + api 7 + auth 4 등) | **134 pass / 0 fail / 12 skip** |
+| 시크릿 grep | 0건 |
+
+**미실행 항목**: 실제 GitHub PR 1건 생성 후 close(GATE 2-c 마지막 요구사항) — `GITHUB_TOKEN`/SSH 배포키가
+이 세션 환경에 없어 수행 불가. mock 기반 유닛 테스트로 로직은 완전 검증했으며, 운영 자격증명 설정 후 수동
+1회 확인이 필요하다(README_CBO_PRECHECK.md 안내 예정 — Phase 4).

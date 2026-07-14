@@ -89,6 +89,7 @@ const REWRITES = {
   "/rate": "rate/index.html", "/stella-rate": "rate/index.html", "/currency": "rate/index.html",
   "/notes": "note/index.html", "/stella-notes": "note/index.html",
   "/cbo-review": "cbo-review/index.html", "/stella-cbo-review": "cbo-review/index.html",
+  "/cbo-precheck": "cbo-precheck/index.html", "/stella-cbo-precheck": "cbo-precheck/index.html",
 };
 app.get(/.*/, (req, res, next) => {
   const target = REWRITES[req.path];
