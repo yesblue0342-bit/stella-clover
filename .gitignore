@@ -1,16 +1,16 @@
-# 시크릿/로컬
+﻿# ?쒗겕由?濡쒖뺄
 .env
 .env.local
 *.log
 
-# 의존성/빌드
+# ?섏〈??鍮뚮뱶
 node_modules/
 package-lock.json
 
-# 런타임 로컬 데이터(오디오 청크 등) — 커밋 금지
+# ?고???濡쒖뺄 ?곗씠???ㅻ뵒??泥?겕 ?? ??而ㅻ컠 湲덉?
 data/
 
-# OS/에디터
+# OS/?먮뵒??
 .DS_Store
 *.swp
 .codex/*
@@ -21,3 +21,13 @@ data/
 .codex/skills/.system/**
 !.codex/prompts/
 !.codex/prompts/**
+
+# ?먯씠?꾪듃 ?꾧뎄 濡쒖뺄 ?ㅼ젙
+.omc/
+.omx/
+
+# autopilot ?꾨＼?꾪듃/?묒뾽 硫붾え (濡쒖뺄 ?꾩슜)
+PROMPT_*.md
+prompt_*.md
+stella_clover_*.md
+stellaclover_*.md
