@@ -1,5 +1,22 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-17] CBO Pre-Check 화면 미리보기 모바일 반응형 수정 (휴대폰 깨짐 해결)
+
+### 문제 / 원인
+- SAP 화면 미리보기가 PC는 정상, 휴대폰에서 깨짐: (1) `.sap-label` 고정 180px + `.sap-select-options` 고정폭
+  from/to + ⋯ 버튼이 폰 폭을 넘겨 ⋯ 가 블록 밖으로 밀리고, (2) `FOR zaqmt0132-werksOBLIGATORYDEFAULT...`
+  같은 긴 ABAP 토큰이 줄바꿈 안 돼 가로 오버플로 유발.
+### 조치 (cbo-precheck/index.html, CSS만)
+- 라벨/헬퍼 텍스트에 `overflow-wrap:anywhere; word-break:break-word` → 긴 토큰 줄바꿈.
+- `@media(max-width:640px)`: 라벨을 한 줄 전체로(입력은 아래 줄로 스택), from/to 입력은 `flex:1`로 폭에 맞춰 신축,
+  ⋯ 버튼은 고정, 블록 제목은 static 배치(좁은 폭에서 잘림 방지), 화면/블록 패딩·타이틀바 마진 축소.
+  ※ 데스크톱(≥641px) 레이아웃은 불변(회귀 없음).
+### 검증 (playwright-core + 프리빌트 chromium) — 5/5 PASS
+- ZAQMR0131 유사 가짜 elements를 실제 렌더 함수(renderPreviewElements)로 그려 측정:
+  390px에서 페이지 가로 오버플로 없음(scrollW 390=innerW 390), SAP 화면 266px·최광폭 행 228px로 뷰포트 이내,
+  데스크톱 1280px 오버플로 없음. 모바일 스크린샷으로 라벨-입력 스택·⋯ 정위치·긴 토큰 줄바꿈 육안 확인. SW v36→v37.
+
+
 ## [2026-07-11] 앱바 메뉴탭 정리 — 도구 5종을 드롭다운으로 묶어 상단 정돈
 
 ### 문제 / 조치

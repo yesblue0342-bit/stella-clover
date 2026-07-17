@@ -64,7 +64,8 @@ tr.held{opacity:.55}
 .sap-block{border:1px solid #6b6b6b;border-radius:2px;margin:16px 6px 10px;padding:14px 10px 12px;position:relative}
 .sap-block-title{font-weight:700;font-size:12px;position:absolute;top:-10px;left:8px;background:#eeeeea;padding:0 4px}
 .sap-row{display:flex;align-items:center;gap:8px;margin:7px 0;flex-wrap:wrap}
-.sap-label{width:180px;flex:0 0 auto;text-align:left;font-size:12px}
+.sap-label{width:180px;flex:0 0 auto;text-align:left;font-size:12px;overflow-wrap:anywhere;word-break:break-word}
+.sap-row .muted{min-width:0;overflow-wrap:anywhere;word-break:break-word}
 .sap-input{width:auto;min-width:120px;border:1px solid #6b6b6b;background:#fff;color:#111;padding:3px 6px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
 .sap-input.checkbox{width:16px;min-width:0;height:16px;padding:0}
 .sap-obligatory{color:#0a7a3d;font-weight:900;margin-left:2px}
@@ -96,6 +97,20 @@ tr.held{opacity:.55}
 .sap-limit-note{font-size:11px;color:#7a5b00;background:#fff3cd;border:1px dashed #c9a227;padding:6px 8px;margin:12px 6px 0;border-radius:4px}
 .sap-modules-fallback{font-size:11px;color:var(--warn)}
 @media(max-width:900px){.hero,.repo-grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,1fr)}.diff{grid-template-columns:1fr}}
+/* ── 모바일: SAP 화면 미리보기가 폰 폭에서 깨지지 않게(라벨 위·입력 아래로 스택, 필드는 폭에 맞춰 신축) ── */
+@media(max-width:640px){
+  .sap-screen{padding:12px 8px}
+  .sap-block{margin:16px 2px 10px;padding:16px 8px 12px}
+  .sap-titlebar{margin:-12px -8px 12px}
+  .sap-row{gap:3px 6px}
+  .sap-label{flex:1 1 100%;width:auto;font-weight:700}                 /* 라벨을 한 줄 전체로(입력은 아래 줄) */
+  .sap-input{min-width:0}
+  .sap-row>.sap-input:not(.checkbox){flex:1 1 auto;width:100%}         /* 단일 파라미터 입력 = 폭 채움 */
+  .sap-select-options{flex:1 1 100%;width:100%}                        /* from – to ⋯ 를 한 줄에 폭 맞춰 */
+  .sap-select-options .sap-input{flex:1 1 0;width:auto}
+  .sap-multi-btn{flex:0 0 auto}
+  .sap-block-title{position:static;display:inline-block;top:auto;left:auto;margin:0 0 6px} /* 제목이 좁은 폭에서 잘리지 않게 */
+}
 </style></head><body>
 
 <header class="appbar"><div class="bar">
