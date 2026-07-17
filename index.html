@@ -37,10 +37,22 @@ button{font-family:inherit}
 .appbar-in{max-width:920px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:10px 14px;flex-wrap:wrap}
 .logo{display:flex;align-items:center;gap:7px;font-weight:900;font-size:1.08rem;letter-spacing:-.3px;white-space:nowrap}
 .logo .leaf{font-size:1.25rem}
-.tabs{display:flex;gap:4px;margin-left:6px}
-.tab{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;padding:7px 14px;font-size:.86rem;font-weight:700;cursor:pointer;min-height:38px}
+.tabs{display:flex;align-items:center;gap:4px;margin-left:6px}
+.tab{border:none;background:rgba(255,255,255,.14);color:#fff;border-radius:10px;padding:7px 14px;font-size:.86rem;font-weight:700;cursor:pointer;min-height:38px;white-space:nowrap}
 .tab.active{background:#fff;color:var(--brand)}
 .appbar-sp{flex:1}
+/* ── 도구 드롭다운 (차트/환율/노트/CBO … 를 한곳에 모아 앱바 정리) ── */
+.menu-wrap{position:relative;display:inline-flex}
+.menu-btn{display:inline-flex;align-items:center;gap:5px}
+.menu-btn .caret{font-size:.7rem;transition:transform .15s}
+.menu-btn[aria-expanded="true"] .caret{transform:rotate(180deg)}
+.menu-pop{position:absolute;top:calc(100% + 8px);right:0;left:auto;width:max-content;min-width:220px;max-width:min(280px,calc(100vw - 24px));background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:14px;box-shadow:0 12px 34px rgba(0,0,0,.22);padding:6px;display:none;z-index:40}
+.menu-pop.open{display:block}
+.menu-pop button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:none;background:transparent;color:inherit;padding:10px 12px;border-radius:10px;cursor:pointer;font-size:.92rem;font-weight:700;min-height:44px}
+.menu-pop button .mi-ic{font-size:1.15rem;width:22px;text-align:center;flex:0 0 auto}
+.menu-pop button .mi-tx{display:flex;flex-direction:column;gap:1px;min-width:0}
+.menu-pop button .mi-tx small{font-size:.72rem;font-weight:500;color:var(--text2)}
+.menu-pop button:hover,.menu-pop button:focus{background:var(--surface2);outline:none}
 .user-chip{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.16);border:none;color:#fff;border-radius:999px;padding:6px 12px;font-size:.82rem;font-weight:700;cursor:pointer;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ic-btn{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.14);color:#fff;border-radius:10px;min-width:38px;min-height:38px;font-size:1rem;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
 
@@ -174,11 +186,16 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
     <div class="tabs">
       <button class="tab active" id="tabBtnConvert" onclick="showTab('convert')">변환</button>
       <button class="tab" id="tabBtnMy" onclick="showTab('my')">마이</button>
-      <button class="tab" id="tabBtnChart" onclick="location.href='/flow'" title="표→플로우차트 만들기">📊 차트</button>
-      <button class="tab" id="tabBtnRate" onclick="location.href='/rate'" title="환율 계산기">💱 환율</button>
-      <button class="tab" id="tabBtnNotes" onclick="location.href='/notes'" title="노트 작성/검색">📝 노트</button>
-      <button class="tab" id="tabBtnCbo" onclick="location.href='/cbo-review'" title="SAP 프로그램 스펙 작성 및 코드 리뷰">CBO Spec&amp;Code Review</button>
-      <button class="tab" id="tabBtnCboPrecheck" onclick="location.href='/cbo-precheck'" title="ABAP 소스 abaplint 검증 및 화면 미리보기">CBO Pre-Check</button>
+      <div class="menu-wrap">
+        <button class="tab menu-btn" id="toolsBtn" onclick="toggleTools(event)" aria-haspopup="true" aria-expanded="false" title="도구 더보기">🧰 도구 <span class="caret">▾</span></button>
+        <div class="menu-pop" id="toolsMenu" role="menu" aria-label="도구">
+          <button role="menuitem" onclick="goTool('/flow')"><span class="mi-ic">📊</span><span class="mi-tx">차트<small>표 → 플로우차트</small></span></button>
+          <button role="menuitem" onclick="goTool('/rate')"><span class="mi-ic">💱</span><span class="mi-tx">환율<small>환율 계산기</small></span></button>
+          <button role="menuitem" onclick="goTool('/notes')"><span class="mi-ic">📝</span><span class="mi-tx">노트<small>노트 작성·검색</small></span></button>
+          <button role="menuitem" onclick="goTool('/cbo-review')"><span class="mi-ic">🧩</span><span class="mi-tx">CBO 스펙·리뷰<small>스펙 작성 및 코드 리뷰</small></span></button>
+          <button role="menuitem" onclick="goTool('/cbo-precheck')"><span class="mi-ic">✅</span><span class="mi-tx">CBO 프리체크<small>ABAP 검증·화면 미리보기</small></span></button>
+        </div>
+      </div>
     </div>
     <div class="appbar-sp"></div>
     <button class="user-chip" id="userChip" onclick="editProfile()" title="프로필 편집">👤 <span id="userName">사용자</span></button>
@@ -501,6 +518,24 @@ function showTab(name){
   if(!conv){ refreshMyPage(); }
   window.scrollTo({top:0,behavior:'smooth'});
 }
+/* ═══════════ 도구 드롭다운 (차트/환율/노트/CBO) ═══════════ */
+function _toolsOutside(e){ if(!e.target.closest('.menu-wrap')) closeTools(); }
+function openTools(){
+  $('toolsMenu').classList.add('open');
+  $('toolsBtn').setAttribute('aria-expanded','true');
+  setTimeout(function(){ document.addEventListener('click',_toolsOutside); },0); // 바깥 클릭 시 닫기(백드롭 없이)
+}
+function closeTools(){
+  var m=$('toolsMenu'); if(m)m.classList.remove('open');
+  var t=$('toolsBtn'); if(t)t.setAttribute('aria-expanded','false');
+  document.removeEventListener('click',_toolsOutside);
+}
+function toggleTools(e){
+  if(e){e.stopPropagation();}
+  ($('toolsMenu').classList.contains('open')?closeTools:openTools)();
+}
+function goTool(path){ closeTools(); location.href=path; }
+document.addEventListener('keydown',function(e){ if(e.key==='Escape')closeTools(); });
 function toggleAdv(){
   const b=$('advBody'), open=b.classList.toggle('open');
   $('advToggle').textContent = open?'⚙️ 고급 옵션 ▴':'⚙️ 고급 옵션 ▾';

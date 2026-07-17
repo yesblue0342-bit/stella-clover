@@ -1,5 +1,19 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-11] 앱바 메뉴탭 정리 — 도구 5종을 드롭다운으로 묶어 상단 정돈
+
+### 문제 / 조치
+- 상단 탭이 변환·마이·차트·환율·노트·CBO Spec&Code Review·CBO Pre-Check 7개로 늘어 모바일에서 줄바꿈·넘침으로 지저분.
+- 핵심 인페이지 탭(변환·마이)만 노출로 유지하고, 화면 이동형 도구 5종(차트/환율/노트/CBO 스펙·리뷰/CBO 프리체크)을
+  하나의 "🧰 도구" 드롭다운으로 묶음. 아이콘 + 한 줄 설명. 라이트/다크 테마 토큰(--surface/--text/--border) 사용.
+- 바깥 클릭 닫힘은 전체화면 백드롭 대신 document click 리스너로 처리(백드롭 z-index가 sticky 앱바를 덮어
+  탭 클릭을 가로채던 문제 제거). Esc로도 닫힘.
+
+### 검증 (playwright-core + 프리빌트 chromium, 390px) — 11/11 PASS
+- 앱바 노출 항목 3개(변환/마이/도구)만, 도구 클릭 시 메뉴 5종 표시, aria-expanded 토글, 바깥 클릭·항목 클릭 이동,
+  변환/마이 탭 전환 정상, 라이트/다크 스크린샷 확인(메뉴가 화면 안에 우측 정렬로 표시). SW 캐시 v35→v36.
+
+
 ## [2026-07-14] CBO Pre-Check — SALV(CL_SALV_TABLE) 전체화면 ALV 결과화면 렌더링 재작업 (`stella_clover_improvement_260714_1_retry.md`, 무인 재작업 세션)
 
 직전 세션이 "이미 완료됨"이라고 잘못 보고한 건을 재검증 후 실제 구현. `lib/cbo-precheck/dynproPreview.js`에
