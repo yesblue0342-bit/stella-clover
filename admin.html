@@ -24,6 +24,7 @@ h2{font-size:1.05rem;font-weight:900;margin:22px 0 10px}
 .u button{border:none;border-radius:9px;padding:8px 12px;font-size:.82rem;font-weight:800;cursor:pointer}
 .approve{background:var(--brand);color:#fff}
 .reject{background:rgba(220,38,38,.12);color:var(--danger)}
+.setpw{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
 .tag{font-size:.68rem;font-weight:800;padding:2px 8px;border-radius:99px}
 .tag.admin{background:rgba(124,58,237,.15);color:#7c3aed}
 .tag.approved{background:rgba(22,163,74,.14);color:var(--brand2)}
@@ -70,11 +71,20 @@ async function load(){
   var us=(all&&all.users)||[];
   $('all').innerHTML = us.map(u=>{
     var tag = u.role==='admin' ? '<span class="tag admin">관리자</span>' : '<span class="tag '+esc(u.status)+'">'+(u.status==='approved'?'승인됨':u.status==='pending'?'대기':'거부')+'</span>';
+    var pw = '<button class="setpw" onclick="resetPw(\''+esc(u.username)+'\')">비번 재설정</button>';
     var act = (u.role!=='admin') ? (u.status==='approved'
         ? '<button class="reject" onclick="reject(\''+esc(u.username)+'\')">삭제</button>'
         : '<button class="approve" onclick="approve(\''+esc(u.username)+'\')">승인</button><button class="reject" onclick="reject(\''+esc(u.username)+'\')">거부</button>') : '';
-    return '<div class="u"><div class="nm"><b>'+esc(u.username)+'</b> '+tag+'<small>가입 '+esc(fmt(u.created_at))+(u.approved_by?(' · 승인자 '+esc(u.approved_by)):'')+'</small></div>'+act+'</div>';
+    return '<div class="u"><div class="nm"><b>'+esc(u.username)+'</b> '+tag+'<small>가입 '+esc(fmt(u.created_at))+(u.approved_by?(' · 승인자 '+esc(u.approved_by)):'')+'</small></div>'+pw+act+'</div>';
   }).join('');
+}
+async function resetPw(u){
+  var nx=prompt(u+' 님의 새 비밀번호 (4자 이상)'); if(nx===null)return;
+  if(nx.length<4){ toast('새 비밀번호는 4자 이상'); return; }
+  try{
+    var r=await fetch('/api/auth?action=setpw',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:nx})});
+    var d=await r.json(); toast(d.message||(d.ok?'재설정됨':'실패'));
+  }catch(e){ toast('오류: '+(e&&e.message||e)); }
 }
 async function approve(u){ await post('approve',u); toast('승인되었습니다: '+u); load(); }
 async function reject(u){ if(!confirm(u+' 계정을 거부/삭제할까요?'))return; await post('reject',u); toast('처리되었습니다: '+u); load(); }

@@ -101,8 +101,21 @@ export default async function handler(req, res) {
 
     // ── 관리자 전용 ──────────────────────────────────────────────
     const me = await getUser(req, pool);
-    if (["pending", "users", "approve", "reject"].includes(action)) {
+    if (["pending", "users", "approve", "reject", "setpw"].includes(action)) {
       if (!isAdmin(me)) return res.status(200).json({ ok: false, message: "관리자만 사용할 수 있습니다.", authRequired: !me });
+
+      // 관리자가 특정 사용자의 비밀번호를 재설정(초기화). 대상의 기존 세션은 모두 무효화.
+      if (action === "setpw" && req.method === "POST") {
+        const target = normUsername((req.body || {}).username);
+        const newpw = String((req.body || {}).password || "");
+        if (!target) return res.status(200).json({ ok: false, message: "잘못된 아이디" });
+        if (newpw.length < 4 || newpw.length > MAX_PW_LEN) return res.status(200).json({ ok: false, message: "새 비밀번호는 4~256자여야 합니다." });
+        const r = await pool.request().input("u", sql.NVarChar(64), target).input("h", sql.NVarChar(256), hashPassword(newpw))
+          .query(`UPDATE cl_users SET pw_hash=@h WHERE username=@u`);
+        if (!r.rowsAffected || !r.rowsAffected[0]) return res.status(200).json({ ok: false, message: "대상 사용자를 찾을 수 없습니다." });
+        await deleteUserSessions(pool, target);
+        return res.status(200).json({ ok: true, message: `${target} 비밀번호가 재설정되었습니다(기존 로그인 해제).` });
+      }
 
       if (action === "pending") {
         const r = await pool.request().query(`SELECT username, display_name, created_at FROM cl_users WHERE status='pending' ORDER BY created_at ASC`);

@@ -1,5 +1,15 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-18] 관리자 비밀번호 재설정 + 오너 락아웃 복구 스크립트
+
+- 요구: 관리자가 사용자의 비밀번호를 재설정할 수 있어야 함(+오너가 로그인 못 하면 복구 불가 문제).
+- auth.js: 관리자 전용 setpw(대상 비번 재설정 + 대상 세션 전부 무효화). admin.html: 사용자별 '비번 재설정' 버튼.
+- scripts/reset-admin.mjs: 서버에서 로그인 없이 오너/관리자 비번 강제 재설정(upsert admin/approved + 세션 무효화) —
+  `docker exec stella-clover node scripts/reset-admin.mjs <아이디> <새비번>`. 어떤 락아웃에서도 복구.
+- 로컬(실 Postgres) 검증: 관리자 setpw → 대상 old세션 401·old비번 로그인 실패·new비번 성공, 비관리자 setpw 거부,
+  복구 스크립트로 잠긴 yesblue0342 복구 로그인 성공, 미존재 계정 upsert 후 관리자 로그인 성공.
+- 참고: yesblue0342 는 시드되어 '로그인' 탭에서 yesblue0342/admin 로 바로 로그인 가능(스크린샷은 '회원가입' 탭이라 '이미 사용 중' 표시). SW bump.
+
 ## [2026-07-18] 승인제 로그인 인증 게이트 도입 (누구나 접속·열람 차단)
 
 ### 배경 / 범위
