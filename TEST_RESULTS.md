@@ -1,5 +1,33 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-18] 승인제 로그인 인증 게이트 도입 (누구나 접속·열람 차단)
+
+### 배경 / 범위
+- 회원 시스템이 없어 누구나 접속·열람 가능했고, 특히 CBO 화면은 개인 AI 키에 연결돼 있어 위험.
+- 승인제 회원가입 + 로그인 세션으로 '승인된 사용자만 접근'을 강제. ★사용자별 컨텐츠 분리는 하지 않음(1인 사용, 공유 유지).
+
+### 구성
+- api/_auth.js: cl_users/cl_sessions 스키마, PBKDF2(120k)+솔트 해시, DB 세션(쿠키 clover_sid, HttpOnly/SameSite=Lax/30일),
+  getUser(승인된 세션만), 관리자 시드 admin·yesblue0342(둘 다 비번 admin, approved). 멱등.
+- api/auth.js: signup(pending)/login/logout/me/password + 관리자 approve/reject/pending/users(요청자 admin 검증).
+- server.mjs: /api 게이트 미들웨어 — /api/auth 만 공개, 그 외 모든 /api 는 승인 세션 필요(401), req.user 주입.
+  서버 내부 워커/크론/노트동기화는 HTTP 미경유라 게이트 무관.
+- auth-gate.js(미로그인 시 /login 리다이렉트, 6개 앱 head 포함), login.html(로그인/가입), admin.html(관리자 승인 UI),
+  index.html 사용자칩=실제 로그인명·로그아웃(서버 세션)·관리자면 승인관리 링크. SW v37→v38.
+
+### 로컬 E2E (실 Postgres + Playwright) — 20/20 PASS
+- 미로그인: /api/meetings·/api/jobs 401, 홈 접속 → /login 리다이렉트, /api/auth?me 공개(authed:false).
+- 가입 → pending, 승인 전 로그인 차단, 중복 가입 거부.
+- 관리자 yesblue0342/admin·admin/admin 로그인 성공, 비관리자 pending 조회 거부, 승인 목록에 신규 사용자.
+### 적대적 보안 리뷰(5관점) 반영
+- 세션 쿠키 Secure(X-Forwarded-Proto=https 일 때) 조건부 부여(직접 http 접근 락아웃 방지), PBKDF2 120k→600k(OWASP),
+  비밀번호 변경 시 전 세션 무효화+재발급, login.html 오픈리다이렉트 차단(/\, // 거부), 로그아웃 POST 전용,
+  비밀번호 길이 상한(256, pbkdf2 DoS 방지), 서버 소스/설정 정적 노출 차단(server.mjs·lib·config·api… 404, .env 는 기존 dotfiles:ignore).
+- ★관리자 기본 비번 admin/admin·yesblue0342/admin 은 요청대로 시드 — 추측 가능하므로 배포 후 즉시 변경 필요(/admin 의 '비밀번호 변경').
+- 승인 후 로그인 성공, 로그인 후 /api/meetings 200(컨텐츠 공유 — 관리자·일반 동일), 오답 로그인 실패,
+  로그아웃 후 401(세션 무효화), 세션 쿠키 HttpOnly, /admin 관리자 전용(비관리자 차단).
+
+
 ## [2026-07-17] CBO Pre-Check 화면 미리보기 모바일 반응형 수정 (휴대폰 깨짐 해결)
 
 ### 문제 / 원인

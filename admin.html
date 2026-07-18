@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stella Clover 사용자 승인 관리</title>
+<meta name="theme-color" content="#1a4731">
+<style>
+:root{--bg:#eef3ee;--surface:#fff;--surface2:#f9fafb;--border:#e5e7eb;--text:#111827;--text2:#6b7280;--brand:#1a4731;--brand2:#2d6a4f;--danger:#dc2626}
+@media (prefers-color-scheme: dark){:root{--bg:#0f1713;--surface:#16211b;--surface2:#1c2a22;--border:#2a3a30;--text:#e6efe9;--text2:#9fb3a7;--brand:#34d399;--brand2:#5eead4}}
+:root[data-theme=dark]{--bg:#0f1713;--surface:#16211b;--surface2:#1c2a22;--border:#2a3a30;--text:#e6efe9;--text2:#9fb3a7;--brand:#34d399;--brand2:#5eead4}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.bar{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;padding:14px 18px;display:flex;align-items:center;gap:10px}
+.bar .logo{font-weight:900;font-size:1.1rem;flex:1}
+.bar a,.bar button{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.14);color:#fff;border-radius:10px;padding:7px 12px;font-size:.85rem;font-weight:700;cursor:pointer;text-decoration:none}
+.wrap{max-width:820px;margin:0 auto;padding:20px 16px 60px}
+h2{font-size:1.05rem;font-weight:900;margin:22px 0 10px}
+.empty{color:var(--text2);font-size:.9rem;padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:12px}
+.u{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.u .nm{flex:1;min-width:0}
+.u .nm b{font-size:.95rem}
+.u .nm small{display:block;color:var(--text2);font-size:.75rem;margin-top:2px}
+.u button{border:none;border-radius:9px;padding:8px 12px;font-size:.82rem;font-weight:800;cursor:pointer}
+.approve{background:var(--brand);color:#fff}
+.reject{background:rgba(220,38,38,.12);color:var(--danger)}
+.tag{font-size:.68rem;font-weight:800;padding:2px 8px;border-radius:99px}
+.tag.admin{background:rgba(124,58,237,.15);color:#7c3aed}
+.tag.approved{background:rgba(22,163,74,.14);color:var(--brand2)}
+.tag.pending{background:rgba(234,179,8,.18);color:#a16207}
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);opacity:0;background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;transition:.2s;z-index:9}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="logo">🍀 사용자 승인 관리</div>
+  <a href="/">← 앱으로</a>
+  <button onclick="changePw()">비밀번호 변경</button>
+  <button onclick="logout()">로그아웃</button>
+</div>
+<div class="wrap">
+  <h2>⏳ 승인 대기</h2>
+  <div id="pending"></div>
+  <h2>👥 전체 사용자</h2>
+  <div id="all"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
+function fmt(ts){ try{return new Date(ts).toLocaleString('ko-KR');}catch(e){return '';} }
+async function guard(){
+  var d=await fetch('/api/auth?action=me',{cache:'no-store'}).then(r=>r.json()).catch(()=>null);
+  if(!d||!d.authed){ location.replace('/login?next=/admin'); return false; }
+  if(!d.user||d.user.role!=='admin'){ document.body.innerHTML='<div class="wrap"><h2>접근 권한 없음</h2><div class="empty">관리자만 접근할 수 있습니다. <a href="/">앱으로</a></div></div>'; return false; }
+  return true;
+}
+async function load(){
+  var pend=await fetch('/api/auth?action=pending',{cache:'no-store'}).then(r=>r.json()).catch(()=>({users:[]}));
+  var list=(pend&&pend.users)||[];
+  $('pending').innerHTML = list.length ? list.map(u=>
+    '<div class="u"><div class="nm"><b>'+esc(u.username)+'</b><small>신청 '+esc(fmt(u.created_at))+'</small></div>'+
+    '<button class="approve" onclick="approve(\''+esc(u.username)+'\')">승인</button>'+
+    '<button class="reject" onclick="reject(\''+esc(u.username)+'\')">거부</button></div>'
+  ).join('') : '<div class="empty">승인 대기 중인 사용자가 없습니다.</div>';
+
+  var all=await fetch('/api/auth?action=users',{cache:'no-store'}).then(r=>r.json()).catch(()=>({users:[]}));
+  var us=(all&&all.users)||[];
+  $('all').innerHTML = us.map(u=>{
+    var tag = u.role==='admin' ? '<span class="tag admin">관리자</span>' : '<span class="tag '+esc(u.status)+'">'+(u.status==='approved'?'승인됨':u.status==='pending'?'대기':'거부')+'</span>';
+    var act = (u.role!=='admin') ? (u.status==='approved'
+        ? '<button class="reject" onclick="reject(\''+esc(u.username)+'\')">삭제</button>'
+        : '<button class="approve" onclick="approve(\''+esc(u.username)+'\')">승인</button><button class="reject" onclick="reject(\''+esc(u.username)+'\')">거부</button>') : '';
+    return '<div class="u"><div class="nm"><b>'+esc(u.username)+'</b> '+tag+'<small>가입 '+esc(fmt(u.created_at))+(u.approved_by?(' · 승인자 '+esc(u.approved_by)):'')+'</small></div>'+act+'</div>';
+  }).join('');
+}
+async function approve(u){ await post('approve',u); toast('승인되었습니다: '+u); load(); }
+async function reject(u){ if(!confirm(u+' 계정을 거부/삭제할까요?'))return; await post('reject',u); toast('처리되었습니다: '+u); load(); }
+async function post(action,username){
+  try{ var r=await fetch('/api/auth?action='+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username})}); var d=await r.json(); if(!d.ok) toast(d.message||'실패'); }catch(e){ toast('오류: '+(e&&e.message||e)); }
+}
+function logout(){ fetch('/api/auth?action=logout',{method:'POST'}).finally(()=>location.href='/login'); }
+async function changePw(){
+  var cur=prompt('현재 비밀번호'); if(cur===null)return;
+  var nx=prompt('새 비밀번호 (4자 이상)'); if(nx===null)return;
+  if(nx.length<4){ toast('새 비밀번호는 4자 이상'); return; }
+  try{
+    var r=await fetch('/api/auth?action=password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({current:cur,next:nx})});
+    var d=await r.json();
+    toast(d.message||(d.ok?'변경됨':'실패'));
+  }catch(e){ toast('오류: '+(e&&e.message||e)); }
+}
+(function(){ try{ var t=localStorage.getItem('cl_theme'); if(t==='dark'||t==='light') document.documentElement.setAttribute('data-theme',t); }catch(e){} })();
+guard().then(ok=>{ if(ok) load(); });
+</script>
+</body>
+</html>

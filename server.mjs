@@ -49,6 +49,32 @@ app.use("/api", (req, res, next) => {
   next();
 });
 
+// ── /api/* 인증 게이트 (승인제 로그인) ──────────────────────────
+//  · /api/auth 만 로그인 전 공개(로그인/가입/승인대기 확인). 그 외 모든 /api 는 승인된 세션 필요.
+//    → "누구나 접속·열람" 상태 차단 + req.user 주입(컨텐츠 owner 분리에 사용).
+//    서버 내부 호출(워커·크론·노트동기화)은 HTTP 를 타지 않으므로 게이트와 무관.
+const AUTH_PUBLIC = new Set(["auth"]);
+app.use("/api", async (req, res, next) => {
+  const sub = req.path.replace(/^\/+/, "").split("?")[0];
+  if (AUTH_PUBLIC.has(sub)) return next();
+  try {
+    const [{ getPool }, authmod] = await Promise.all([import("./api/_db.js"), import("./api/_auth.js")]);
+    const pool = await getPool();
+    try { await authmod.ensureAuthSchema(pool._pg || pool); } catch (e) { /* 스키마 보장 실패는 아래 getUser 가 null 처리 */ }
+    const user = await authmod.getUser(req, pool);
+    if (!user) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return res.status(401).json({ ok: false, authRequired: true, message: "로그인이 필요합니다." });
+    }
+    req.user = user;
+    return next();
+  } catch (e) {
+    // DB 불가 등 → 인증 불가이므로 안전하게 차단(로그인 페이지로 유도).
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    return res.status(401).json({ ok: false, authRequired: true, message: "인증 서버 오류: " + (e && e.message || e) });
+  }
+});
+
 // ── /api/* → api 파일의 default(req,res) 호출 ─────────────────
 //  · 언더스코어(_db/_drive/_stt/_analyze/_meeting)·디렉토리 탈출은 404 (공유 모듈 비노출).
 const handlerCache = new Map();
@@ -83,6 +109,8 @@ app.use("/api", async (req, res) => {
 // ── 깔끔한 URL rewrites → .html ──────────────────────────────
 const REWRITES = {
   "/": "index.html",
+  "/login": "login.html",
+  "/admin": "admin.html",
   "/talk": "talk.html", "/stella-talk": "talk.html",
   "/db": "db.html", "/stella-db": "db.html",
   "/flow": "flow/index.html", "/stella-flow": "flow/index.html",
@@ -97,8 +125,16 @@ app.get(/.*/, (req, res, next) => {
   next();
 });
 
+// ── 서버 내부 소스/설정 정적 노출 차단 (앱은 이 경로들을 브라우저에서 부르지 않는다) ──
+//  · .env 는 express.static 이 dotfiles:ignore 로 이미 404. 여기선 서버 코드/설정 디렉터리 소스 유출 방지.
+const DENY_STATIC = /^\/(server\.mjs|package(-lock)?\.json|(api|lib|scripts|test|deploy|config|fixtures|NOTES)(\/|$))/i;
+app.use((req, res, next) => {
+  if (DENY_STATIC.test(req.path)) return res.status(404).send("Not Found");
+  next();
+});
+
 // ── 정적 파일 (HTML/JS/CSS/icons/manifest 등) ────────────────
-app.use(express.static(ROOT, { extensions: ["html"], index: "index.html" }));
+app.use(express.static(ROOT, { extensions: ["html"], index: "index.html", dotfiles: "ignore" }));
 
 // ── 404 ──────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).send("Not Found"));

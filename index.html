@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Stella Clover">
 <meta name="description" content="AI 회의록 자동 생성 - 음성 파일을 회의록으로">
+<script src="/auth-gate.js"></script>
 <style>
 /* ── 테마 토큰: 기본 라이트, [data-theme=dark] 다크 ── */
 :root{
@@ -194,6 +195,7 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
           <button role="menuitem" onclick="goTool('/notes')"><span class="mi-ic">📝</span><span class="mi-tx">노트<small>노트 작성·검색</small></span></button>
           <button role="menuitem" onclick="goTool('/cbo-review')"><span class="mi-ic">🧩</span><span class="mi-tx">CBO 스펙·리뷰<small>스펙 작성 및 코드 리뷰</small></span></button>
           <button role="menuitem" onclick="goTool('/cbo-precheck')"><span class="mi-ic">✅</span><span class="mi-tx">CBO 프리체크<small>ABAP 검증·화면 미리보기</small></span></button>
+          <button role="menuitem" id="adminMenuItem" onclick="goTool('/admin')" style="display:none"><span class="mi-ic">🛡️</span><span class="mi-tx">사용자 승인 관리<small>가입 승인·거부(관리자)</small></span></button>
         </div>
       </div>
     </div>
@@ -201,7 +203,7 @@ textarea.instr{width:100%;border:1.5px solid var(--border);border-radius:12px;pa
     <button class="user-chip" id="userChip" onclick="editProfile()" title="프로필 편집">👤 <span id="userName">사용자</span></button>
     <button class="ic-btn" id="installBtn" onclick="installApp()" title="앱 설치" style="display:none">⬇</button>
     <button class="ic-btn" id="themeToggle" onclick="toggleTheme()" title="다크/라이트">🌙</button>
-    <button class="ic-btn" onclick="logout()" title="로그아웃">⎋</button>
+    <button class="ic-btn" onclick="serverLogout()" title="로그아웃">⎋</button>
   </div>
 </header>
 
@@ -536,6 +538,23 @@ function toggleTools(e){
 }
 function goTool(path){ closeTools(); location.href=path; }
 document.addEventListener('keydown',function(e){ if(e.key==='Escape')closeTools(); });
+
+/* ═══════════ 로그인 상태 반영 + 로그아웃(서버 세션) ═══════════ */
+function serverLogout(){
+  if(!confirm('로그아웃할까요?')) return;
+  fetch('/api/auth?action=logout',{method:'POST'}).catch(function(){}).finally(function(){ location.href='/login'; });
+}
+function applyAuthUI(u){
+  if(!u) return;
+  try{ var el=$('userName'); if(el) el.textContent=u.username; }catch(e){}
+  if(u.role==='admin'){ var mi=$('adminMenuItem'); if(mi) mi.style.display=''; }
+}
+(function(){
+  if(window.__cloverUser) applyAuthUI(window.__cloverUser);
+  window.addEventListener('clover-auth', function(e){ applyAuthUI(e.detail); });
+  // 게이트 스크립트와 별개로 한 번 더 조회(레이스 방지, 저렴함).
+  fetch('/api/auth?action=me',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ if(d&&d.authed) applyAuthUI(d.user); }).catch(function(){});
+})();
 function toggleAdv(){
   const b=$('advBody'), open=b.classList.toggle('open');
   $('advToggle').textContent = open?'⚙️ 고급 옵션 ▴':'⚙️ 고급 옵션 ▾';

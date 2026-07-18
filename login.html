@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Stella Clover 로그인</title>
+<meta name="theme-color" content="#1a4731">
+<style>
+:root{--bg:#eef3ee;--surface:#fff;--border:#e5e7eb;--text:#111827;--text2:#6b7280;--brand:#1a4731;--brand2:#2d6a4f;--danger:#dc2626}
+@media (prefers-color-scheme: dark){:root{--bg:#0f1713;--surface:#16211b;--border:#2a3a30;--text:#e6efe9;--text2:#9fb3a7;--brand:#34d399;--brand2:#5eead4}}
+:root[data-theme=dark]{--bg:#0f1713;--surface:#16211b;--border:#2a3a30;--text:#e6efe9;--text2:#9fb3a7;--brand:#34d399;--brand2:#5eead4}
+:root[data-theme=light]{--bg:#eef3ee;--surface:#fff;--border:#e5e7eb;--text:#111827;--text2:#6b7280;--brand:#1a4731;--brand2:#2d6a4f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:20px;box-shadow:0 12px 40px rgba(0,0,0,.12);width:100%;max-width:380px;padding:28px 24px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:900;font-size:1.35rem;color:var(--brand);justify-content:center;margin-bottom:4px}
+.sub{text-align:center;color:var(--text2);font-size:.85rem;margin-bottom:20px}
+.seg{display:flex;background:var(--bg);border-radius:12px;padding:4px;margin-bottom:18px}
+.seg button{flex:1;border:none;background:transparent;color:var(--text2);border-radius:9px;padding:9px;font-size:.9rem;font-weight:800;cursor:pointer}
+.seg button.on{background:var(--surface);color:var(--brand);box-shadow:0 1px 4px rgba(0,0,0,.1)}
+label{display:block;font-size:.78rem;font-weight:800;margin:12px 0 5px;color:var(--text2)}
+input{width:100%;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--text);font-size:1rem;padding:12px 14px;outline:none}
+input:focus{border-color:var(--brand2)}
+.btn{width:100%;border:none;border-radius:12px;background:var(--brand);color:#fff;font-size:1rem;font-weight:800;padding:13px;cursor:pointer;margin-top:18px}
+.btn:disabled{opacity:.6;cursor:default}
+.msg{margin-top:14px;font-size:.85rem;line-height:1.5;padding:10px 12px;border-radius:10px;display:none}
+.msg.show{display:block}
+.msg.err{background:rgba(220,38,38,.1);color:var(--danger)}
+.msg.ok{background:rgba(22,163,74,.12);color:var(--brand2)}
+.hint{margin-top:16px;font-size:.75rem;color:var(--text2);text-align:center;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo"><span>🍀</span> Stella Clover</div>
+  <div class="sub">개인 워크스페이스 — 로그인 후 이용</div>
+  <div class="seg">
+    <button id="segLogin" class="on" onclick="mode('login')">로그인</button>
+    <button id="segSignup" onclick="mode('signup')">회원가입</button>
+  </div>
+  <form id="form" onsubmit="submitForm(event)">
+    <label for="username">아이디</label>
+    <input id="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="아이디" required>
+    <label for="password">비밀번호</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="비밀번호" required>
+    <button class="btn" id="submitBtn" type="submit">로그인</button>
+  </form>
+  <div class="msg" id="msg"></div>
+  <div class="hint" id="hint">가입은 관리자(yesblue0342) 승인 후 이용할 수 있습니다.</div>
+</div>
+<script>
+var _mode='login';
+function $(id){return document.getElementById(id);}
+// 오픈 리다이렉트 방지: 반드시 단일 '/' 로 시작 + 다음 문자가 슬래시/백슬래시가 아니어야 함('//x','/\\x' 차단).
+function nextUrl(){ try{ var u=new URL(location.href); var n=u.searchParams.get('next'); if(n && /^\/[^/\\]/.test(n)) return n; }catch(e){} return '/'; }
+function mode(m){
+  _mode=m;
+  $('segLogin').classList.toggle('on',m==='login');
+  $('segSignup').classList.toggle('on',m==='signup');
+  $('submitBtn').textContent = m==='login'?'로그인':'가입 신청';
+  $('password').setAttribute('autocomplete', m==='login'?'current-password':'new-password');
+  hideMsg();
+}
+function showMsg(text,ok){ var el=$('msg'); el.textContent=text; el.className='msg show '+(ok?'ok':'err'); }
+function hideMsg(){ $('msg').className='msg'; }
+async function submitForm(e){
+  e.preventDefault();
+  var username=$('username').value.trim(), password=$('password').value;
+  if(!username||!password) return;
+  $('submitBtn').disabled=true; hideMsg();
+  try{
+    var r=await fetch('/api/auth?action='+_mode,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username,password:password})});
+    var d=await r.json();
+    if(_mode==='login'){
+      if(d.ok){ location.href=nextUrl(); return; }
+      showMsg(d.message||'로그인 실패', false);
+    }else{
+      if(d.ok){ showMsg(d.message||'가입 신청이 완료되었습니다. 승인 후 로그인하세요.', true); mode('login'); }
+      else showMsg(d.message||'가입 실패', false);
+    }
+  }catch(err){ showMsg('네트워크 오류: '+(err&&err.message||err), false); }
+  finally{ $('submitBtn').disabled=false; }
+}
+// 이미 로그인 상태면 앱으로
+fetch('/api/auth?action=me').then(r=>r.json()).then(d=>{ if(d&&d.authed) location.href=nextUrl(); }).catch(()=>{});
+(function(){ try{ var t=localStorage.getItem('cl_theme'); if(t==='dark'||t==='light') document.documentElement.setAttribute('data-theme',t); }catch(e){} })();
+</script>
+</body>
+</html>
