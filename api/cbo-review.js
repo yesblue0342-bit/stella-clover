@@ -10,8 +10,11 @@ import {
   extractMainTitle, normalizeFindings, parseJsonObject, sha256, validateProviderModel,
 } from "../lib/cbo-review/core.js";
 import {
-  applyToRepo, parseGitHubUrl, readRepoPath, repoInfo, restoreBackup, saveSpec,
+  applyToRepo, parseGitHubUrl, readRepoPath, repoInfo, restoreBackup,
 } from "../lib/cbo-review/repository.js";
+import {
+  saveSpecToHub, listHub, mkdirHub, deleteHub, renameHub, hubRepoInfo,
+} from "../lib/cbo-review/hub.js";
 import { createJob, getJob, registerRunner } from "../lib/cbo-review/jobRuntime.js";
 import { hasDbConfig } from "./_db.js";
 
@@ -151,7 +154,20 @@ export default async function handler(req, res) {
       const extension = req.body?.extension === "xlsx" ? "xlsx" : "md";
       const markdown = String(req.body?.markdown || "");
       const content = extension === "xlsx" ? await markdownToWorkbook(markdown, req.body?.title) : Buffer.from(markdown, "utf8");
-      return json(res, 200, { ok: true, ...(await saveSpec({ title: req.body?.title, extension, content })) });
+      return json(res, 200, { ok: true, ...(await saveSpecToHub({ folder: req.body?.folder, title: req.body?.title, extension, content })) });
+    }
+    // ── Hub(0Program) 폴더 관리 — GitHub REST(api/cbo-review.js는 로컬 clone 미사용) ──
+    if (req.method === "GET" && action === "hub-list") {
+      return json(res, 200, { ok: true, repo: hubRepoInfo, ...(await listHub({ path: req.query?.path })) });
+    }
+    if (req.method === "POST" && action === "hub-mkdir") {
+      return json(res, 200, { ok: true, ...(await mkdirHub({ path: req.body?.path })) });
+    }
+    if (req.method === "POST" && action === "hub-delete") {
+      return json(res, 200, { ok: true, ...(await deleteHub({ path: req.body?.path })) });
+    }
+    if (req.method === "POST" && action === "hub-rename") {
+      return json(res, 200, { ok: true, ...(await renameHub({ path: req.body?.path, dest: req.body?.dest })) });
     }
     if (req.method === "POST" && action === "review-upload") {
       if (!hasDbConfig()) return json(res, 503, { ok: false, message: "DB 환경변수가 설정되지 않아 비동기 작업 큐를 사용할 수 없습니다." });
@@ -214,6 +230,8 @@ export default async function handler(req, res) {
     return json(res, 405, { ok: false, message: "지원하지 않는 요청입니다." });
   } catch (error) {
     console.error("[cbo-review]", error?.message || error);
-    return json(res, /허용|필요|올바르지|초과|변경되었습니다/.test(error?.message || "") ? 400 : 500, { ok: false, message: String(error?.message || error) });
+    const status = error?.status
+      || (/허용|필요|올바르지|초과|변경되었습니다|같습니다|찾을 수 없/.test(error?.message || "") ? 400 : 500);
+    return json(res, status, { ok: false, message: String(error?.message || error) });
   }
 }

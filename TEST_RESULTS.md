@@ -1,5 +1,26 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-19] CBO Review Hub 전송 GitHub 인증 오류 수정 + 폴더 지정/관리 기능
+
+### 배경 / 증상
+- `/cbo-review` 에서 스펙 생성 후 **Hub 전송(.md/.xlsx)** 이 실패:
+  `git clone --branch main https://github.com/…/0Program.git … fatal: could not read Username for 'https://github.com': terminal prompts disabled`.
+- 근본 원인: `lib/cbo-review/repository.js` 가 0Program 을 **로컬 clone/push** 하는데, HTTPS remote + `http.extraHeader: Authorization: **Bearer** <token>` 조합은 GitHub git-over-HTTPS 에서 거부되어 사용자명 프롬프트로 빠짐(무인 환경이라 즉시 실패).
+
+### 조치 (cbo-precheck 벤치마킹 + Stella Hub `api/github.js` 참고)
+- **신규 `lib/cbo-review/hub.js`**: Hub 전송·폴더 관리를 **GitHub REST Contents/Git-Data API**(api.github.com, Bearer 정식 인증)로 처리 — 로컬 git clone/임시파일 미사용. 토큰은 Authorization 헤더에만(URL/로그/에러 미노출).
+  - `saveSpecToHub({folder,title,extension,content})`: 지정 폴더(기본 `spec`)에 `spec_YYYYMMDD_제목.(md|xlsx)` PUT, 동명 존재 시 `_vN`.
+  - `listHub`(목록)·`mkdirHub`(`.gitkeep`)·`deleteHub`(파일/폴더 재귀)·`renameHub`(파일/폴더 재귀 이동). 경로안전: traversal(..)·`.git`/`.env`·숨김·키/자격증명·절대경로 차단, 재귀 상한 200.
+- **`api/cbo-review.js`**: `save-spec` → `saveSpecToHub`(폴더 인자 추가). 신규 액션 `hub-list`/`hub-mkdir`/`hub-delete`/`hub-rename`. catch 가 `error.status` 존중(항상 JSON).
+- **`cbo-review/index.html`**: 스펙 미리보기에 **Hub 대상 폴더 매니저**(경로 입력·열기·상위·＋새폴더, 목록 행별 폴더 탐색/✏️이름변경/🗑삭제, 파괴적 작업 confirm). Hub 전송이 선택 폴더로 저장. SW 캐시 v39→v40.
+- **`lib/cbo-review/repository.js`**(코드리뷰 repo 소스 경로도 복구): git 인증 `Bearer`→**Basic**(`x-access-token:<token>` base64) 로 교체 — clone/pull/push 정상화.
+
+### 검증
+- `node --check`: hub.js·cbo-review.js·repository.js·sw.js 전부 OK. `cbo-review/index.html` 인라인 JS `new Function` 파싱 OK(15,835자).
+- **신규 `test/cboHub.test.js`(fetch 목킹) 11/11 PASS**: base64 왕복·`_vN` 버전링·새폴더(404) PUT·경로안전 6종 거부(호출 0)·`.gitkeep` mkdir·파일/폴더 삭제(트리 prefix 매칭)·파일 rename(PUT+DELETE)·404 빈목록·`.gitkeep` 숨김/dir 우선 정렬·무토큰 503.
+- 전체 스위트: 신규 테스트 통과. 기존 12 실패는 샌드박스 미설치 패키지(`exceljs`/`@abaplint/core`)로 인한 **환경 문제**(내 변경과 무관, 기존부터 동일).
+- ※ 라이브 GitHub 쓰기는 샌드박스에서 0Program 에 직접 하지 않음(정적/목킹 검증까지) — 실제 전송은 OCI 배포 후 사용자 브라우저에서 확인.
+
 ## [2026-07-18] 관리자 비밀번호 재설정 + 오너 락아웃 복구 스크립트
 
 - 요구: 관리자가 사용자의 비밀번호를 재설정할 수 있어야 함(+오너가 로그인 못 하면 복구 불가 문제).
