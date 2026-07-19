@@ -3,11 +3,11 @@ import crypto from "node:crypto";
 import { extractFile, markdownToWorkbook } from "../lib/cbo-review/extract.js";
 import { hasAccessPassword, login, requireAuth } from "../lib/cbo-review/auth.js";
 import {
-  callModel, connectCli, deleteProviderKey, disconnectCli, providerStatus, saveProviderKey,
+  callModel, connectCli, deleteProviderKey, disconnectCli, getProviderMode, providerStatus, saveProviderKey,
 } from "../lib/ai-connection/providers.js";
 import {
   applyFindings, buildReviewPrompt, buildSpecPrompt, chunkSource, detectLanguage,
-  extractMainTitle, normalizeFindings, parseJsonObject, sha256, validateProviderModel,
+  extractMainTitle, mapWithConcurrency, normalizeFindings, parseJsonObject, sha256, validateProviderModel,
 } from "../lib/cbo-review/core.js";
 import {
   applyToRepo, readRepoPath, repoInfo, restoreBackup,
@@ -52,35 +52,63 @@ function cleanSpec(text) {
   return String(text || "").trim().replace(/^```(?:markdown|md)?\s*/i, "").replace(/\s*```$/, "");
 }
 
+// 리뷰 LLM 호출 동시성 — 순차 처리가 리뷰 지연의 근본 원인이라 병렬화한다.
+//   API 키 경로: 병렬(기본 5) — requestWithRetry 가 429 백오프 처리. CLI 계정 로그인: 소수(기본 2, 구독 보호).
+//   조정: CBO_REVIEW_API_CONCURRENCY / CBO_REVIEW_CLI_CONCURRENCY (1~8).
+function reviewConcurrency(mode) {
+  const raw = mode === "cli" ? process.env.CBO_REVIEW_CLI_CONCURRENCY : process.env.CBO_REVIEW_API_CONCURRENCY;
+  const fallback = mode === "cli" ? 2 : 5;
+  const n = parseInt(raw, 10);
+  return Math.max(1, Math.min(8, Number.isFinite(n) && n > 0 ? n : fallback));
+}
+
 async function reviewFiles({ files, provider, model, origin }) {
   validateProviderModel(provider, model);
-  const results = [];
-  let wasChunked = false;
-  let chunkCount = 0;
   const totalChars = files.reduce((sum, file) => sum + String(file.content || "").length, 0);
   if (totalChars > 2_000_000) throw new Error("리뷰 소스 전체 크기는 텍스트 2,000,000자를 초과할 수 없습니다.");
-  for (const file of files.slice(0, 100)) {
-    const language = detectLanguage(file.name, file.content);
-    const chunks = chunkSource(file);
-    chunkCount += chunks.length;
-    if (chunkCount > 80) throw new Error("리뷰 분할 수가 80개를 초과합니다. 대상 범위를 줄이세요.");
-    if (chunks.length > 1) wasChunked = true;
-    const findings = [];
-    const summaries = [];
-    for (const chunk of chunks) {
-      const raw = await callModel({ provider, model, system: SYSTEM, user: buildReviewPrompt({ ...chunk, language }), json: true });
-      const parsed = parseJsonObject(raw);
-      findings.push(...normalizeFindings(parsed, file.name, chunk.startLine));
-      if (parsed.summary) summaries.push(String(parsed.summary));
+
+  const picked = files.slice(0, 100).map((file) => ({
+    name: file.name, content: file.content,
+    language: detectLanguage(file.name, file.content),
+    chunks: chunkSource(file), findings: [], summaries: [],
+  }));
+  const totalChunks = picked.reduce((sum, f) => sum + f.chunks.length, 0);
+  if (totalChunks > 80) throw new Error("리뷰 분할 수가 80개를 초과합니다. 대상 범위를 줄이세요.");
+  const wasChunked = picked.some((f) => f.chunks.length > 1);
+
+  // (파일, 청크)를 평탄화해 동시성 제한 하에 병렬 호출(순서는 mapWithConcurrency가 보존).
+  const tasks = [];
+  picked.forEach((f, fi) => f.chunks.forEach((chunk) => tasks.push({ fi, chunk, language: f.language, name: f.name })));
+  const concurrency = reviewConcurrency(await getProviderMode(provider));
+
+  // 한 청크가 실패해도 전체를 중단하지 않는다(CLAUDE.md 플레이북 #1) — 실패는 표시하고 나머지는 진행.
+  let failed = 0;
+  const outputs = await mapWithConcurrency(tasks, concurrency, async (t) => {
+    try {
+      const parsed = parseJsonObject(await callModel({ provider, model, system: SYSTEM, user: buildReviewPrompt({ ...t.chunk, language: t.language }), json: true }));
+      return { fi: t.fi, findings: normalizeFindings(parsed, t.name, t.chunk.startLine), summary: parsed.summary ? String(parsed.summary) : "" };
+    } catch (e) {
+      return { fi: t.fi, findings: [], summary: `[구간 리뷰 실패: ${String((e && e.message) || e).slice(0, 120)}]`, failed: true };
     }
-    results.push({ name: file.name, language, summary: summaries.join(" / ").slice(0, 3000), findings, hash: sha256(file.content), content: file.content });
+  });
+  for (const o of outputs) {
+    if (o.failed) failed += 1;
+    picked[o.fi].findings.push(...o.findings);
+    if (o.summary) picked[o.fi].summaries.push(o.summary);
   }
+  if (tasks.length && failed === tasks.length) throw new Error("리뷰 호출이 모두 실패했습니다. AI 연결 상태와 대상 범위를 확인하세요.");
+
+  const results = picked.map((f) => ({
+    name: f.name, language: f.language,
+    summary: f.summaries.join(" / ").slice(0, 3000),
+    findings: f.findings, hash: sha256(f.content), content: f.content,
+  }));
   const reviewId = crypto.randomUUID();
   reviews.set(reviewId, { reviewId, createdAt: Date.now(), provider, model, origin, files: results });
   while (reviews.size > MAX_REVIEWS) reviews.delete(reviews.keys().next().value);
   const counts = { High: 0, Mid: 0, Low: 0 };
   for (const file of results) for (const finding of file.findings) counts[finding.severity] += 1;
-  return { reviewId, files: results.map(({ content, ...rest }) => rest), summary: { fileCount: results.length, findingCount: Object.values(counts).reduce((a, b) => a + b, 0), severities: counts, chunked: wasChunked } };
+  return { reviewId, files: results.map(({ content, ...rest }) => rest), summary: { fileCount: results.length, findingCount: Object.values(counts).reduce((a, b) => a + b, 0), severities: counts, chunked: wasChunked, failed } };
 }
 
 // ── 비동기 잡 실행기 등록(lib/cbo-review/jobRuntime.js) ──

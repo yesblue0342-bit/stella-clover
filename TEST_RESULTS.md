@@ -1,5 +1,26 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-19] CBO Review 코드 리뷰 속도 개선 — 순차→동시성 병렬(516초 병목)
+
+### 배경 / 원인
+- 소스 코드 리뷰가 매우 느림(경과 516초+). 원인: `reviewFiles` 가 (파일 × 청크)마다 `callModel` 을
+  **완전 순차** 호출(이중 for + await) → 파일 N개면 N번을 하나씩 대기. N×(10~40초) 누적.
+
+### 조치
+- **동시성 제한 병렬화**: 신규 순수 유틸 `mapWithConcurrency`(lib/cbo-review/core.js) — worker를 limit개까지
+  동시 실행, 결과는 입력 순서 보존. `reviewFiles` 를 (파일,청크) 평탄화 후 병렬 호출로 재작성.
+  - 동시성: **API 키 경로 기본 5**(requestWithRetry가 429 백오프 처리) / **CLI 계정 로그인 기본 2**(구독 보호).
+    조정: `CBO_REVIEW_API_CONCURRENCY` · `CBO_REVIEW_CLI_CONCURRENCY`(1~8). API 키 사용 시 최대 5배 단축.
+  - **부분 실패 비차단**(CLAUDE.md 플레이북 #1): 한 청크가 실패해도 전체 중단 없이 나머지 진행,
+    실패 수를 summary.failed 로 반환하고 프런트가 상단에 경고 표시. 전량 실패 시에만 잡 실패.
+- SW 캐시 v42→v43.
+
+### 검증
+- `node --check` cbo-review.js·core.js·sw.js OK, 인라인 JS `new Function` 파싱 OK(실패 경고 노출 포함).
+- **신규 `test/cboConcurrency.test.js` 5/5 PASS**(순서 보존·동시성 상한 준수·병렬 확인·빈 목록·예외 전파·1회 호출).
+  전체 CBO 단위 테스트 22/22(concurrency 5 + ghSource 6 + hub 11).
+- 실제 속도 개선은 배포 후 사용자 브라우저에서 확인(리뷰 경과 시간 단축).
+
 ## [2026-07-19] CBO Review 소스 코드 리뷰 — 로컬/GitHub 링크 소스 복구·개편
 
 ### 배경 / 증상
