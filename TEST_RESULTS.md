@@ -1,5 +1,33 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-19] CBO Review 소스 코드 리뷰 — 로컬/GitHub 링크 소스 복구·개편
+
+### 배경 / 증상
+- 리뷰 대상 2가지 옵션이 동작하지 않아 코드 리뷰 기능 상실:
+  (a) "0Program 경로"는 로컬 clone 인증 실패의 영향권이었고, (b) "GitHub 링크"는 `parseGitHubUrl` 이
+  `github.com/yesblue0342-bit/0Program/(blob|tree)/main/...` 형태만 허용 + 로컬 clone 의존이라 사실상 사용 불가.
+
+### 조치 (cbo-precheck 벤치마킹)
+- **"0Program 경로" → "로컬"** 로 명칭 변경, 서버 0Program 사본 기준 **파일/폴더** 지정 지원(폴더면 하위 텍스트
+  파일 최대 100개 리뷰 — readRepoPath 기존 동작 유지). 반영 시 0Program 커밋(기존과 동일). 직전 커밋의
+  git 인증 Basic 수정으로 clone/pull/push 정상.
+- **"GitHub 링크" → URL + 브랜치 + 경로(선택)** 3필드(cbo-precheck 스캔 대상과 동일 패턴). 신규
+  `lib/cbo-review/ghSource.js`:
+  - `parseGitHubTarget`: SSH(`git@github.com:o/r.git`)·https(`github.com/o/r[.git]`)·blob/tree 링크(브랜치·경로
+    자동 추출, 필드 값 우선) 모두 수용 → SSH clone 대상으로 정규화. github.com 외 호스트 거부.
+  - `fetchGitHubFiles`: cbo-precheck `withClonedRepo`(임시 폴더 SSH clone, 종료 시 정리, GITHUB_TOKEN 불필요) 재사용
+    + `collectReviewFiles`(텍스트 확장자만, 숨김/.git/node_modules/민감파일(.pem 등)/500KB 초과 제외, 최대 100개).
+  - GitHub 링크 리뷰는 **읽기 전용** — "보완 및 반영"은 수정본 다운로드(origin.type=github → apply 다운로드 분기).
+    커밋 반영이 필요하면 '로컬' 소스 사용(UI 문구로 안내).
+- `api/cbo-review.js` `review-repo`: `repoUrl/branch/githubPath` 수용(레거시 `githubUrl` 도 동일 경로로 호환),
+  provider/model 검증을 소스 처리 전으로 이동. 미사용 `parseGitHubUrl` import 제거. SW 캐시 v40→v41.
+
+### 검증
+- `node --check` ghSource.js·cbo-review.js·sw.js OK, 인라인 JS `new Function` 파싱 OK.
+- **신규 `test/cboGhSource.test.js` 6/6 PASS**(SSH/https/blob·tree 파싱, 타 호스트·불량 입력 거부, 수집 필터
+  (텍스트만·숨김/민감/과대 제외)·단일 파일 루트). 기존 `cboHub.test.js` 11/11 유지 — 합계 17/17.
+- ※ 실제 SSH clone 은 서버 배포키 필요 — 샌드박스에선 정적/단위 검증까지, 라이브는 사용자 브라우저에서 확인.
+
 ## [2026-07-19] CBO Review Hub 전송 GitHub 인증 오류 수정 + 폴더 지정/관리 기능
 
 ### 배경 / 증상

@@ -10,11 +10,12 @@ import {
   extractMainTitle, normalizeFindings, parseJsonObject, sha256, validateProviderModel,
 } from "../lib/cbo-review/core.js";
 import {
-  applyToRepo, parseGitHubUrl, readRepoPath, repoInfo, restoreBackup,
+  applyToRepo, readRepoPath, repoInfo, restoreBackup,
 } from "../lib/cbo-review/repository.js";
 import {
   saveSpecToHub, listHub, mkdirHub, deleteHub, renameHub, hubRepoInfo,
 } from "../lib/cbo-review/hub.js";
+import { fetchGitHubFiles } from "../lib/cbo-review/ghSource.js";
 import { createJob, getJob, registerRunner } from "../lib/cbo-review/jobRuntime.js";
 import { hasDbConfig } from "./_db.js";
 
@@ -181,13 +182,29 @@ export default async function handler(req, res) {
     }
     if (req.method === "POST" && action === "review-repo") {
       if (!hasDbConfig()) return json(res, 503, { ok: false, message: "DB 환경변수가 설정되지 않아 비동기 작업 큐를 사용할 수 없습니다." });
-      const relative = req.body?.githubUrl ? parseGitHubUrl(req.body.githubUrl) : String(req.body?.path || "");
-      const files = await readRepoPath(relative);
-      if (!files.length) return json(res, 404, { ok: false, message: "리뷰 가능한 텍스트 파일이 없습니다." });
       const provider = String(req.body?.provider || "");
       const model = String(req.body?.model || "");
       validateProviderModel(provider, model);
-      const jobId = await createJob({ kind: "review", payload: { files, provider, model, origin: { type: "repo", relative } } });
+      let files;
+      let origin;
+      if (req.body?.repoUrl || req.body?.githubUrl) {
+        // GitHub 링크 소스 — cbo-precheck 방식(URL+브랜치+경로, 임시 SSH clone). 읽기 전용:
+        // "보완 및 반영"은 origin.type !== "repo" 이므로 apply 에서 수정본 다운로드로 제공된다.
+        const { target, files: collected } = await fetchGitHubFiles({
+          repoUrl: req.body?.repoUrl || req.body?.githubUrl,
+          branch: req.body?.branch,
+          path: req.body?.githubPath ?? req.body?.subPath,
+        });
+        files = collected;
+        origin = { type: "github", owner: target.owner, repo: target.repo, branch: target.branch, path: target.path };
+      } else {
+        // 로컬 소스 — 서버의 0Program 사본 기준 파일/폴더 경로(commit 반영 가능).
+        const relative = String(req.body?.path || "");
+        files = await readRepoPath(relative);
+        origin = { type: "repo", relative };
+      }
+      if (!files.length) return json(res, 404, { ok: false, message: "리뷰 가능한 텍스트 파일이 없습니다(경로/확장자를 확인하세요)." });
+      const jobId = await createJob({ kind: "review", payload: { files, provider, model, origin } });
       return json(res, 200, { ok: true, jobId, status: "queued" });
     }
     if (req.method === "GET" && action === "job-status") {
