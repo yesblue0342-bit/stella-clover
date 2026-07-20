@@ -7,8 +7,9 @@ import {
 } from "../lib/ai-connection/providers.js";
 import {
   applyFindings, buildReviewPrompt, buildSpecPrompt, chunkSource, detectLanguage,
-  extractMainTitle, mapWithConcurrency, normalizeFindings, parseJsonObject, sha256, validateProviderModel,
+  extractMainTitle, kstDate, mapWithConcurrency, normalizeFindings, parseJsonObject, sha256, validateProviderModel,
 } from "../lib/cbo-review/core.js";
+import { reviewToMarkdown, reviewToWorkbook } from "../lib/cbo-review/reviewExport.js";
 import {
   applyToRepo, readRepoPath, repoInfo, restoreBackup,
 } from "../lib/cbo-review/repository.js";
@@ -234,6 +235,24 @@ export default async function handler(req, res) {
       if (!files.length) return json(res, 404, { ok: false, message: "리뷰 가능한 텍스트 파일이 없습니다(경로/확장자를 확인하세요)." });
       const jobId = await createJob({ kind: "review", payload: { files, provider, model, origin } });
       return json(res, 200, { ok: true, jobId, status: "queued" });
+    }
+    // 검토 결과(지적 목록)를 문서로 내보내기 — 프런트가 reviewResult(files/summary)를 그대로 전달.
+    // Markdown 은 "모두 반영" 프롬프트로 바로 사용 가능(상단 지시문 + Before/After 코드펜스).
+    if (req.method === "POST" && action === "review-export") {
+      const format = req.body?.format === "md" ? "md" : "xlsx";
+      const title = String(req.body?.title || "CBO 코드 리뷰");
+      const files = Array.isArray(req.body?.files) ? req.body.files : [];
+      const summary = req.body?.summary || {};
+      const stamp = kstDate();
+      if (format === "md") {
+        res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="review_${stamp}.md"`);
+        return res.status(200).send(reviewToMarkdown({ title, files, summary }));
+      }
+      const buffer = await reviewToWorkbook({ title, files, summary });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="review_${stamp}.xlsx"`);
+      return res.status(200).send(buffer);
     }
     if (req.method === "GET" && action === "job-status") {
       const id = parseInt(req.query.id, 10);

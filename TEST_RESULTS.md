@@ -1,5 +1,27 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-19] CBO Review 코드 리뷰 결과 문서 내보내기(Markdown/Excel) 추가
+
+### 배경
+- 코드 리뷰 결과에서 지적을 **개별로만** 반영할 수 있어 불편. 전체를 문서로 받아 한 번에 프롬프트로
+  일괄 수정 지시를 내리고 싶다는 요구.
+
+### 조치
+- 신규 `lib/cbo-review/reviewExport.js`:
+  - `reviewToMarkdown`: 상단에 **"아래 지적사항을 모두 반영해 소스를 수정해줘…"** 지시문 + 파일별 그룹 +
+    각 지적의 사유/Before/After를 코드펜스(내용에 ``` 있으면 ~~~~로 자동 회피)로 담아, 그대로 AI에 붙여
+    **일괄 수정 프롬프트**로 쓸 수 있게 한다. 심각도(High→Low)·라인 순 정렬.
+  - `reviewToWorkbook`: exceljs 동적 import — "요약" + "지적사항"(파일/라인/심각도/사유/Before/After) 시트.
+    수식 인젝션 방지(=,+,-,@ 셀 앞 ' 부착).
+- `api/cbo-review.js`: `POST ?action=review-export {format:'md'|'xlsx', title, files, summary}` — 프런트가
+  reviewResult를 그대로 전달(서버 메모리 의존 없음, 재시작/만료와 무관). md=text/markdown, xlsx=스프레드시트 첨부.
+- `cbo-review/index.html`: 검토 결과 액션에 **📄 Markdown / 📊 Excel** 버튼 추가(downloadReviewDoc). SW v43→v44.
+
+### 검증
+- `node --check` cbo-review.js·reviewExport.js·sw.js OK, 인라인 JS 파싱 OK(다운로드 버튼 2종 확인).
+- **신규 `test/cboReviewExport.test.js` 5/5 PASS**(평탄화·제목/요약/지시문/코드펜스·백틱 회피·빈 결과·안전 입력).
+  전체 CBO 단위 테스트 27/27(export 5 + concurrency 5 + ghSource 6 + hub 11). exceljs는 배포 의존성으로 존재.
+
 ## [2026-07-19] CBO Review 코드 리뷰 속도 개선 — 순차→동시성 병렬(516초 병목)
 
 ### 배경 / 원인
