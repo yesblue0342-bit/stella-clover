@@ -2,7 +2,7 @@
 // ★ 회귀 방지: 앱 셸(HTML/네비게이션)은 network-first 로 항상 최신을 받는다.
 //   과거 오래된 캐시가 계속 옛 프론트를 서빙해 이미 고친 버그(invalid_client 등)가 사용자에게 남던
 //   문제를 막는다. 정적 자산(js/css/img)만 캐시 폴백. /api 는 캐시하지 않음.
-const CACHE = 'stella-clover-v44';
+const CACHE = 'stella-clover-v45';
 
 self.addEventListener('install', e => self.skipWaiting());
 

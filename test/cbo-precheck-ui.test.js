@@ -229,6 +229,32 @@ test("GATE 1: renderPreviewElements — programTitle이 있으면 SAP GUI 타이
   assert.match(els.previewRoot.innerHTML, /Assign Inspection Type/);
 });
 
+test("RFC UI: 파라미터와 기술정보를 escape해 렌더링하고 빈 Selection Screen을 표시하지 않는다", () => {
+  const els = makeDom(["previewRoot"]);
+  const $ = (id) => els[id];
+  const fn = loadFnWithDeps("renderPreviewElements", [
+    "buildPreviewHtml", "buildRfcPreviewHtml", "renderRfcParamTable", "renderRfcList",
+    "renderDynproScreen", "fieldLabelHtml", "renderParameterEl", "renderRadioGroup", "renderSelectOptionsEl", "renderAlvEl",
+  ], { $, esc });
+  fn([], { parsed: 1, unparsed: 0 }, {
+    objectType: "function-module",
+    objectName: "Z_RFC_<BAD>",
+    file: "Z_RFC.abap",
+    rfcInterface: { importing: [{ section: "IMPORTING", name: "IV_<X>", typing: "TYPE", dataType: "CHAR1", optional: true, defaultValue: "'<A>'" }], exporting: [], changing: [], tables: [], exceptions: [] },
+    technicalSummary: { readTables: ["ZT_<READ>"], writtenTables: ["ZT_WRITE"], calledFunctions: ["Z_CALL"], forms: ["DO_WORK"], commits: true, rollbacks: false, processingSteps: [{ no: 1, text: "Validate <input>" }] },
+    relatedDdicFile: "Z_RFC_DDIC.txt",
+    warnings: ["RFC 안내 <script>"],
+  });
+  const html = els.previewRoot.innerHTML;
+  assert.match(html, /RFC Function Module/);
+  assert.match(html, /Z_RFC_&lt;BAD&gt;/);
+  assert.match(html, /IV_&lt;X&gt;/);
+  assert.match(html, /Validate &lt;input&gt;/);
+  assert.match(html, /Z_RFC_DDIC\.txt/);
+  assert.doesNotMatch(html, /<script>/i);
+  assert.doesNotMatch(html, /Selection Screen\(1000\)/);
+});
+
 test("Phase 2: 화면(Preview) 탭 GitHub SSH URL 입력란(directRepoUrl)은 실제 value로 기본값이 채워져 있다", () => {
   const m = html.match(/<input id="directRepoUrl"([^>]*)>/);
   assert.ok(m, "directRepoUrl input을 찾지 못함");

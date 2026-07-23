@@ -1,5 +1,33 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-23] CBO Pre-Check RFC Function Module 미리보기 추가
+
+### 배경 / 원인
+- `/cbo-precheck` preview-direct 폴더 자동 탐색이 `REPORT/PROGRAM` 선언 파일만 메인으로 인정해
+  `FUNCTION ... ENDFUNCTION` 단일 RFC 폴더를 404로 처리했다.
+- 기존 미리보기 파서는 Selection Screen/ALV/Dynpro 중심이라 RFC Local Interface, 호출 FM, DB 테이블,
+  COMMIT/ROLLBACK, FORM 구조를 표시하지 못했다.
+
+### 조치
+- 공통 ABAP 오브젝트 판별 모듈 추가: REPORT/PROGRAM, FUNCTION, FUNCTION-POOL, CLASS, INTERFACE,
+  INCLUDE, UNKNOWN을 한곳에서 판별하고 `CALL FUNCTION`은 선언으로 오인하지 않도록 첫 유효 문장 기준으로 처리.
+- RFC 전용 미리보기 파서/빌더 추가: Function Builder Local Interface 주석(IMPORTING/EXPORTING/CHANGING/
+  TABLES/EXCEPTIONS), 처리 단계 주석, 호출 Function Module, read/write 테이블, FORM, COMMIT/ROLLBACK,
+  관련 `<RFC명>_DDIC.txt` 메타데이터 추출.
+- preview-direct 폴더 탐색을 report-only에서 previewable object 기반으로 확장하고, RFC UI 렌더러를 추가해
+  빈 Selection Screen 대신 "RFC Function Module Preview" 기술 패널을 표시.
+- 프론트 변경 반영을 위해 Service Worker 캐시 v44→v45.
+
+### 검증
+- 관련 테스트 PASS:
+  `node --experimental-test-module-mocks --test test\cbo-precheck-rfc-preview.test.js test\cbo-precheck-preview.test.js test\cbo-precheck-preview-direct.test.js test\cbo-precheck-ui.test.js`
+- repofetch DDIC 수집 테스트 PASS:
+  `node --experimental-test-module-mocks --test test\cbo-precheck-repofetch.test.js`
+- 전체 `npm test`: 289개 중 277 PASS, 12 SKIP(DB 환경변수 미설정 통합 테스트), FAIL 0.
+- 실제 0Program SSH 경로 검증 PASS: `ZAQMF_RECV_DEVIATION_FROM_QMS.abap`이 200으로 반환되고
+  `objectType=function-module`, IMPORTING 8개, EXPORTING `EV_CD/EV_MSG`, TABLES `T_TABLE/ET_RETURN`,
+  관련 DDIC, 처리 단계, ZAQMT0150/ZAQMT0151 등 테이블, 호출 FM, FORM, COMMIT/ROLLBACK 감지 확인.
+
 ## [2026-07-23] CBO Review/Pre-Check AI 계정 로그인 호출 실패 자동 복구
 
 ### 배경 / 원인

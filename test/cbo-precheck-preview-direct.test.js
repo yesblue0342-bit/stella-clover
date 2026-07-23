@@ -133,6 +133,6 @@ test(
     }, res);
     assert.equal(res._status, 404, JSON.stringify(res._body));
     assert.equal(res._body.ok, false);
-    assert.match(res._body.message, /메인 프로그램/);
+    assert.match(res._body.message, /미리보기 가능한 ABAP 프로그램/);
   }
 );

@@ -1,0 +1,4 @@
+DDIC reference for ZAQMF_RECV_DEVIATION_FROM_QMS.
+
+ZAQMS0002 - inbound deviation payload
+ZAQMS0003 - return messages

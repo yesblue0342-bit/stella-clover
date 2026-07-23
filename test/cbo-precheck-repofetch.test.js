@@ -33,18 +33,22 @@ test("collectAbapFiles: 하위 폴더를 폴더명/깊이와 무관하게 재귀
     await fs.writeFile(path.join(root, "node_modules", "pkg", "SKIP.abap"), "REPORT zskip.\n");
     await fs.mkdir(path.join(root, ".git", "objects"), { recursive: true });
     await fs.writeFile(path.join(root, ".git", "objects", "SKIP2.abap"), "REPORT zskip2.\n");
-    // 대상 확장자가 아닌 파일(0Program `_abap/ZAQMR0130_DDIC.txt` 관례) — 수집 대상 아님
+    // RFC Function Module 미리보기용 DDIC 참고 문서 — 명확한 suffix만 수집한다.
     await fs.writeFile(path.join(root, "_abap", "ZAQMR0130_DDIC.txt"), "note\n");
+    // 일반 txt는 계속 제외한다(무제한 txt 수집 금지).
+    await fs.writeFile(path.join(root, "_abap", "README.txt"), "skip\n");
 
     const files = await collectAbapFiles(root);
     const names = files.map((f) => f.name).sort();
-    assert.deepEqual(names, ["TOP.abap", "_abap/ZAQMR0130.abap", "a/b/DEEP.abap", "dictionary/qals.tabl.xml"].sort());
+    assert.deepEqual(names, ["TOP.abap", "_abap/ZAQMR0130.abap", "_abap/ZAQMR0130_DDIC.txt", "a/b/DEEP.abap", "dictionary/qals.tabl.xml"].sort());
     assert.ok(!names.some((n) => n.includes("node_modules")), "node_modules 제외");
     assert.ok(!names.some((n) => n.includes(".git")), ".git 제외");
-    assert.ok(!names.some((n) => n.endsWith(".txt")), ".txt 확장자는 수집 대상 아님");
+    assert.ok(!names.some((n) => n.endsWith("README.txt")), "일반 .txt 확장자는 수집 대상 아님");
 
     const ddic = files.find((f) => f.name === "dictionary/qals.tabl.xml");
     assert.equal(ddic.isDdic, true);
+    const rfcDdic = files.find((f) => f.name === "_abap/ZAQMR0130_DDIC.txt");
+    assert.equal(rfcDdic.isRfcDdic, true);
 
     // 단순 확장자(비 abapGit 네이밍) 파일도 isScannable(스캔 대상)로 인식되어야 한다 — 이번 수정의 핵심.
     assert.ok(isScannable("_abap/ZAQMR0130.abap"));

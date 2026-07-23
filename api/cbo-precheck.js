@@ -3,7 +3,7 @@
 // server.mjs 라우팅은 /api/<단일세그먼트> 만 허용(하위 경로 없음) — 미션 문서의
 // `POST /api/cbo-precheck/scan` 형태 대신 기존 cbo-review.js 관례(action 쿼리 파라미터)를 따른다.
 import crypto from "node:crypto";
-import { scanFiles, buildConfig, isScannable, isAbapSource, hasReportStatement } from "../lib/cbo-precheck/scan.js";
+import { scanFiles, buildConfig, isScannable, isAbapSource } from "../lib/cbo-precheck/scan.js";
 import { withClonedRepo, collectAbapFiles } from "../lib/cbo-precheck/repoFetch.js";
 import { saveScan, getScan, updateIssue } from "../lib/cbo-precheck/store.js";
 import { exportScan, CONTENT_TYPES } from "../lib/cbo-precheck/exportFormats.js";
@@ -15,6 +15,7 @@ import {
 } from "../lib/ai-connection/providers.js";
 import { hasAccessPassword, login, requireAuth } from "../lib/cbo-precheck/auth.js";
 import { buildPreview } from "../lib/cbo-precheck/preview.js";
+import { detectAbapObject } from "../lib/cbo-precheck/abapObject.js";
 
 function json(res, status, value) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -94,6 +95,39 @@ function scanAndFileIssues(req) {
   const issues = scan.issues.filter((i) => i.file === file && i.status === "open" && (!issueIds || issueIds.includes(i.id)));
   if (!issues.length) throw new Error("대상 이슈가 없습니다(이미 처리되었거나 존재하지 않습니다).");
   return { scan, issues };
+}
+
+export function buildDirectFilePreviewResponse(files, baseName) {
+  const file = files.find((f) => {
+    const name = String(f.name || "").replaceAll("\\", "/");
+    return (name === baseName || name.split("/").pop() === baseName) && !f.isDdic && !f.isTexts && !f.isDict;
+  });
+  if (!file) return { status: 404, body: { ok: false, message: "ABAP 소스 파일을 찾지 못했습니다(경로를 확인하세요)." } };
+  try {
+    return { status: 200, body: { ok: true, ...buildPreview(file.name, file.content, files) } };
+  } catch (e) {
+    return { status: 500, body: { ok: false, message: String(e?.message || e) } };
+  }
+}
+
+export function buildDirectFolderPreviewResponse(files) {
+  const previewableFiles = files
+    .filter((f) => isAbapSource(f.name) && !f.isDdic && !f.isTexts && !f.isDict)
+    .map((f) => ({ ...f, object: detectAbapObject(f.content, f.name) }))
+    .filter((f) => f.object.previewable);
+  if (!previewableFiles.length) {
+    return { status: 404, body: { ok: false, message: "이 폴더에서 미리보기 가능한 ABAP 프로그램(REPORT/PROGRAM/FUNCTION)을 찾지 못했습니다." } };
+  }
+
+  const previews = previewableFiles.map((file) => {
+    try {
+      return { ok: true, file: file.name, ...buildPreview(file.name, file.content, files) };
+    } catch (e) {
+      return { ok: false, file: file.name, message: String(e?.message || e) };
+    }
+  });
+  if (previews.length === 1) return { status: previews[0].ok ? 200 : 500, body: previews[0] };
+  return { status: 200, body: { ok: true, multi: true, previews } };
 }
 
 // [자동 수정 PR]: abaplint 자체 quickfix(fixEdits)만 적용 — AI 호출 없음, 결정적(deterministic).
@@ -213,15 +247,8 @@ async function handlePreviewDirect(req, res) {
     } catch (e) {
       return json(res, 400, { ok: false, message: String(e?.message || e) });
     }
-    const file = files.find((f) => f.name === baseName && !f.isDdic && !f.isTexts && !f.isDict);
-    if (!file) return json(res, 404, { ok: false, message: "ABAP 소스 파일을 찾지 못했습니다(경로를 확인하세요)." });
-
-    try {
-      const result = buildPreview(file.name, file.content, files);
-      return json(res, 200, { ok: true, ...result });
-    } catch (e) {
-      return json(res, 500, { ok: false, message: String(e?.message || e) });
-    }
+    const result = buildDirectFilePreviewResponse(files, baseName);
+    return json(res, result.status, result.body);
   }
 
   // 폴더 경로 — 하위 전체를 clone해 메인 프로그램을 자동 탐지한다.
@@ -231,21 +258,8 @@ async function handlePreviewDirect(req, res) {
   } catch (e) {
     return json(res, 400, { ok: false, message: String(e?.message || e) });
   }
-  const mainFiles = files.filter((f) => isAbapSource(f.name) && !f.isDdic && !f.isTexts && !f.isDict && hasReportStatement(f.content));
-  if (!mainFiles.length) return json(res, 404, { ok: false, message: "이 폴더에서 메인 프로그램(REPORT/PROGRAM 문이 있는 .abap 파일)을 찾지 못했습니다." });
-
-  // 메인 프로그램이 여러 개면(예: ZAQMR0130.abap + ZAQMR0131.abap) 전부 렌더링한다 — 사용자 선택 UI보다
-  // 구현이 단순하고, 스펙 문서 작성 시 어차피 전부 확인해야 하므로 한 번에 보여주는 쪽을 택했다. 하나뿐이면
-  // 그 결과 하나만 풀어서 응답한다(회귀 없음 — 기존 단일 파일 응답과 동일 모양).
-  const previews = mainFiles.map((file) => {
-    try {
-      return { ok: true, file: file.name, ...buildPreview(file.name, file.content, files) };
-    } catch (e) {
-      return { ok: false, file: file.name, message: String(e?.message || e) };
-    }
-  });
-  if (previews.length === 1) return json(res, previews[0].ok ? 200 : 500, previews[0]);
-  return json(res, 200, { ok: true, multi: true, previews });
+  const result = buildDirectFolderPreviewResponse(files);
+  return json(res, result.status, result.body);
 }
 
 export default async function handler(req, res) {

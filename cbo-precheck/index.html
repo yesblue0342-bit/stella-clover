@@ -468,7 +468,7 @@ async function runPreviewDirect(){
     $('directPreviewStatus').textContent='저장소를 clone하는 중입니다…';
     const d=await safeJson(await fetch('/api/cbo-precheck?action=preview-direct',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({repoUrl,branch,path})}));
     if(d.multi){
-      $('directPreviewStatus').textContent=`미리보기 생성 완료 — 메인 프로그램 ${d.previews.length}개`;
+      $('directPreviewStatus').textContent=`미리보기 생성 완료 — 대상 ${d.previews.length}개`;
       renderMultiPreview(d.previews);
     }else{
       $('directPreviewStatus').textContent=`미리보기 생성 완료 — ${d.file}`;
@@ -553,8 +553,43 @@ function renderDynproScreen(screen){
   return html;
 }
 
+function renderRfcParamTable(params){
+  const rows=params.length?params.map(p=>`<tr><td>${esc(p.section||'')}</td><td><b>${esc(p.name||'')}</b></td><td>${esc([p.typing,p.dataType].filter(Boolean).join(' ')||'-')}</td><td>${p.optional?'Yes':'No'}</td><td>${esc(p.defaultValue||'')}</td></tr>`).join(''):`<tr><td colspan="5" class="muted">인터페이스 파라미터를 찾지 못했습니다.</td></tr>`;
+  return `<table class="review-table"><thead><tr><th>Direction</th><th>Parameter</th><th>Type/Structure</th><th>Optional</th><th>Default</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function renderRfcList(title,items){
+  const list=(items||[]).length?(items||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join(' '):'<span class="muted">미검출</span>';
+  return `<div><b>${esc(title)}</b><div style="margin-top:6px">${list}</div></div>`;
+}
+function buildRfcPreviewHtml(meta){
+  meta=meta||{};
+  const iface=meta.rfcInterface||{};
+  const params=[...(iface.importing||[]),...(iface.exporting||[]),...(iface.changing||[]),...(iface.tables||[]),...(iface.exceptions||[])];
+  const tech=meta.technicalSummary||{};
+  const steps=(tech.processingSteps||[]).length?`<ol>${tech.processingSteps.map(s=>`<li><b>${esc(String(s.no))}.</b> ${esc(s.text||'')}</li>`).join('')}</ol>`:'<div class="muted">번호 기반 처리 단계 주석을 찾지 못했습니다.</div>';
+  const warnings=[...(meta.warnings||[])];
+  if(meta.relatedDdicFile) warnings.push(`DDIC 참고 문서: ${meta.relatedDdicFile}`);
+  const warnHtml=warnings.length?`<div class="sap-merge-banner">${warnings.map(w=>`<span class="warn">⚠ ${esc(w)}</span>`).join('')}</div>`:'';
+  return `${warnHtml}<div class="sap-screen">
+    <div class="sap-titlebar">RFC Function Module — ${esc(meta.objectName||'')}</div>
+    <div class="sap-status-row">Object Name: <b>${esc(meta.objectName||'')}</b> · Source File: <b>${esc(meta.file||'')}</b></div>
+    <h3>Interface Parameters</h3>${renderRfcParamTable(params)}
+    <h3>Processing Flow</h3>${steps}
+    <h3>Technical Objects</h3>
+    <div class="metrics" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:10px">
+      ${renderRfcList('Read Tables',tech.readTables)}
+      ${renderRfcList('Written Tables',tech.writtenTables)}
+      ${renderRfcList('Called Function Modules',tech.calledFunctions)}
+      ${renderRfcList('FORM Routines',tech.forms)}
+      <div><b>COMMIT WORK</b><div style="margin-top:6px">${tech.commits?'Detected':'Not detected'}</div></div>
+      <div><b>ROLLBACK WORK</b><div style="margin-top:6px">${tech.rollbacks?'Detected':'Not detected'}</div></div>
+    </div>
+  </div>`;
+}
+
 function buildPreviewHtml(elements,coverage,meta){
   meta=meta||{};
+  if(meta.objectType==='function-module') return buildRfcPreviewHtml(meta);
   let banner='';
   if(meta.mergedFiles&&meta.mergedFiles.length){
     banner+=`<div class="sap-merge-banner">이 미리보기는 ${1+meta.mergedFiles.length}개 파일(메인 + INCLUDE ${meta.mergedFiles.length}개)을 합쳐 생성했습니다.`;
