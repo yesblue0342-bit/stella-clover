@@ -1,5 +1,25 @@
 # Stella Clover — 재설계 + 오류 근본 수정 TEST RESULTS
 
+## [2026-07-23] CBO Review/Pre-Check AI 계정 로그인 호출 실패 자동 복구
+
+### 배경 / 원인
+- `/cbo-review` 코드 리뷰가 `리뷰 호출이 모두 실패했습니다`로 종료되고, `/cbo-precheck` Claude 수정 제안도 실패.
+- 재현 결과 Claude CLI 인증 파일은 존재하지만 실제 호출이 `403 subscription access disabled`로 실패했다.
+  기존 코드는 "인증 파일 존재"만 보고 Claude를 연결됨으로 취급했고, Pre-Check는 Claude를 우선 선택해
+  ChatGPT/Codex 연결이 있어도 폴백하지 못했다.
+
+### 조치
+- `lib/ai-connection/providers.js`: `callModelWithFallback()` 추가. 선택 provider 호출 실패 시 이미 연결된 다른
+  provider(openai → anthropic → gemini 순, 선택 provider 제외)로 같은 요청을 자동 재시도한다.
+- `api/cbo-review.js`: 스펙 생성/코드 리뷰 LLM 호출을 폴백 함수로 교체.
+- `lib/cbo-precheck/aiFix.js`: Claude 수정 제안도 폴백 함수로 교체.
+
+### 검증
+- `node --check` 대상 파일 3개 통과.
+- 관련 테스트 22/22 PASS: `cbo-review-providers`, `cbo-precheck-aifix-cli`, `cbo-precheck-fix`.
+- 전체 `npm test`: 271개 중 259 PASS, 12 SKIP(DB 환경변수 미설정 통합 테스트), FAIL 0.
+- 실계정 스모크: Claude CLI 실패 후 Codex/OpenAI CLI로 자동 폴백되어 `OK` 응답 확인.
+
 ## [2026-07-19] CBO Review 코드 리뷰 결과 문서 내보내기(Markdown/Excel) 추가
 
 ### 배경

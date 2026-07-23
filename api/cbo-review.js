@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { extractFile, markdownToWorkbook } from "../lib/cbo-review/extract.js";
 import { hasAccessPassword, login, requireAuth } from "../lib/cbo-review/auth.js";
 import {
-  callModel, connectCli, deleteProviderKey, disconnectCli, getProviderMode, providerStatus, saveProviderKey,
+  callModelWithFallback, connectCli, deleteProviderKey, disconnectCli, getProviderMode, providerStatus, saveProviderKey,
 } from "../lib/ai-connection/providers.js";
 import {
   applyFindings, buildReviewPrompt, buildSpecPrompt, chunkSource, detectLanguage,
@@ -86,7 +86,7 @@ async function reviewFiles({ files, provider, model, origin }) {
   let failed = 0;
   const outputs = await mapWithConcurrency(tasks, concurrency, async (t) => {
     try {
-      const parsed = parseJsonObject(await callModel({ provider, model, system: SYSTEM, user: buildReviewPrompt({ ...t.chunk, language: t.language }), json: true }));
+      const parsed = parseJsonObject(await callModelWithFallback({ provider, model, system: SYSTEM, user: buildReviewPrompt({ ...t.chunk, language: t.language }), json: true }));
       return { fi: t.fi, findings: normalizeFindings(parsed, t.name, t.chunk.startLine), summary: parsed.summary ? String(parsed.summary) : "" };
     } catch (e) {
       return { fi: t.fi, findings: [], summary: `[구간 리뷰 실패: ${String((e && e.message) || e).slice(0, 120)}]`, failed: true };
@@ -117,7 +117,7 @@ async function reviewFiles({ files, provider, model, origin }) {
 // 동기 HTTP 요청+180초 타임아웃 대신 잡 큐로 처리한다. 여기 등록된 함수의 반환값이 그대로
 // cbo_jobs.result_json 에 저장되고, action=job-status 폴링 응답에 그대로 펼쳐진다.
 registerRunner("spec", async ({ prompt, extracted, provider, model, warnings }) => {
-  const markdown = cleanSpec(await callModel({ provider, model, system: SYSTEM, user: buildSpecPrompt({ prompt, attachments: extracted }) }));
+  const markdown = cleanSpec(await callModelWithFallback({ provider, model, system: SYSTEM, user: buildSpecPrompt({ prompt, attachments: extracted }) }));
   const title = extractMainTitle({ prompt, fileNames: extracted.map((item) => item.name), generated: markdown });
   return { title, markdown, warnings, provider, model };
 });

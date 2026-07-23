@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cbo-providers-test-"));
 process.env.CBO_DATA_DIR = tmpDir;
 const {
-  getProviderKey, getProviderMode, connectCli, disconnectCli, detectCli, providerStatus, callModel,
+  getProviderKey, getProviderMode, connectCli, disconnectCli, detectCli, providerStatus, callModel, callModelWithFallback,
 } = await import("../lib/ai-connection/providers.js");
 
 test.after(async () => { await fs.rm(tmpDir, { recursive: true, force: true }); });
@@ -79,5 +79,33 @@ test("providerStatus는 provider마다 mode/cli/connected 필드를 포함한다
     assert.equal(typeof p.connected, "boolean");
     assert.ok(p.cli && typeof p.cli.available === "boolean");
     assert.ok(Array.isArray(p.models) && p.models.length > 0);
+  }
+});
+
+test("callModelWithFallback은 선택 provider 실패 시 연결된 다음 provider로 재시도한다", async () => {
+  await fs.writeFile(path.join(tmpDir, "providers.json"), JSON.stringify({
+    anthropic: "dummy-anthropic-fallback-key",
+    openai: "dummy-openai-fallback-key",
+  }));
+  const beforeFetch = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    urls.push(u);
+    if (u.includes("api.anthropic.com/v1/models")) return { ok: true, json: async () => ({ data: [{ id: "claude-sonnet-5" }] }) };
+    if (u.includes("api.openai.com/v1/models")) return { ok: true, json: async () => ({ data: [{ id: "gpt-5.6" }] }) };
+    if (u.includes("api.anthropic.com/v1/messages")) return { ok: false, status: 403, text: async () => "subscription disabled" };
+    if (u.includes("api.openai.com/v1/chat/completions")) {
+      return { ok: true, text: async () => JSON.stringify({ choices: [{ message: { content: "OK_FROM_OPENAI" } }] }) };
+    }
+    throw new Error(`unexpected fetch: ${u}`);
+  };
+  try {
+    const text = await callModelWithFallback({ provider: "anthropic", model: "claude-sonnet-5", system: "s", user: "u" });
+    assert.equal(text, "OK_FROM_OPENAI");
+    assert.ok(urls.some((u) => u.includes("api.anthropic.com/v1/messages")));
+    assert.ok(urls.some((u) => u.includes("api.openai.com/v1/chat/completions")));
+  } finally {
+    globalThis.fetch = beforeFetch;
   }
 });

@@ -12,7 +12,7 @@ let providers = [];
 mock.module("../lib/ai-connection/providers.js", {
   exports: {
     async providerStatus() { return providers; },
-    async callModel(args) { calls.push(args); return "```abap\nREPORT zfixed_cli.\n```"; },
+    async callModelWithFallback(args) { calls.push(args); return "```abap\nREPORT zfixed_cli.\n```"; },
   },
 });
 
